@@ -1,0 +1,117 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Header Files\LibraryHeaders">
+      <UniqueIdentifier>{c48dbfeb-5476-4ed2-bb62-9d793b4004ec}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Shared">
+      <UniqueIdentifier>{00903fd4-1eef-4593-b71b-3e1ac320e869}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\SDK Headers">
+      <UniqueIdentifier>{90334252-5f8e-49be-8a89-211d614376a3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\DLL Headers">
+      <UniqueIdentifier>{1f7c05b4-a52d-4e92-9aba-76a800f22a8e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\DLL Impl">
+      <UniqueIdentifier>{116bf4bb-10ca-4060-affc-98dd8b3fd237}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\SDK Impl">
+      <UniqueIdentifier>{7f552e51-84e5-4642-8967-df6a4dd88fd4}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="SDK\SDK\AssetRegistry_functions.cpp">
+      <Filter>Source Files\SDK Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="SDK\SDK\Basic.cpp">
+      <Filter>Source Files\SDK Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="SDK\SDK\CoreUObject_functions.cpp">
+      <Filter>Source Files\SDK Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="SDK\SDK\Engine_functions.cpp">
+      <Filter>Source Files\SDK Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="SDK\SDK\FSD_functions.cpp">
+      <Filter>Source Files\SDK Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="SDK\SDK\LIB_Game_functions.cpp">
+      <Filter>Source Files\SDK Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="Main.cpp">
+      <Filter>Source Files\DLL Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="ModManager.cpp">
+      <Filter>Source Files\DLL Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="Commands.cpp">
+      <Filter>Source Files\DLL Impl</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Lib_Forward.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_FField.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_ObjectCast.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_PropertyAccess.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_Print.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_Utils.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_EasyHook.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_GameHooks.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_VarSystem.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_CommandHandler.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_PropertyInspector.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Common.h">
+      <Filter>Header Files\Shared</Filter>
+    </ClInclude>
+    <ClInclude Include="StringLib.h">
+      <Filter>Header Files\Shared</Filter>
+    </ClInclude>
+    <ClInclude Include="SDK\SDK\FSD_classes.hpp">
+      <Filter>Header Files\SDK Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Library.h">
+      <Filter>Header Files\Shared</Filter>
+    </ClInclude>
+    <ClInclude Include="ModManager.h">
+      <Filter>Header Files\DLL Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Commands.h">
+      <Filter>Header Files\DLL Headers</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

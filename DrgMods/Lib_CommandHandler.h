@@ -1,0 +1,282 @@
+﻿#pragma once
+// Lib_CommandHandler.h — CommandContext, MutableContext, CommandHandler.
+//                        Also provides VarSystem command implementations
+//                        (deferred from Lib_VarSystem.h due to CommandContext dependency).
+
+#include <functional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include "Lib_Forward.h"
+#include "Lib_GameHooks.h"
+#include "Lib_VarSystem.h"
+#include "Common.h"
+#include "StringLib.h"
+
+extern ResponseBuffer* g_pRespBuffer;
+extern void SendResponse(uint32_t cmdSeq, const std::string& msg);
+
+// =========================================================================
+// CommandContext
+// =========================================================================
+
+struct CommandContext
+{
+    const std::vector<std::string>& args;
+    uint32_t seq = 0;
+
+    size_t             ArgCount() const { return args.size(); }
+    inline const std::string& Arg(size_t i, const std::string& fallback = "") const
+    {
+        return i < args.size() ? args[i] : fallback;
+    }
+};
+
+struct MutableContext
+{
+    std::vector<std::string> args;
+    uint32_t seq = 0;
+
+    size_t             ArgCount() const { return args.size(); }
+    inline const std::string& Arg(size_t i, const std::string& fallback = "") const
+    {
+        return i < args.size() ? args[i] : fallback;
+    }
+
+    MutableContext(std::vector<std::string>& a) : args(a) {}
+    MutableContext(std::vector<std::string>&& a) : args(std::move(a)) {}
+    MutableContext(const CommandContext& ctx) : args(ctx.args), seq(ctx.seq) {}
+};
+
+// =========================================================================
+// VarSystem command implementations (deferred because they need CommandContext)
+// =========================================================================
+
+namespace VarSystem
+{
+    inline void Cmd_Set(const CommandContext& ctx)
+    {
+        if (ctx.ArgCount() < 3) [[unlikely]] { spdlog::warn("[var] Usage: set <n> <value>"); return; }
+        const std::string& name = ctx.Arg(1);
+        std::string raw = ctx.Arg(2);
+        for (size_t i = 3; i < ctx.ArgCount(); ++i) raw += ' ' + ctx.Arg(i);
+        Var v = Parse(raw);
+        g_Vars[name] = v;
+        Print(name, v);
+    }
+
+    inline void Cmd_Get(const CommandContext& ctx)
+    {
+        if (ctx.ArgCount() < 2) [[unlikely]] { spdlog::warn("[var] Usage: get <n>"); return; }
+        const std::string& name = ctx.Arg(1);
+        auto it = g_Vars.find(name);
+        if (it == g_Vars.end()) { spdlog::warn("[var] '{}' not defined", name); return; }
+        Print(name, it->second);
+    }
+
+    inline void Cmd_Unset(const CommandContext& ctx)
+    {
+        if (ctx.ArgCount() < 2) [[unlikely]] { spdlog::warn("[var] Usage: unset <n>"); return; }
+        const std::string& name = ctx.Arg(1);
+        if (g_Vars.erase(name)) spdlog::info("[var] '{}' unset", name);
+        else                    spdlog::warn("[var] '{}' was not defined", name);
+    }
+
+    inline void Cmd_Vars(const CommandContext&)
+    {
+        if (g_Vars.empty() && g_Bindings.empty()) { spdlog::info("[var] No variables defined."); return; }
+        if (!g_Vars.empty())
+        {
+            spdlog::info("[var] {} variable(s):", g_Vars.size());
+            for (const auto& [n, v] : g_Vars) Print(n, v);
+        }
+        if (!g_Bindings.empty())
+        {
+            spdlog::info("[var] {} binding(s) (fn:<n>):", g_Bindings.size());
+            for (const auto& [n, fn] : g_Bindings)
+            {
+                ExpandResult r = fn();
+                if (!r.isValid)   spdlog::info("[var]   fn:{} = <invalid>", n);
+                else if (r.object) spdlog::info("[var]   fn:{} = [object] {} ({})", n,
+                    r.object->GetName(), r.object->Class ? r.object->Class->GetName() : "?");
+                else               spdlog::info("[var]   fn:{} = {}", n, r.token);
+            }
+        }
+    }
+} // namespace VarSystem
+
+// =========================================================================
+// CommandHandler
+// =========================================================================
+
+class CommandHandler
+{
+public:
+    using CommandFn = std::function<void(const CommandContext&)>;
+
+    inline void Register(const std::string& name, CommandFn fn, std::string description = "")
+    {
+        commands_[name] = { std::move(fn), std::move(description) };
+    }
+
+    inline bool Dispatch(const std::string& msg, uint32_t seq = 0) const
+    {
+        auto parts = Split(msg);
+        if (parts.empty()) [[unlikely]] return false;
+
+        if (parts[0] == "help")
+        {
+            PrintHelp(parts.size() > 1 ? parts[1] : "");
+            SendResponse(seq, "ok");
+            return true;
+        }
+
+        auto it = commands_.find(parts[0]);
+        if (it == commands_.end()) [[unlikely]]
+        {
+            spdlog::warn("[CommandHandler] Unknown command: '{}'. Type 'help' for a list.", parts[0]);
+            SendResponse(seq, "not ok");
+            return false;
+        }
+
+        CommandFn fn = it->second.fn;
+        GameHooks::ProcessEventHook::Get().Enqueue([fn, parts, seq]() mutable
+            {
+                // On game thread — safe to call VarSystem::Expand
+                for (size_t i = 1; i < parts.size(); ++i)
+                {
+                    auto expanded = VarSystem::Expand(parts[i]);
+                    if (!expanded.isValid) [[unlikely]] continue;
+                    if (expanded.object)
+                        parts[i] = expanded.object->GetName();
+                    else if (!expanded.token.empty() ||
+                        parts[i].substr(0, 4) == "var:" ||
+                        parts[i].substr(0, 3) == "fn:")
+                        parts[i] = expanded.token;
+                }
+                fn(CommandContext{ parts, seq });
+                if (g_pRespBuffer && !g_pRespBuffer->ready.load(std::memory_order_acquire))
+                    SendResponse(seq, "ok");
+            });
+        return true;
+    }
+
+private:
+    struct CommandEntry { CommandFn fn; std::string description; };
+    std::unordered_map<std::string, CommandEntry> commands_;
+
+    inline void PrintHelp(const std::string& filter) const
+    {
+        if (!filter.empty())
+        {
+            auto it = commands_.find(filter);
+            if (it == commands_.end()) { spdlog::warn("[help] Unknown command: '{}'", filter); return; }
+            const auto& desc = it->second.description;
+            spdlog::info("[help] {}: {}", it->first, desc.empty() ? "(no description)" : desc);
+            return;
+        }
+        spdlog::info("[help] Available commands ({}):", commands_.size());
+        std::vector<std::pair<std::string, const CommandEntry*>> sorted;
+        sorted.reserve(commands_.size());
+        for (const auto& [name, entry] : commands_)
+            sorted.emplace_back(name, &entry);
+        std::sort(sorted.begin(), sorted.end(),
+            [](const auto& lhs, const auto& rhs)
+            {
+                return lhs.first < rhs.first;
+            });
+        for (const auto& [name, entry] : sorted)
+            spdlog::info("[help]   {:20} {}", name, entry->description.empty() ? "(no description)" : entry->description);
+    }
+
+    static constexpr bool IsSpace(char c) noexcept {
+        return static_cast<unsigned char>(c) <= 32;
+    }
+    static constexpr size_t SkipWS(std::string_view s, size_t pos) noexcept {
+        while (pos < s.size() && IsSpace(s[pos])) [[likely]] {
+            pos++;
+        }
+        return pos;
+    }
+    static bool ExtractToken(std::string_view s, size_t& i, std::string& out_buf) {
+        i = SkipWS(s, i);
+        if (i >= s.size()) return false;
+
+        out_buf.clear();
+        if (s[i] == '"' || s[i] == '\'') [[unlikely]] {
+            char q = s[i++];
+            // Typical token size rarely exceeds 64, reserve to avoid multiple reallocs
+            if (out_buf.capacity() < 64) out_buf.reserve(64);
+
+            while (i < s.size() && s[i] != q) {
+                if (s[i] == '\\' && i + 1 < s.size()) [[unlikely]] {
+                    i++;
+                    out_buf.push_back(s[i++]);
+                }
+                else {
+                    out_buf.push_back(s[i++]);
+                }
+            }
+            if (i < s.size()) i++; // skip closing quote
+        }
+        else {
+            size_t start = i;
+            while (i < s.size() && !IsSpace(s[i])) i++;
+            out_buf.assign(s.substr(start, i - start));
+        }
+        return true;
+    }
+    inline static std::vector<std::string> Split(std::string_view s) {
+        std::vector<std::string> out;
+        // Optimization: Small strings usually have few tokens, larger ones more.
+        out.reserve(s.size() / 10);
+
+        size_t i = 0;
+        std::string buffer;
+        buffer.reserve(64); // Reuse memory for building tokens
+
+        while (i < s.size()) {
+            if (!ExtractToken(s, i, buffer)) break;
+
+            // Handle Special Prefixes
+            bool is_vec = (buffer == "vec:" || buffer == "rot:");
+            bool is_var = !is_vec && (buffer == "fn:" || buffer == "name:" || buffer == "var:");
+
+            if (is_vec) [[unlikely]] {
+                std::string joined = std::move(buffer);
+                std::string arg;
+                for (int count = 0; count < 3; ++count) {
+                    if (ExtractToken(s, i, arg)) {
+                        if (joined.back() != ':') joined.push_back(',');
+                        joined.append(arg);
+                    }
+                    else break;
+                }
+                out.push_back(std::move(joined));
+                buffer.clear(); // Ensure buffer is ready for next iteration
+                continue;
+            }
+
+            if (is_var) [[unlikely]] {
+                std::string joined = std::move(buffer);
+                std::string arg;
+                if (ExtractToken(s, i, arg)) {
+                    joined.append(arg);
+                }
+                out.push_back(std::move(joined));
+                buffer.clear();
+                continue;
+            }
+
+            // Normal token
+            out.push_back(std::move(buffer));
+        }
+
+        return out;
+    }
+    public: 
+        inline const std::unordered_map<std::string, CommandEntry>& GetEntries() const
+        {
+            return commands_;
+        }
+};
