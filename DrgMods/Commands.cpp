@@ -1063,6 +1063,24 @@ namespace Commands
             Player->PlayerState->GetPlayerName().ToString(), Player->danceMove);
     }
 
+    void Rename(const CommandContext& ctx)
+    {
+        auto* Player = GetLocalPlayer();
+        if (!Kismet::IsValid(Player)) { warn("[cmd:rename] Local player not valid."); return; }
+        info("[cmd:rename] Current name: '{}'", ObjToStr(Player));
+        std::string newName;
+        for (size_t i = 1; i < ctx.args.size(); ++i) { if (i > 1) newName += ' '; newName += ctx.args[i]; }
+        UObjectVCalls::Rename::Call(Player, ToWide(newName).c_str(),Player->Outer, REN::None);
+        info("[cmd:rename] New name: '{}'", ObjToStr(Player));
+    }
+
+    void ReadName(const CommandContext&)
+    {
+        auto* Player = GetLocalPlayer();
+        if (!Kismet::IsValid(Player)) { warn("[cmd:readname] Local player not valid."); return; }
+        info("[cmd:readname] Player name: '{}'", ObjToStr(Player));
+    }
+
     void Twerk(const CommandContext&)
     {
         if (State::DanceCallback == 0)
@@ -1804,6 +1822,8 @@ void RegisterCommands(CommandHandler& handler)
     handler.Register("twerk",        Commands::Twerk,                "Toggle anti-twerk filter");
     handler.Register("unset",        Cmd_Unset,                      "Delete a variable: unset <n>");
     handler.Register("untwerk",      Commands::DoUntwerk,            "Stop all other players from twerking");
+    handler.Register("rename",       Commands::Rename,               "Rename the local player: rename <new_name>");
+    handler.Register("readname",     Commands::ReadName,             "Read the name of a local player");                             
     handler.Register("vars",         Cmd_Vars,                       "List all variables");
 }
 

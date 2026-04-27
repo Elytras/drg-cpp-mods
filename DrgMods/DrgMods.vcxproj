@@ -184,6 +184,7 @@
     <ClInclude Include="Lib_Forward.h" />
     <ClInclude Include="Library.h" />
     <ClInclude Include="Lib_VarSystem.h" />
+    <ClInclude Include="Lib_VtableInfo.h" />
     <ClInclude Include="ModManager.h" />
     <ClInclude Include="SDK\SDK\FSD_classes.hpp" />
     <ClInclude Include="StringLib.h" />
