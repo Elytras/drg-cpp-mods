@@ -5,6 +5,7 @@
 #include "SDK/UnrealContainers.hpp"
 #include "SDK/SDK/Basic.hpp"
 #include "Lib_Forward.h"
+#include "Lib_FField.h"
 
 using ERenameFlags = uint32;
 namespace REN
@@ -96,7 +97,7 @@ namespace VTableLayout
         using FIsLocalizedResource = bool(const UObject*);
         using FIsSafeForRootSet = bool(const UObject*);
         using FTagSubobjects = void(UObject*, EObjectFlags);
-        using FGetLifetimeReplicatedProps = void(const UObject*, void* /* TArray<FLifetimeProperty>& */);
+        using FGetLifetimeReplicatedProps = void(const UObject*, TArray<FLifetimeProperty>& );
         using FIsNameStableForNetworking = bool(const UObject*);
         using FIsFullNameStableForNetworking = bool(const UObject*);
         using FIsSupportedForNetworking = bool(const UObject*);
@@ -746,7 +747,7 @@ namespace UObjectVCalls
     {
         using Sig = VTableLayout::Signatures::FGetLifetimeReplicatedProps;
         static FORCEINLINE Sig* GetPtr(const UObject* Obj) { return Detail::GetFn<Sig>(Obj, VTableLayout::Slots::GetLifetimeReplicatedProps); }
-        static FORCEINLINE void Call(const UObject* Obj, void* /*TArray<FLifetimeProperty>&*/ Out) { GetPtr(Obj)(Obj, Out); }
+        static FORCEINLINE void Call(const UObject* Obj, TArray<FLifetimeProperty>& Out) { GetPtr(Obj)(Obj, Out); }
     };
 
     struct IsNameStableForNetworking

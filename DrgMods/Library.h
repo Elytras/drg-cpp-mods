@@ -60,8 +60,8 @@ struct std::hash<SDK::FName>
 };
 // Listed in dependency order for ease of use. Each header should be self-contained and only depend on those above it.
 #include "Lib_Forward.h"            // namespace/type aliases, forward decls
-#include "Lib_VTableInfo.h"         // VTable index info for unreal functions
 #include "Lib_FField.h"             // FField types, FieldCast, iterators
+#include "Lib_VTableInfo.h"         // VTable index info for unreal functions
 #include "Lib_ObjectCast.h"         // ObjectCast, class flags, IsValidRaw
 #include "Lib_PropertyAccess.h"     // GetPropertyPtr, ReadBool/WriteBool, GetTypeName
 #include "Lib_Utils.h"              // SubclassCache, safe parsers, GetLocalPlayer, etc.
