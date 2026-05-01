@@ -1,5 +1,5 @@
 #pragma once
-// Lib_ObjectCast.h — UObject cast system, class flag helpers, IsValidRaw.
+// Lib_ObjectCast.h ï¿½ UObject cast system, class flag helpers, IsValidRaw.
 
 #include <cassert>
 #include "Lib_Forward.h"
@@ -77,6 +77,66 @@ struct UClassHierarchyRange
 private:
     UClass* start_;
 };
+
+// =========================================================================
+// GObjects range  â€”  for (auto* obj : GObjectsOf<T>()) { ... }
+//
+// Iterates the global UObject table, skipping null and invalid entries.
+// When T != UObject the iterator also filters by IsA(T::StaticClass()).
+// Count is snapshotted at construction; objects added mid-loop are ignored.
+// =========================================================================
+
+template<typename T = UObject>
+class GObjectsRange
+{
+    int32 num_;
+
+    static bool Matches(UObject* obj)
+    {
+        if (!obj || !Kismet::IsValid(obj)) return false;
+        if constexpr (std::is_same_v<T, UObject>)
+            return true;
+        else
+            return obj->IsA(T::StaticClass());
+    }
+
+public:
+    class iterator
+    {
+        int32 idx_;
+        int32 num_;
+
+        void Advance()
+        {
+            while (idx_ < num_ && !GObjectsRange::Matches(UObject::GObjects->GetByIndex(idx_)))
+                ++idx_;
+        }
+
+    public:
+        using iterator_category = std::input_iterator_tag;
+        using value_type        = T*;
+        using difference_type   = std::ptrdiff_t;
+        using pointer           = T*;
+        using reference         = T*;
+
+        iterator(int32 idx, int32 num) : idx_(idx), num_(num) { Advance(); }
+
+        T*        operator*()  const { return static_cast<T*>(UObject::GObjects->GetByIndex(idx_)); }
+        iterator& operator++()       { ++idx_; Advance(); return *this; }
+        iterator  operator++(int)    { auto c = *this; ++(*this); return c; }
+
+        bool operator==(const iterator& o) const { return idx_ == o.idx_; }
+        bool operator!=(const iterator& o) const { return idx_ != o.idx_; }
+    };
+
+    GObjectsRange() : num_(UObject::GObjects ? UObject::GObjects->Num() : 0) {}
+
+    iterator begin() const { return { 0,    num_ }; }
+    iterator end()   const { return { num_, num_ }; }
+};
+
+template<typename T = UObject>
+inline GObjectsRange<T> GObjectsOf() { return {}; }
 
 inline bool IsChildOfByName(const UObject* object, const std::wstring& name)
 {

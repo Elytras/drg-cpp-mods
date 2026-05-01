@@ -26,7 +26,9 @@
 enum class InjectionState { Watching, Active, Suppressed };
 
 std::atomic<bool>           g_Running{ true };
+std::atomic<bool>           g_Dumper7Loaded{ false };
 std::atomic<InjectionState> g_InjState{ InjectionState::Watching };
+DWORD_PTR                   g_hRemoteDumperModule = 0;
 HANDLE                      g_hProcess = NULL;
 
 // Convenience helpers (keep call-sites readable)
@@ -57,6 +59,7 @@ FILETIME     g_LastInjectedTime{}; // write-time of the source at last inject
 
 constexpr int  kTimeoutMs = 3000;
 constexpr DWORD kWatchPollMs = 1000; // how often ProcessWatcherThread polls
+constexpr wchar_t kDumper7Path[] = LR"(D:\Repos\Dumper7\x64\Release\Dumper-7.dll)";
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Logging
@@ -70,6 +73,27 @@ static void Log(const std::string& msg)
 // ─────────────────────────────────────────────────────────────────────────────
 //  Process helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+static DWORD_PTR FindRemoteModuleByName(DWORD pid, const std::wstring& moduleName)
+{
+    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+    if (hSnap == INVALID_HANDLE_VALUE) return 0;
+
+    MODULEENTRY32W entry{ .dwSize = sizeof(entry) };
+    DWORD_PTR result = 0;
+    if (Module32FirstW(hSnap, &entry))
+    {
+        do {
+            if (!_wcsicmp(entry.szModule, moduleName.c_str()))
+            {
+                result = reinterpret_cast<DWORD_PTR>(entry.hModule);
+                break;
+            }
+        } while (Module32NextW(hSnap, &entry));
+    }
+    CloseHandle(hSnap);
+    return result;
+}
 
 static DWORD GetProcId(const wchar_t* procName)
 {
@@ -338,6 +362,24 @@ static bool InjectDLL()
             CloseHandle(hSnap);
         }
     }
+
+    if (g_Dumper7Loaded.load())
+    {
+        DWORD pidCheck = GetProcId(TARGET_PROCESS);
+        if (pidCheck)
+        {
+            std::wstring dumperName = std::filesystem::path(kDumper7Path).filename().wstring();
+            if (FindRemoteModuleByName(pidCheck, dumperName))
+            {
+                Log("InjectDLL: aborting inject because Dumper7 is attached to target process (unsafe to inject).");
+                return false;
+            }
+            else {
+                g_Dumper7Loaded.store(false);
+            }
+        }
+    }
+
     // Copy the DLL so the compiler can freely overwrite the original
     bool copied = false;
     for (int i = 0; i < 10; ++i)
@@ -406,7 +448,6 @@ static bool InjectDLL()
     Log("DLL injected successfully.");
     return true;
 }
-
 // suppress=true  → called by explicit "unload" command; watcher goes Suppressed
 // suppress=false → called internally (hot-reload, crash recovery); watcher stays Watching
 static void UnloadDLL(bool suppress = false)
@@ -517,6 +558,118 @@ static void UnloadDLL(bool suppress = false)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Dumper 7 attachment 
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Load Dumper7 into the target process.
+// Returns true on success (or if already loaded), false on error.
+static bool LoadDumper7()
+{
+    std::lock_guard<std::mutex> lock(g_InjectionMutex);
+
+    DWORD pid = GetProcId(TARGET_PROCESS);
+    if (!pid)
+    {
+        Log("Dumper7: target process not found.");
+        return false;
+    }
+
+    std::wstring dumperName = std::filesystem::path(kDumper7Path).filename().wstring();
+    if (g_Dumper7Loaded.load())
+    {
+        if (FindRemoteModuleByName(pid, dumperName))
+        {
+            Log("Dumper7: already marked as loaded");
+            return true;
+        }
+        else {
+            Log("Dumper7: marked as loaded but module not found in target process; correcting state.");
+            g_Dumper7Loaded.store(false);
+        }
+    }
+
+    // Ensure our usual DLL is not loaded in the target process.
+    if (!g_CopyDllPath.empty())
+    {
+        std::wstring usualName = std::filesystem::path(g_CopyDllPath).filename().wstring();
+        if (FindRemoteModuleByName(pid, usualName))
+        {
+            Log("Dumper7: aborting load because usual DLL is present in target process.");
+            return false;
+        }
+    }
+
+    if (FindRemoteModuleByName(pid, dumperName))
+    {
+        // Already present in target now — still mark as loaded so future injects are aware.
+        g_Dumper7Loaded.store(true);
+        Log("Dumper7: already present in target process; marked as loaded.");
+        return true;
+    }
+
+    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+    if (!hProcess)
+    {
+        Log("Dumper7: OpenProcess failed.");
+        return false;
+    }
+
+    size_t sizeBytes = (wcslen(kDumper7Path) + 1) * sizeof(wchar_t);
+    void* remoteBuf = VirtualAllocEx(hProcess, nullptr, sizeBytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!remoteBuf)
+    {
+        Log("Dumper7: VirtualAllocEx failed.");
+        CloseHandle(hProcess);
+        return false;
+    }
+
+    if (!WriteProcessMemory(hProcess, remoteBuf, kDumper7Path, static_cast<SIZE_T>(sizeBytes), nullptr))
+    {
+        Log("Dumper7: WriteProcessMemory failed.");
+        VirtualFreeEx(hProcess, remoteBuf, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        return false;
+    }
+
+    HANDLE hThread = CreateRemoteThread(hProcess, nullptr, 0,
+        reinterpret_cast<LPTHREAD_START_ROUTINE>(LoadLibraryW), remoteBuf, 0, nullptr);
+
+    if (!hThread)
+    {
+        Log("Dumper7: CreateRemoteThread(LoadLibraryW) failed.");
+        VirtualFreeEx(hProcess, remoteBuf, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        return false;
+    }
+
+    WaitForSingleObject(hThread, 5000);
+    DWORD exitCode = 0;
+    GetExitCodeThread(hThread, &exitCode);
+    CloseHandle(hThread);
+    VirtualFreeEx(hProcess, remoteBuf, 0, MEM_RELEASE);
+    CloseHandle(hProcess);
+
+    if (exitCode == 0)
+    {
+        Log("Dumper7: LoadLibraryW returned NULL — load failed.");
+        return false;
+    }
+
+    // Mark that we attached Dumper7; we will not attempt to unload it externally.
+    g_Dumper7Loaded.store(true);
+    Log("Dumper7: loaded and marked as attached (attach-and-forget).");
+    return true;
+}
+// Unload Dumper7 from the target process.
+// Returns true on success (or if already unloaded), false on error.
+
+static bool UnloadDumper7()
+{
+    Log("Dumper7: external unload disabled — not unloading to avoid crash. Press F6 to unload while in game");
+    return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Background threads
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -587,6 +740,16 @@ static void CommandThread()
                 g_InjState.store(InjectionState::Suppressed);
                 Log("DLL not loaded; auto-injection suppressed until next 'load'.");
             }
+        }
+        else if (cmd == "d7l")
+        {
+            // Load Dumper7 (will abort if usual DLL copy is present in target)
+            if (LoadDumper7()) Log("d7l: Dumper7 load requested (success).");
+            else               Log("d7l: Dumper7 load requested (failed).");
+        }
+        else if (cmd == "d7u")
+        {
+            (void)UnloadDumper7();
         }
         else if (cmd == "reload")
         {

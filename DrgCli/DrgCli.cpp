@@ -525,7 +525,7 @@ int main()
 
     // ── REPL ───────────────────────────────────────────────────────────────
 
-    static const std::unordered_set<std::string, StringLib::CaseInsensitiveHash, StringLib::CaseInsensitiveEqual> k_NoReply = { "load", "unload", "reload","exit"};
+    static const std::unordered_set<std::string, StringLib::CaseInsensitiveHash, StringLib::CaseInsensitiveEqual> k_NoReply = { "load", "unload", "reload", "d7l", "d7u", "exit"};
 
     while (true)
     {

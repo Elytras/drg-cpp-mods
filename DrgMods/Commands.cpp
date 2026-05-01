@@ -8,9 +8,12 @@
 #include <atomic>
 #include <chrono>
 #include <random>
+#include <fstream>
+#include <filesystem>
 #include <thread>
 #include <numbers>
 #include <type_traits>
+#include <nlohmann/json.hpp>
 
 #include "SDK/SDK/Basic.hpp"
 #include "SDK/SDK/CoreUObject_classes.hpp"
@@ -60,6 +63,61 @@ namespace Weapons
 // =========================================================================
 // Helpers
 // =========================================================================
+
+static std::ofstream OpenOutput(const std::string& path)
+{
+    namespace fs = std::filesystem;
+    fs::create_directories(fs::path(path).parent_path());
+    try {
+        fs::remove(path);
+    }
+    catch (const fs::filesystem_error& e) {
+        error("Failed to remove existing file: %s", e.what());
+    }
+    return std::ofstream(path);
+}
+
+inline nlohmann::json ExtractNumericPropertiesAsJson(uintptr_t Base, UClass* StopAt, const std::string& prefix = "")
+{
+    nlohmann::json result = nlohmann::json::object();
+    if (!Base) return result;
+
+    const auto chain = BuildClassChain(reinterpret_cast<UObject*>(Base)->Class, StopAt);
+    for (UStruct* level : chain)
+    {
+        UClass* cls = ObjectCast::Cast<UClass>(level);
+        if (!cls) continue;
+
+        for (FField* field : FFieldRange(cls->ChildProperties))
+        {
+            bool numeric = false;
+            std::string typePrefix;
+
+            FieldCast::Visit(field, [&](auto* p)
+                {
+                    using T = std::remove_pointer_t<decltype(p)>;
+                    if (std::is_same_v<T, FFloatProperty>) { numeric = true; typePrefix = "Float"; }
+                    else if (std::is_same_v<T, FDoubleProperty>) { numeric = true; typePrefix = "Float"; }
+                    else if (std::is_same_v<T, FBoolProperty>) { numeric = true; typePrefix = "Bool"; }
+                    else if (std::is_same_v<T, FIntProperty>) { numeric = true; typePrefix = "Int"; }
+                    else if (std::is_same_v<T, FInt8Property>) { numeric = true; typePrefix = "Int"; }
+                    else if (std::is_same_v<T, FInt16Property>) { numeric = true; typePrefix = "Int"; }
+                    else if (std::is_same_v<T, FInt64Property>) { numeric = true; typePrefix = "Int"; }
+                    else if (std::is_same_v<T, FUInt16Property>) { numeric = true; typePrefix = "Int"; }
+                    else if (std::is_same_v<T, FUInt32Property>) { numeric = true; typePrefix = "Int"; }
+                    else if (std::is_same_v<T, FUInt64Property>) { numeric = true; typePrefix = "Int"; }
+                });
+
+            if (!numeric) continue;
+
+            std::string fieldName = field->Name.ToString();
+            std::string fullKey = typePrefix + ":" + prefix + fieldName;
+            result[fullKey] = GetFieldValueAsString(Base, field);
+        }
+    }
+
+    return result;
+}
 
 static inline const bool CanChangeWorld() {
     return IsValidOf<APlayerCharacter>(GetLocalPlayer());
@@ -120,8 +178,8 @@ namespace State
 
     struct ScannedFunction
     {
-        UFunction* Func;
-        UObject* Owner;
+        UFunction* Func=nullptr;
+        UObject* Owner=nullptr;
         std::string FunctionName;
         std::string OwnerName;
         std::string OwnerClassName;
@@ -367,8 +425,7 @@ namespace Tickables
         ++counter;
         auto* Player = GetLocalPlayer();
         if (!Player || !Kismet::IsValid(Player)) return;
-        auto ChatStr = UKismetStringLibrary::Conv_NameToString(
-            FName(ToWide(std::format("Tick {}", counter)).c_str()));
+        auto ChatStr = FString(ToWide(std::format("Tick {}", counter)).c_str());
         Player->GetPlayerController()->Server_NewMessage(
             Player->GetPlayerState()->GetPlayerName(), ChatStr,
             Player->GetPlayerState()->GetChatSenderType());
@@ -823,7 +880,18 @@ namespace Callbacks
     {
         auto& msg = static_cast<SDK::Params::FSDGameState_ClientNewMessage*>(Params)->Msg;
         if (msg.Msg.ToString() == "Six Seven") return;
-        info("[Chat (Server)] {}: {}", msg.Sender.ToString(), msg.Msg.ToString());
+        const auto& senderName = msg.Sender.ToString();
+        const auto& messageText = msg.Msg.ToString();
+        if (senderName.empty() && messageText.empty()) return;
+        if (senderName.empty()) {
+            info("[Chat] {}", messageText);
+            return;
+        }
+        if (messageText.empty()) {
+            info("[Chat] {}", senderName);
+            return;
+        }
+        info("[Chat] {}: {}", msg.Sender.ToString(), msg.Msg.ToString());
     }
 
     void MessageIntercept(UObject*, UFunction*, void* Params)
@@ -851,6 +919,23 @@ namespace Callbacks
 // =========================================================================
 namespace Commands
 {
+    void CmdSet(const ctx& ctx) {
+        using namespace VarSystem;
+        Cmd_Set(ctx);
+    }
+    void CmdGet(const ctx& ctx) {
+        using namespace VarSystem;
+        Cmd_Get(ctx);
+    }
+    void CmdVars(const ctx& ctx) {
+        using namespace VarSystem;
+        CmdVars(ctx);
+    }
+    void CmdUnset(const ctx& ctx) {
+        using namespace VarSystem;
+        Cmd_Unset(ctx);
+    }
+
     //void tpbars(const ctx&){
     //    if (!IsValidOf<APlayerCharacter>(GetLocalPlayer())) return;
     //    std::vector<AActor*> Relevant{};
@@ -936,9 +1021,7 @@ namespace Commands
     {
         auto* Local = GetLocalPlayer();
         if (!IsValidOf<APlayerCharacter>(Local)) return;
-        std::vector<std::string> parts = { ctx.args.begin() + 2, ctx.args.end() };
-        std::string SenderName = ctx.Arg(1);
-        info(SenderName);
+        const std::string SenderName = ctx.Arg(1);
         APlayerCharacter* Sender = nullptr;
         for (APlayerCharacter* Player : ActorLib::GetAllPlayerCharacters(GetWorld())) {
             if (!IsValidOf<APlayerCharacter>(Player)) continue;
@@ -947,12 +1030,16 @@ namespace Commands
                 break;
             }
         }
+        // If no player matched, arg 1 is part of the message, not a name
+        const auto msgBegin = IsValidOf<APlayerCharacter>(Sender)
+            ? ctx.args.begin() + 2
+            : ctx.args.begin() + 1;
         if (!IsValidOf<APlayerCharacter>(Sender)) Sender = Local;
         std::string msg;
-        for (size_t i = 0; i < parts.size(); ++i) { if (i) msg += ' '; msg += parts[i]; }
+        for (auto it = msgBegin; it != ctx.args.end(); ++it) { if (it != msgBegin) msg += ' '; msg += *it; }
         Local->GetPlayerController()->Server_NewMessage(
             Sender->PlayerState->GetPlayerName(),
-            UKismetStringLibrary::Conv_NameToString(FName(ToWide(msg).c_str())),
+            FString(ToWide(msg).c_str()),
             Sender->GetPlayerState()->GetChatSenderType());
     }
 
@@ -1741,6 +1828,223 @@ namespace Commands
             Count, ctx.Arg(1), Location.X, Location.Y, Location.Z);
     }
 
+    void SpawnAndDump(const CommandContext& ctx)
+    {
+        if (!Kismet::IsServer(GetWorld())) return;
+        const long double delayMs = static_cast<long double>(std::max(200.0f, SafeStof(ctx.Arg(1))));
+
+        //Request all descriptors and all biomes. iterate on all of them including elite versions. Only spawn enemy ONCE , keep track of UClasses.
+        std::vector<UEnemyDescriptor*> descriptors{};
+        descriptors.reserve(512);
+        for (auto* Descriptor : GObjectsOf<UEnemyDescriptor>())
+            if (Descriptor->GetName().starts_with("ED_")) descriptors.push_back(Descriptor);
+        std::vector<UBiome*> biomes{};
+        for (auto* Biome : GObjectsOf<UBiome>())
+            biomes.push_back(Biome);
+
+        // Build class → combos map: for each descriptor × (null + all biomes) × (non-elite + elite)
+        // call GetEnemyClass; group all (desc,biome,isElite) tuples that resolve to the same UClass.
+        struct Combo { std::string desc, biome; bool isElite; };
+        struct Entry { UClass* cls = nullptr; std::vector<Combo> combos; };
+        std::unordered_map<UClass*, Entry> classMap;
+        classMap.reserve(256);
+
+        for (auto* Desc : descriptors)
+        {
+            auto tryAdd = [&](UBiome* Biome, bool IsElite)
+                {
+                    UClass* cls = static_cast<UClass*>(Desc->GetEnemyClass(Biome, IsElite));
+                    if (!IsValidClass(cls)) return;
+                    auto& e = classMap[cls];
+                    e.cls = cls;
+                    e.combos.push_back({ Desc->GetName(), Biome ? Biome->GetName() : "none", IsElite });
+                };
+            tryAdd(nullptr, false);
+            tryAdd(nullptr, true);
+            for (auto* Biome : biomes) { tryAdd(Biome, false); tryAdd(Biome, true); }
+        }
+
+        if (classMap.empty()) { warn("[spawndump] No enemy classes resolved"); return; }
+        info("[spawndump] {} unique classes from {} descriptors x {} biomes, delay={:.0f}ms",
+            classMap.size(), descriptors.size(), biomes.size(), static_cast<double>(delayMs));
+
+        APlayerCharacter* Player = GetLocalPlayer();
+        if (!IsValidOf<APlayerCharacter>(Player)) { warn("[spawndump] No local player"); return; }
+        const FVector SpawnLoc = Player->K2_GetActorLocation() + Player->GetActorForwardVector() * 400.f;
+
+        // Root JSON object to accumulate all data
+        auto rootJson = std::make_shared<nlohmann::json>();
+        (*rootJson)["metadata"] = {
+            {"totalClasses", classMap.size()},
+            {"totalDescriptors", descriptors.size()},
+            {"totalBiomes", biomes.size()},
+            {"delayMs", static_cast<double>(delayMs)}
+        };
+        (*rootJson)["enemies"] = nlohmann::json::array();
+
+        // Numeric property dump — float/bool/int family, class chain up to StopAt
+        auto dumpNumeric = [](UObject* Obj, UClass* StopAt) -> nlohmann::json
+            {
+                if (!IsValid(Obj)) return nlohmann::json::object();
+                return ExtractNumericPropertiesAsJson(reinterpret_cast<uintptr_t>(Obj), StopAt);
+            };
+
+        // Flatten to a stable vector and append a null sentinel.
+        // EnqueueThrottled offsets by one: each slot dumps+destroys the previous pawn,
+        // logs its combos, then spawns the current one. Sentinel flushes the last pawn.
+        auto entries = std::make_shared<std::vector<Entry>>();
+        entries->reserve(classMap.size());
+        for (auto& [_, e] : classMap) entries->push_back(std::move(e));
+
+        std::vector<Entry*> items;
+        items.reserve(entries->size() + 1);
+        for (auto& e : *entries) items.push_back(&e);
+        items.push_back(nullptr);
+
+        auto prevPawn = std::make_shared<APawn*>(nullptr);
+        auto prevEntry = std::make_shared<Entry*>(nullptr);
+
+        EnqueueThrottled<Entry*>(std::move(items),
+            std::chrono::milliseconds(static_cast<long long>(delayMs)),
+            [prevPawn, prevEntry, entries, dumpNumeric, SpawnLoc, rootJson]
+            (Entry*& current, size_t idx, size_t total) -> bool
+            {
+                // Dump and destroy the previously spawned pawn
+                if (*prevEntry && *prevPawn)
+                {
+                    std::string descriptorName = (*prevEntry)->combos.empty() ? "Unknown" : (*prevEntry)->combos[0].desc;
+
+                    nlohmann::json& enemyEntry = (*rootJson)["Enemies"][descriptorName]["Direct"];
+
+                    // Add all numeric properties
+                    auto actorProps = ExtractNumericPropertiesAsJson(reinterpret_cast<uintptr_t>(*prevPawn), AActor::StaticClass());
+                    for (auto& [key, value] : actorProps.items())
+                        enemyEntry[key] = value;
+
+                    // Add component properties with component name prefix
+                    for (auto* comp : GObjectsOf<UActorComponent>())
+                    {
+                        if (comp->Outer == *prevPawn)
+                        {
+                            auto compProps = ExtractNumericPropertiesAsJson(
+                                reinterpret_cast<uintptr_t>(comp),
+                                UActorComponent::StaticClass(),
+                                comp->GetName() + "."
+                            );
+                            for (auto& [key, value] : compProps.items())
+                                enemyEntry[key] = value;
+                        }
+                    }
+
+                    (*prevPawn)->K2_DestroyActor();
+                    *prevPawn = nullptr;
+                    *prevEntry = nullptr;
+                }
+
+                if (!current)
+                {
+                    // Write JSON to file
+                    std::string filename = std::string{OUTPUT_DIR} + "spawndump_" + std::to_string(std::time(nullptr)) + ".json";
+                    std::ofstream outFile = OpenOutput(filename);
+                    if (outFile.is_open())
+                    {
+                        outFile << rootJson->dump(2,'\t');
+                        outFile.close();
+                        info("[spawndump] Done — {} classes processed, results written to {}", idx, filename);
+                    }
+                    else
+                    {
+                        warn("[spawndump] Failed to open file {} for writing", filename);
+                    }
+                    return true;
+                }
+
+                FTransform SpawnTransform{};
+                SpawnTransform.Translation = SpawnLoc;
+                APawn* Pawn = nullptr;
+                SpawnActor<APawn>(current->cls, SpawnTransform, Pawn);
+                *prevPawn = Pawn;
+                *prevEntry = Pawn ? current : nullptr;
+                if (!Pawn)
+                    warn("[spawndump] ({}/{}) Spawn failed: {}", idx, total - 1, current->cls->GetName());
+                return true;
+            }
+        );
+    }
+
+    void DumpDescriptors(const CommandContext&)
+    {
+        // UEnum* for a named field via FEnumProperty / FByteProperty reflection
+        auto getFieldEnum = [](UClass* Cls, const char* Name) -> UEnum*
+        {
+            FName needle(ToWide(std::string(Name)).c_str());
+            for (FField* field : FFieldRange(Cls->ChildProperties))
+            {
+                if (field->Name != needle) continue;
+                if (auto* ep = FieldCast::Cast<FEnumProperty>(field)) return ep->Enum;
+                if (auto* bp = FieldCast::Cast<FByteProperty>(field))  return bp->Enum;
+            }
+            return nullptr;
+        };
+
+        // Enum integer → short name via UEnum::Names, strips "EnumClass::" prefix
+        auto enumName = [](UEnum* E, int64 Val) -> std::string
+        {
+            if (!E) return std::to_string(Val);
+            for (int32 i = 0; i < E->Names.Num(); ++i)
+            {
+                if (E->Names[i].Value() != Val) continue;
+                std::string full = E->Names[i].Key().ToString();
+                const auto sep = full.rfind("::");
+                return sep != std::string::npos ? full.substr(sep + 2) : full;
+            }
+            return std::to_string(Val);
+        };
+
+        // One FField walk per enum type, not per descriptor
+        UClass* DescClass = UEnemyDescriptor::StaticClass();
+        UEnum* SigEnum = getFieldEnum(DescClass, "EnemySignificance");
+        UEnum* VetEnum = getFieldEnum(DescClass, "VeteranScaling");
+
+        nlohmann::json root = nlohmann::json::object();
+
+        for (auto* Desc : GObjectsOf<UEnemyDescriptor>())
+        {
+            if (!Desc->GetName().starts_with("ED_")) continue;
+
+            nlohmann::json d;
+
+            d["DifficultyRating"]             = Desc->DifficultyRating;
+            d["MinSpawnCount"]                = Desc->MinSpawnCount;
+            d["MaxSpawnCount"]                = Desc->MaxSpawnCount;
+            d["Rarity"]                       = Desc->Rarity;
+            d["SpawnAmountModifier"]          = Desc->SpawnAmountModifier;
+            d["SpawnSpread"]                  = Desc->SpawnSpread;
+            d["CanBeUsedForConstantPressure"] = Desc->CanBeUsedForConstantPressure;
+            d["CanBeUsedInEncounters"]        = Desc->CanBeUsedInEncounters;
+            d["UsesSpawnRarityModifiers"]     = Desc->UsesSpawnRarityModifiers;
+
+            d["Significance"]     = enumName(SigEnum, static_cast<int64>(Desc->EnemySignificance));
+            d["VeteranScaling"]   = enumName(VetEnum, static_cast<int64>(Desc->VeteranScaling));
+            d["UsesVeteranLarge"] = (Desc->VeteranScaling == EVeteranScaling::LargeEnemy);
+
+            nlohmann::json vets = nlohmann::json::array();
+            for (int32 i = 0; i < Desc->VeteranClasses.Num(); ++i)
+            {
+                auto* v = Desc->VeteranClasses[i];
+                if (v && IsValid(v)) vets.push_back(v->GetName());
+            }
+            d["VeteranClasses"] = std::move(vets);
+
+            root[Desc->GetName()] = std::move(d);
+        }
+
+        const std::string path = std::string{OUTPUT_DIR} + "EnemyDescriptors.json";
+        std::ofstream f = OpenOutput(path);
+        if (f) { f << root.dump(2); info("[dumpdescriptors] {} descriptors → {}", root.size(), path); }
+        else warn("[dumpdescriptors] Failed to open {}", path);
+    }
+
     void ToggleGodmode(const CommandContext&)
     {
         auto* Local = GetLocalPlayer();
@@ -1788,43 +2092,59 @@ void RegisterCommands(CommandHandler& handler)
 {
     using namespace VarSystem;
 
-    //               Command        Callback                         Description                                                                    Notes
-    handler.Register("67",           Commands::SixSeven,             "Send 'Six Seven' chat message to twerking players");
-    handler.Register("beginplay",    Commands::BeginPlay,            "Toggle BeginPlay spawn watcher");
-    handler.Register("call",         Commands::Call,                 "Call a server RPC: call <FunctionName> [args...]");
-    handler.Register("cleartwerkers",Commands::ClearTwerkers,        "Clear the vanity dwarfs");
-    handler.Register("coilcarve",    Commands::CoilCarve,            "Carve terrain with the Coil Gun: coilcarve <x1> <y1> <z1> <x2> <y2> <z2> <power>");
-    handler.Register("crash",        Commands::Crash,                "Crash host");
-    handler.Register("dance",        Commands::Dance,                "Show local player dance state");
-    handler.Register("dancer",       Commands::SpawnDancer,          "Spawn a dancing dwarf on self");
-    handler.Register("exec",         Commands::Exec,                 "Execute a console command: exec <command>");                                  // No namespace collision
-    handler.Register("fearall",      Commands::FearAll,              "Instantly fear all enemies (requires Coil Gun equipped)");
-    handler.Register("findclass",    Commands::FindClass,            "Find classes by name");                                                       // No namespace collision
-    handler.Register("get",          Cmd_Get,                        "Get a variable: get <n>");
-    handler.Register("godmode",      Commands::ToggleGodmode,        "Toggle god mode for local player");
-    handler.Register("hidesound",    Commands::HideSound,            "Teleport out of hearing range on the space rig");                             // SU host only
-    handler.Register("ignoreproxy",  Commands::IgnoreProxy,          "Toggle ProxyMod hook");
-    handler.Register("infiniteammo", Commands::ToggleInfiniteAmmo,   "Toggle infinite ammo for local player");
-    handler.Register("inventory",    Commands::Inventory,            "Dump local player inventory");
-    handler.Register("logchat",      Commands::LogChat,              "Toggle chat message logging");
-    handler.Register("prop",         Commands::Prop,                 "prop <cdo|obj> <name> <dump|get|set|list> [...]");
-    handler.Register("ptp",          Commands::PlayerTeleport,       "Player teleport: ptp <name> | target <name> | dest <name>");
-    handler.Register("say",          Commands::Say,                  "Send message to chat");
-    handler.Register("scanall",      Commands::ScanAllClasses,       "Scan all classes for server RPCs and log them");
-    handler.Register("scandmg",      Commands::ScanDamageMeeterMod,  "Scan damage meeter mod for usable actors");
-    handler.Register("scanfuncs",    Commands::ScanReplicated,       "Scan for usable replicated functions");
-    handler.Register("set",          Cmd_Set,                        "Set a variable: set <n> <value>");
-    handler.Register("spawnenemies", Commands::SpawnEnemies,         "Spawn enemies: spawnenemies <descriptor> <count> <x> <y> <z>");               // SU host only
-    handler.Register("stoptick",     Commands::StopTick,             "Toggle tick event logging");
-    handler.Register("tp",           Commands::Teleport,             "Teleport: tp <x> <y> <z> [--rel] [--sweep]");
-    handler.Register("tpall",        Commands::TeleportAllToSelf,    "Teleport all players to self");
-    handler.Register("troll",        Commands::Troll,                "Troll all players with random teleports");
-    handler.Register("twerk",        Commands::Twerk,                "Toggle anti-twerk filter");
-    handler.Register("unset",        Cmd_Unset,                      "Delete a variable: unset <n>");
-    handler.Register("untwerk",      Commands::DoUntwerk,            "Stop all other players from twerking");
-    handler.Register("rename",       Commands::Rename,               "Rename the local player: rename <new_name>");
-    handler.Register("readname",     Commands::ReadName,             "Read the name of a local player");                             
-    handler.Register("vars",         Cmd_Vars,                       "List all variables");
+    // Chat
+    handler.Register("logchat",         Commands::LogChat,              "Chat",       R"(Toggle chat message logging)");
+    handler.Register("say",             Commands::Say,                  "Chat",       R"(Send message to chat: say [sender] <message>)");
+
+    // Enemies
+    handler.Register("dumpdescriptors", Commands::DumpDescriptors,      "Enemies",    R"(Dump all ED_* descriptor controls to C:\Dumper-7\DescriptorDump.json)");
+    handler.Register("fearall",         Commands::FearAll,              "Enemies",    R"(Instantly fear all enemies (requires Coil Gun equipped))");
+    handler.Register("spawndump",       Commands::SpawnAndDump,         "Enemies",    R"(Dump float/bool/int props for all enemy descriptors x biomes: spawndump [delay_ms])");
+    handler.Register("spawnenemies",    Commands::SpawnEnemies,         "Enemies",    R"(Spawn enemies: spawnenemies <descriptor> <count> <x> <y> <z>)");
+
+    // Inspection
+    handler.Register("findclass",       Commands::FindClass,            "Inspection", R"(Find classes by name)");
+    handler.Register("inventory",       Commands::Inventory,            "Inspection", R"(Dump local player inventory)");
+    handler.Register("prop",            Commands::Prop,                 "Inspection", R"(prop <cdo|obj> <name> <dump|get|set|list> [...])");
+    handler.Register("scanall",         Commands::ScanAllClasses,       "Inspection", R"(Scan all classes for server RPCs and log them)");
+    handler.Register("scandmg",         Commands::ScanDamageMeeterMod,  "Inspection", R"(Scan damage meeter mod for usable actors)");
+    handler.Register("scanfuncs",       Commands::ScanReplicated,       "Inspection", R"(Scan for usable replicated functions)");
+
+    // Player
+    handler.Register("coilcarve",       Commands::CoilCarve,            "Player",     R"(Carve terrain with the Coil Gun: coilcarve <x1> <y1> <z1> <x2> <y2> <z2> <power>)");
+    handler.Register("godmode",         Commands::ToggleGodmode,        "Player",     R"(Toggle god mode for local player)");
+    handler.Register("infiniteammo",    Commands::ToggleInfiniteAmmo,   "Player",     R"(Toggle infinite ammo for local player)");
+    handler.Register("readname",        Commands::ReadName,             "Player",     R"(Read the name of the local player)");
+    handler.Register("rename",          Commands::Rename,               "Player",     R"(Rename the local player: rename <new_name>)");
+
+    // System
+    handler.Register("beginplay",       Commands::BeginPlay,            "System",     R"(Toggle BeginPlay spawn watcher)");
+    handler.Register("call",            Commands::Call,                 "System",     R"(Call a server RPC: call <FunctionName> [args...])");
+    handler.Register("exec",            Commands::Exec,                 "System",     R"(Execute a console command: exec <command>)");
+    handler.Register("ignoreproxy",     Commands::IgnoreProxy,          "System",     R"(Toggle ProxyMod hook)");
+    handler.Register("stoptick",        Commands::StopTick,             "System",     R"(Toggle tick event logging)");
+
+    // Teleport
+    handler.Register("hidesound",       Commands::HideSound,            "Teleport",   R"(Teleport out of hearing range on the space rig)");
+    handler.Register("ptp",             Commands::PlayerTeleport,       "Teleport",   R"(Player teleport: ptp <name> | target <name> | dest <name>)");
+    handler.Register("tp",              Commands::Teleport,             "Teleport",   R"(Teleport: tp <x> <y> <z> [--rel] [--sweep])");
+    handler.Register("tpall",           Commands::TeleportAllToSelf,    "Teleport",   R"(Teleport all players to self)");
+
+    // Troll
+    handler.Register("67",              Commands::SixSeven,             "Troll",      R"(Send 'Six Seven' chat message to twerking players)");
+    handler.Register("cleartwerkers",   Commands::ClearTwerkers,        "Troll",      R"(Clear the vanity dwarfs)");
+    handler.Register("crash",           Commands::Crash,                "Troll",      R"(Crash host)");
+    handler.Register("dance",           Commands::Dance,                "Troll",      R"(Show local player dance state)");
+    handler.Register("dancer",          Commands::SpawnDancer,          "Troll",      R"(Spawn a dancing dwarf on self)");
+    handler.Register("troll",           Commands::Troll,                "Troll",      R"(Troll all players with random teleports)");
+    handler.Register("twerk",           Commands::Twerk,                "Troll",      R"(Toggle anti-twerk filter)");
+    handler.Register("untwerk",         Commands::DoUntwerk,            "Troll",      R"(Stop all other players from twerking)");
+
+    // Variables
+    handler.Register("get",             Commands::CmdGet,               "Variables",  R"(Get a variable: get <n>)");
+    handler.Register("set",             Commands::CmdSet,               "Variables",  R"(Set a variable: set <n> <value>)");
+    handler.Register("unset",           Commands::CmdUnset,             "Variables",  R"(Delete a variable: unset <n>)");
+    handler.Register("vars",            Commands::CmdVars,              "Variables",  R"(List all variables)");
 }
 
 void SendCommandList(const CommandContext& ctx, const CommandHandler& handler)
@@ -1873,203 +2193,4 @@ void ResetCallbackHandles()
         0;
 }
 
-
-namespace {
-    enum class ECharacterType : uint8 {
-        Unknown = 0,
-        Letter = 1 << 0,
-        Digit = 1 << 1,
-        Whitespace = 1 << 2,
-        Newline = 1 << 3,
-        Control = 1 << 4,
-        Symbol = 1 << 5,
-    };
-    UE_ENUM_OPERATORS(ECharacterType)
-
-        enum class ETokenType {
-        Unknown,
-        Error,
-        Identifier,
-        Number,
-        String,
-        Symbol,
-        EOF
-    };
-
-    struct FToken {
-        ETokenType Type = ETokenType::Unknown;
-        std::string_view Text = "";
-        uint32 Row = uint32(-1);
-        uint32 Col = uint32(-1);
-    };
-
-    static consteval std::array<ECharacterType, 256> BuildCharacterTypes() {
-        std::array<ECharacterType, 256> arr{};
-
-        for (uint16 i : range<uint16>(255, 0)) {
-            if (i >= '0' && i <= '9') {
-                arr[i] = ECharacterType::Digit;
-            }
-            else if ((i >= 'A' && i <= 'Z') || (i >= 'a' && i <= 'z')) {
-                arr[i] = ECharacterType::Letter;
-            }
-            else if (i == '\n') {
-                arr[i] = ECharacterType::Newline;
-            }
-            else if (i == ' ' || i == '\t' || i == '\r' || i == '\v' || i == '\f') {
-                arr[i] = ECharacterType::Whitespace;
-            }
-            else if ((i >= 0 && i < 32) || i == 127) {
-                arr[i] = ECharacterType::Control;
-            }
-            else if (i > 32 && i < 127) {
-                arr[i] = ECharacterType::Symbol;
-            }
-            else {
-                arr[i] = ECharacterType::Unknown;
-            }
-        }
-        return arr;
-    }
-
-    inline constexpr std::array<ECharacterType, 256> CharTypes{ BuildCharacterTypes() };
-
-    inline bool IsType(uint8 c, ECharacterType type) {
-        return static_cast<uint8>(CharTypes[c]) & static_cast<uint8>(type);
-    }
-
-    class StringStream {
-        std::string_view input;
-        uint32 CurrIndex = 0;
-        uint32 CurrRow = 1;
-        uint32 CurrCol = 1;
-
-    public:
-        StringStream() = default;
-        StringStream(std::string_view str) : input(str) {}
-        void Init(std::string_view str) {
-            input = str;
-            CurrIndex = 0; CurrRow = 1; CurrCol = 1;
-        }
-        bool IsAtEnd() const { return CurrIndex >= input.size(); }
-        uint8 PeekChar() const {
-            return IsAtEnd() ? 0 : static_cast<uint8>(input[CurrIndex]);
-        }
-        uint8 PeekNext() const {
-            return (CurrIndex + 1 >= input.size()) ? 0 : static_cast<uint8>(input[CurrIndex + 1]);
-        }
-        uint8 PeekPrevious() const {
-            return (CurrIndex == 0) ? 0 : static_cast<uint8>(input[CurrIndex - 1]);
-        }
-        uint32 GetCurrentIndex() const { return CurrIndex; }
-        uint32 GetCurrentRow() const { return CurrRow; }
-        uint32 GetCurrentCol() const { return CurrCol; }
-        std::string_view GetSubStringToIndex(uint32 startIndex) const {
-            if (startIndex >= input.size() || startIndex > CurrIndex) return "";
-            return input.substr(startIndex, CurrIndex - startIndex);
-        }
-        void Step() {
-            if (IsAtEnd()) return;
-            char c = input[CurrIndex++];
-            if (c == '\n') {
-                CurrRow++;
-                CurrCol = 1;
-            }
-            else {
-                CurrCol++;
-            }
-        }
-        uint8 Advance() {
-            uint8 c = PeekChar();
-            Step();
-            return c;
-        }
-        bool Match(uint8 expected) {
-            if (PeekChar() != expected) return false;
-            Step();
-            return true;
-        }
-    };
-
-    static inline FToken MakeError(const StringStream& stream, uint32 idx, uint32 row, uint32 col) {
-        return { ETokenType::Error, stream.GetSubStringToIndex(idx), row, col };
-    }
-
-    class UJSONLexer {
-        //unused in cpp mokup for faster write, but in blueprint version its populated before 
-        std::string lastError{};
-        //unused/bad used in cpp mokup for faster write but in blueprint version its used instead of function call for less overhead on while loop
-        bool bShouldContinue = true;
-
-        StringStream stream;
-        bool bAllowMultilineStrings = false;
-
-        FToken ScanToken() {
-            uint32 Idx = stream.GetCurrentIndex();
-            uint32 Row = stream.GetCurrentRow();
-            uint32 Col = stream.GetCurrentCol();
-            uint8 Char = stream.Advance();
-            ECharacterType Type = CharTypes[Char];
-            //This is the only set of ShouldContinue in cpp mokup inside ScanToken.
-            //There are more in actual blueprint code, but this was done just for faster cpp mokup for review
-            bShouldContinue = !stream.IsAtEnd();
-
-            //Single char parsed
-            //True/False/Null parsed
-
-            //Number
-            if (Type & ECharacterType::Digit || Char == '-')
-            {
-                uint8 SecondChar = stream.PeekChar();
-                ECharacterType SecondType = CharTypes[SecondChar];
-
-                if (Char == '-' && SecondType != ECharacterType::Digit)
-                    return MakeError(stream, Idx, Row, Col);
-                if (Char == '0' && SecondType & ECharacterType::Digit)
-                    return MakeError(stream, Idx, Row, Col);
-                while (CharTypes[stream.PeekChar()] & ECharacterType::Digit)
-                    stream.Step();
-                if (stream.PeekChar() == '.')
-                {
-                    stream.Step();
-                    if (CharTypes[stream.PeekChar()] != ECharacterType::Digit)
-                        return { MakeError(stream,Idx,Row,Col) };
-                    else stream.Step();
-                    while (CharTypes[stream.PeekChar()] & ECharacterType::Digit)
-                        stream.Step();
-                }
-                if ((stream.PeekChar() | 32) == 'e') {
-                    stream.Step();
-                    SecondChar = stream.PeekChar();
-                    if (SecondChar == '-' || SecondChar == '+') stream.Step();
-                    if (CharTypes[stream.PeekChar()] & ECharacterType::Digit) stream.Step();
-                    else return MakeError(stream, Idx, Row, Col);
-                    while (CharTypes[stream.PeekChar()] & ECharacterType::Digit)
-                        stream.Step();
-                }
-                return { ETokenType::Number, stream.GetSubStringToIndex(Idx), Row, Col };
-            }
-
-
-            //Parsing String
-
-
-            return { ETokenType::Error };
-        }
-
-    public:
-        std::vector<FToken> Lex(std::string& input) {
-            stream.Init(input);
-            std::vector<FToken> Out{ input.size() / 4 };
-            lastError.clear();
-            bShouldContinue = true;
-            while (bShouldContinue) Out.push_back(ScanToken());
-            Out.push_back({ ETokenType::EOF });
-            return Out;
-        }
-        const std::string& GetLastError() const {
-            return lastError;
-        }
-    };
-}
 #pragma pop_macro("EOF")

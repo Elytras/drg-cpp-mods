@@ -16,6 +16,7 @@
 #include "Lib_Forward.h"
 #include "Lib_FField.h"
 #include "Lib_ObjectCast.h"
+#include "Lib_VTableInfo.h"
 #include "SDK/UtfN.hpp"
 #include "SDK/SDK/AssetRegistry_classes.hpp"
 #include "SDK/SDK/AssetRegistry_structs.hpp"
@@ -420,6 +421,7 @@ inline AActor* SpawnActorWithTickrate(int)
 
     if (!OutActor) return nullptr;
     OutActor = UGameplayStatics::FinishSpawningActor(OutActor, SpawnTransform);
+    UObjectVCalls::Rename::Call(OutActor, L"TickManager", nullptr, REN::ForceGlobalUnique);
     return OutActor;
 }
 

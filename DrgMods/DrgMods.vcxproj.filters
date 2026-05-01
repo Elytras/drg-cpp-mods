@@ -113,7 +113,10 @@
     <ClInclude Include="Commands.h">
       <Filter>Header Files\DLL Headers</Filter>
     </ClInclude>
-    <ClInclude Include="Lib_VtableInfo.h">
+    <ClInclude Include="Lib_VTableInfo.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_VTableHook.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
   </ItemGroup>

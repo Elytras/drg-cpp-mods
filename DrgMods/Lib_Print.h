@@ -67,7 +67,7 @@ namespace Detail
 // Forward declarations for recursion
 inline void PrintFieldValue(uintptr_t Base, FField* Field, const std::vector<bool>& ancestry, bool isLast, const std::string& labelOverride = "");
 inline void PrintFieldValue(UObject* Base, FField* Field, const std::vector<bool>& ancestry, bool isLast, const std::string& labelOverride = "");
-
+inline std::string GetFieldValueAsString(uintptr_t Base, FField* Field);
 // =========================================================================
 // PrintFieldValue
 // =========================================================================
@@ -345,4 +345,72 @@ inline void DumpItemPropertiesSorted(UObject* Item, UClass* OuterBase = nullptr)
         }
     }
     spdlog::info("╚══════════════════════════");
+}
+
+inline std::string GetFieldValueAsString(uintptr_t Base, FField* Field)
+{
+    std::string result;
+    FieldCast::Visit(Field, [&](auto* prop)
+        {
+            using T = std::remove_pointer_t<decltype(prop)>;
+            auto* fakeBase = reinterpret_cast<UObject*>(Base);
+
+            if constexpr (std::is_same_v<T, FIntProperty>)
+                result = std::to_string(*GetPropertyPtr<int32>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FInt8Property>)
+                result = std::to_string(*GetPropertyPtr<int8>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FInt16Property>)
+                result = std::to_string(*GetPropertyPtr<int16>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FInt64Property>)
+                result = std::to_string(*GetPropertyPtr<int64>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FUInt16Property>)
+                result = std::to_string(*GetPropertyPtr<uint16>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FUInt32Property>)
+                result = std::to_string(*GetPropertyPtr<uint32>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FUInt64Property>)
+                result = std::to_string(*GetPropertyPtr<uint64>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FFloatProperty>)
+            {
+                float val = *GetPropertyPtr<float>(Base, prop->Offset);
+                result = std::format("{:.6g}", val);
+            }
+            else if constexpr (std::is_same_v<T, FDoubleProperty>)
+            {
+                double val = *GetPropertyPtr<double>(Base, prop->Offset);
+                result = std::format("{:.6g}", val);
+            }
+            else if constexpr (std::is_same_v<T, FByteProperty>)
+            {
+                uint8 val = *GetPropertyPtr<uint8>(Base, prop->Offset);
+                result = std::to_string(val);
+            }
+            else if constexpr (std::is_same_v<T, FBoolProperty>)
+                result = ReadBool(fakeBase, prop) ? "true" : "false";
+            else if constexpr (std::is_same_v<T, FStrProperty>)
+            {
+                const auto& str = *GetPropertyPtr<UC::FString>(Base, prop->Offset);
+                result = str.IsValid() ? str.ToString() : "";
+            }
+            else if constexpr (std::is_same_v<T, FNameProperty>)
+                result = GetPropertyRef<FName>(fakeBase, prop->Offset).ToString();
+            else if constexpr (std::is_same_v<T, FEnumProperty>)
+            {
+                int64 enumVal = 0;
+                memcpy(&enumVal, GetPropertyPtr<void>(Base, prop->Offset), prop->UnderlayingProperty->ElementSize);
+                result = std::to_string(enumVal);
+            }
+            else if constexpr (std::is_same_v<T, FClassProperty>)
+            {
+                auto* cls = *GetPropertyPtr<UClass*>(Base, prop->Offset);
+                result = cls && IsValid(cls) ? cls->GetName() : "null";
+            }
+            else if constexpr (std::is_same_v<T, FObjectProperty> || std::is_same_v<T, FObjectPropertyBase>)
+            {
+                auto* obj = *GetPropertyPtr<UObject*>(Base, prop->Offset);
+                result = obj && IsValidRaw(obj) ? obj->GetName() : "null";
+            }
+            else
+                result = "<unsupported>";
+        });
+    return result;
 }

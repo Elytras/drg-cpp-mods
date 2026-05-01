@@ -232,7 +232,7 @@ namespace GameHooks
                 }
                 catch (const std::exception& ex)
                 {
-                    DBG_ASSERT(false && "Callback threw exception");
+                    DBG_ASSERT(false, "Callback threw exception");
                 }
                 
                 if (e.mode == ExecutionMode::SkipOriginal) ok = false;
@@ -264,7 +264,7 @@ namespace GameHooks
                 }
                 catch (const std::exception& ex)
                 {
-                    DBG_ASSERT(false && "Callback threw exception");
+                    DBG_ASSERT(false, "Callback threw exception");
                 }
             }
         }
@@ -300,7 +300,7 @@ namespace GameHooks
                     }
                     catch (const std::exception& ex)
                     {
-                        DBG_ASSERT(false && "Task threw exception");
+                        DBG_ASSERT(false, "Task threw exception");
                     }
                     local.pop_back(); 
                 }
@@ -357,7 +357,7 @@ namespace GameHooks
                         }
                         catch (const std::exception& ex)
                         {
-                            DBG_ASSERT(false && "OriginalProcessEvent threw exception");
+                            DBG_ASSERT(false, "OriginalProcessEvent threw exception");
                         }
                     }
 
@@ -372,7 +372,7 @@ namespace GameHooks
                 }
                 catch (const std::exception& ex)
                 {
-                    DBG_ASSERT(false && "OriginalProcessEvent threw exception");
+                    DBG_ASSERT(false, "OriginalProcessEvent threw exception");
                 }
             }
 
@@ -391,7 +391,7 @@ namespace GameHooks
                     }
                     catch (const std::exception& ex)
                     {
-                        DBG_ASSERT(false && "DoUninstall threw exception");
+                        DBG_ASSERT(false, "DoUninstall threw exception");
                     }
                 }
             }
@@ -423,7 +423,7 @@ namespace GameHooks
                 }
                 catch (const std::exception& ex)
                 {
-                    DBG_ASSERT(false && "onUninstalled callback threw exception");
+                    DBG_ASSERT(false, "onUninstalled callback threw exception");
                 }
             }
             return true;
@@ -758,7 +758,8 @@ void EnqueueThrottled(
             }
             catch (const std::exception& ex)
             {
-                DBG_ASSERT(false && "EnqueueThrottled function threw exception");
+                (void)ex;
+                DBG_ASSERT(false, "EnqueueThrottled function threw exception");
                 keepGoing = false;
             }
 

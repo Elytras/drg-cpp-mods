@@ -134,7 +134,7 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions);FMT_HEADER_ONLY;NOMINMAX;WIN32_LEAN_AND_MEAN;</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <LanguageStandard>stdcpp23</LanguageStandard>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <AdditionalIncludeDirectories>$(ProjectDir)*;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <StringPooling>true</StringPooling>
@@ -184,7 +184,8 @@
     <ClInclude Include="Lib_Forward.h" />
     <ClInclude Include="Library.h" />
     <ClInclude Include="Lib_VarSystem.h" />
-    <ClInclude Include="Lib_VtableInfo.h" />
+    <ClInclude Include="Lib_VTableHook.h" />
+    <ClInclude Include="Lib_VTableInfo.h" />
     <ClInclude Include="ModManager.h" />
     <ClInclude Include="SDK\SDK\FSD_classes.hpp" />
     <ClInclude Include="StringLib.h" />

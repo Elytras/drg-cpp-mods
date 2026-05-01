@@ -48,7 +48,7 @@ class FMulticastSparseDelegateProperty final : public FMulticastDelegateProperty
 // =========================================================================
 // Replicated property defines
 // =========================================================================
-enum class ELifetimeRepNotifyCondition
+enum ELifetimeRepNotifyCondition
 {
     REPNOTIFY_OnChanged = 0             ,// Only call the property's RepNotify function if it changes from the local value
     REPNOTIFY_Always = 1                ,// Always Call the property's RepNotify function when it is received from the server

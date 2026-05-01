@@ -4,6 +4,7 @@
 //                        (deferred from Lib_VarSystem.h due to CommandContext dependency).
 
 #include <functional>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -114,9 +115,9 @@ class CommandHandler
 public:
     using CommandFn = std::function<void(const CommandContext&)>;
 
-    inline void Register(const std::string& name, CommandFn fn, std::string description = "")
+    inline void Register(const std::string& name, CommandFn fn, std::string category, std::string description = "")
     {
-        commands_[name] = { std::move(fn), std::move(description) };
+        commands_[name] = { std::move(fn), std::move(category), std::move(description) };
     }
 
     inline bool Dispatch(const std::string& msg, uint32_t seq = 0) const
@@ -162,7 +163,7 @@ public:
     }
 
 private:
-    struct CommandEntry { CommandFn fn; std::string description; };
+    struct CommandEntry { CommandFn fn; std::string category; std::string description; };
     std::unordered_map<std::string, CommandEntry> commands_;
 
     inline void PrintHelp(const std::string& filter) const
@@ -171,22 +172,21 @@ private:
         {
             auto it = commands_.find(filter);
             if (it == commands_.end()) { spdlog::warn("[help] Unknown command: '{}'", filter); return; }
-            const auto& desc = it->second.description;
-            spdlog::info("[help] {}: {}", it->first, desc.empty() ? "(no description)" : desc);
+            const auto& e = it->second;
+            spdlog::info("[help] [{}] {}: {}", e.category, it->first, e.description.empty() ? "(no description)" : e.description);
             return;
         }
         spdlog::info("[help] Available commands ({}):", commands_.size());
-        std::vector<std::pair<std::string, const CommandEntry*>> sorted;
-        sorted.reserve(commands_.size());
+        std::map<std::string, std::vector<std::pair<std::string, const CommandEntry*>>> byCategory;
         for (const auto& [name, entry] : commands_)
-            sorted.emplace_back(name, &entry);
-        std::sort(sorted.begin(), sorted.end(),
-            [](const auto& lhs, const auto& rhs)
-            {
-                return lhs.first < rhs.first;
-            });
-        for (const auto& [name, entry] : sorted)
-            spdlog::info("[help]   {:20} {}", name, entry->description.empty() ? "(no description)" : entry->description);
+            byCategory[entry.category].emplace_back(name, &entry);
+        for (auto& [cat, entries] : byCategory)
+        {
+            std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+            spdlog::info("[help] -- {} --", cat.empty() ? "Uncategorized" : cat);
+            for (const auto& [name, entry] : entries)
+                spdlog::info("[help]   {:20} {}", name, entry->description.empty() ? "(no description)" : entry->description);
+        }
     }
 
     static constexpr bool IsSpace(char c) noexcept {
@@ -211,7 +211,14 @@ private:
             while (i < s.size() && s[i] != q) {
                 if (s[i] == '\\' && i + 1 < s.size()) [[unlikely]] {
                     i++;
-                    out_buf.push_back(s[i++]);
+                    switch (s[i]) {
+                        case 'n':  out_buf.push_back('\n'); break;
+                        case 't':  out_buf.push_back('\t'); break;
+                        case 'r':  out_buf.push_back('\r'); break;
+                        case '0':  out_buf.push_back('\0'); break;
+                        default:   out_buf.push_back(s[i]); break;
+                    }
+                    i++;
                 }
                 else {
                     out_buf.push_back(s[i++]);

@@ -40,6 +40,12 @@ constexpr const wchar_t* EVENT_SHUTDOWN = L"Local\\DRG_Shutdown";
 constexpr const wchar_t* EVENT_SHUTDOWN_DONE = L"Local\\DRG_ShutdownDone";
 
 //-----------------------------------------------------------------------------
+// Output Locations
+//-----------------------------------------------------------------------------
+
+constexpr const char* OUTPUT_DIR = R"(D:\Repos\CppDrg\Drgmods\DrgMods\ModOutput\)";
+
+//-----------------------------------------------------------------------------
 // Capacity constants
 //-----------------------------------------------------------------------------
 constexpr size_t MAX_FUNC_NAME = 128;
@@ -137,7 +143,7 @@ enum class CommandType : uint32_t
 #if defined(NDEBUG)
 
 #define ASSUME_ASSERT(expr) \
-      [[assume(static_cast<bool>(expr))]]
+      _assume(static_cast<bool>(expr))
 
 #else
 #include <cassert>
