@@ -1,35 +1,37 @@
-﻿#pragma once
+#pragma once
 // WinInput.h — minimal Windows console readline with Tab-completion,
 //               inline ghost-text hints, and up/down history.
 //               No dependencies beyond Windows.h.
+//
+// Split-console mode:
+//   Call SetSplitMode(mutex, logFn, resizeFn, getRowFn) to pin the input
+//   strip to a fixed row. WinInput acquires *mutex during key dispatch,
+//   uses logFn to emit completion candidates, and calls resizeFn on resize.
+//   Viewport drag-resize is detected every event loop tick (cheap) — no
+//   reliance on WINDOW_BUFFER_SIZE_EVENT alone.
 
 #include <Windows.h>
 #include <string>
 #include <vector>
 #include <functional>
 #include <algorithm>
+#include <mutex>
 #include <deque>
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Callback types
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Fill `out` with every completion for the current line buffer.
 using WinCompletionCallback = std::function<void(const std::string& buf, std::vector<std::string>& out)>;
 
-// Hint result:
-//   inline   — completion text that follows cursor inside the existing buffer
-//              (rendered dim over the already-typed chars ahead of cursor)
-//   append   — extra display text appended after end of buffer (params, owner, count)
-//              (never inserted on right-arrow)
-//   color    — Windows console attribute for both parts
 struct WinHint
 {
-    std::string inlineText;  // chars in buf after cursor that complete the name
-    std::string appendText;  // ghost text appended after end of buf
+    std::string inlineText;  // dim completion text rendered over chars ahead of cursor
+    std::string appendText;  // ghost text after end of buffer (params, owner, count)
     WORD        color = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
 };
-using WinHintCallback = std::function<WinHint(const std::string& buf, int cursor)>;
+using WinHintCallback        = std::function<WinHint(const std::string& buf, int cursor)>;
+using WinDescriptionCallback = std::function<std::string(const std::string& candidate)>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  WinInput
@@ -37,6 +39,8 @@ using WinHintCallback = std::function<WinHint(const std::string& buf, int cursor
 
 class WinInput
 {
+    struct CandRegion { SHORT row, c0, c1; int idx; };
+
 public:
     WinInput()
         : m_hIn(GetStdHandle(STD_INPUT_HANDLE))
@@ -44,12 +48,40 @@ public:
         , m_histMaxLen(200)
         , m_histIdx(-1)
         , m_row(0)
+    {}
+
+    void SetCompletionCallback(WinCompletionCallback cb)   { m_completionCb = std::move(cb); }
+    void SetHintCallback(WinHintCallback cb)               { m_hintCb       = std::move(cb); }
+    void SetDescriptionCallback(WinDescriptionCallback cb) { m_descCb       = std::move(cb); }
+    void SetHistoryMaxLen(int n)                           { m_histMaxLen   = n; }
+    void SetScrollFn(std::function<void(int)> fn)          { m_scrollFn     = std::move(fn); }
+
+    // Enable dedicated AC pane mode.
+    //   resizeFn — called (under mutex) with desired height; returns AC pane start row
+    //   clearFn  — called (under mutex) when AC is dismissed
+    void SetAcMode(std::function<SHORT(int)> resizeFn, std::function<void()> clearFn)
     {
+        m_acResizeFn = std::move(resizeFn);
+        m_acClearFn  = std::move(clearFn);
     }
 
-    void SetCompletionCallback(WinCompletionCallback cb) { m_completionCb = std::move(cb); }
-    void SetHintCallback(WinHintCallback cb) { m_hintCb = std::move(cb); }
-    void SetHistoryMaxLen(int n) { m_histMaxLen = n; }
+    // Enable split-console mode.
+    //   mutex     — held during all console writes (released while blocking on input)
+    //   logFn     — called WHILE mutex is held; use *UnderLock variants
+    //   resizeFn  — called while mutex is held on viewport resize; recalcs layout, returns new input row
+    //   getRowFn  — called on every Redraw to read the current input row
+    void SetSplitMode(std::mutex*                              mutex,
+                      std::function<void(const std::string&)>  logFn,
+                      std::function<SHORT()>                   resizeFn,
+                      std::function<SHORT()>                   getRowFn)
+    {
+        m_splitMode     = true;
+        m_splitMutex    = mutex;
+        m_splitLogFn    = std::move(logFn);
+        m_splitResizeFn = std::move(resizeFn);
+        m_splitGetRowFn = std::move(getRowFn);
+        m_splitInputRow = m_splitGetRowFn ? m_splitGetRowFn() : 0;
+    }
 
     void HistoryAdd(const std::string& line)
     {
@@ -59,51 +91,158 @@ public:
             m_history.pop_back();
     }
 
-    // Blocking readline. Returns false on Ctrl-D / EOF.
     bool Readline(const std::string& prompt, std::string& out)
     {
         DWORD prevMode = 0;
         GetConsoleMode(m_hIn, &prevMode);
-        SetConsoleMode(m_hIn, ENABLE_EXTENDED_FLAGS | ENABLE_WINDOW_INPUT);
+        SetConsoleMode(m_hIn, ENABLE_EXTENDED_FLAGS | ENABLE_WINDOW_INPUT | ENABLE_MOUSE_INPUT);
 
         m_buf.clear();
-        m_cursor = 0;
+        m_cursor  = 0;
         m_histIdx = -1;
         m_histScratch.clear();
 
-        // Record the row we start on, then print the prompt
+        if (m_splitMode)
+            m_row = m_splitGetRowFn ? m_splitGetRowFn() : m_splitInputRow;
+        else
         {
             CONSOLE_SCREEN_BUFFER_INFO csbi{};
             GetConsoleScreenBufferInfo(m_hOut, &csbi);
             m_row = csbi.dwCursorPosition.Y;
         }
-        WriteNarrow(prompt);
+
+        // Snapshot viewport size for drag-resize detection
+        {
+            CONSOLE_SCREEN_BUFFER_INFO csbi{};
+            GetConsoleScreenBufferInfo(m_hOut, &csbi);
+            m_viewW = csbi.srWindow.Right  - csbi.srWindow.Left + 1;
+            m_viewH = csbi.srWindow.Bottom - csbi.srWindow.Top  + 1;
+        }
+
+        { auto lock = MakeLock(); Redraw(prompt); }
 
         bool result = true;
 
         while (true)
         {
+            // Wait with a 150 ms timeout so viewport drag-resize is detected
+            // even when no input events fire (viewport-only resize doesn't
+            // generate WINDOW_BUFFER_SIZE_EVENT in all console hosts).
+            if (WaitForSingleObject(m_hIn, 150) == WAIT_TIMEOUT)
+            {
+                CheckAndHandleResize(prompt);
+                continue;
+            }
+
             INPUT_RECORD rec{};
             DWORD nRead = 0;
             ReadConsoleInputW(m_hIn, &rec, 1, &nRead);
+            if (nRead == 0) continue;
+
+            // Also check on every arriving event for immediate response
+            if (CheckAndHandleResize(prompt)) continue;
+
+            // ── Mouse events ──────────────────────────────────────────────
+            if (rec.EventType == MOUSE_EVENT)
+            {
+                const MOUSE_EVENT_RECORD& me = rec.Event.MouseEvent;
+
+                if (me.dwEventFlags & MOUSE_WHEELED)
+                {
+                    SHORT delta = (SHORT)HIWORD(me.dwButtonState);
+                    // positive delta = wheel forward = scroll toward older content
+                    if (m_splitMode && m_scrollFn)
+                    {
+                        auto lock = MakeLock();
+                        m_scrollFn((delta > 0) ? +3 : -3);
+                    }
+                    else
+                    {
+                        int scroll = (delta > 0) ? -3 : 3;
+                        CONSOLE_SCREEN_BUFFER_INFO csbi{};
+                        GetConsoleScreenBufferInfo(m_hOut, &csbi);
+                        SMALL_RECT win = csbi.srWindow;
+                        if (scroll < 0 && win.Top  + scroll < 0)                scroll = -win.Top;
+                        if (scroll > 0 && win.Bottom + scroll >= csbi.dwSize.Y) scroll = csbi.dwSize.Y - 1 - win.Bottom;
+                        if (scroll != 0)
+                        {
+                            win.Top    += (SHORT)scroll;
+                            win.Bottom += (SHORT)scroll;
+                            SetConsoleWindowInfo(m_hOut, TRUE, &win);
+                        }
+                    }
+                }
+                else if ((me.dwEventFlags & MOUSE_MOVED) && !m_candRegs.empty())
+                {
+                    SHORT mx = me.dwMousePosition.X;
+                    SHORT my = me.dwMousePosition.Y;
+                    int newHovered = -1;
+                    for (const auto& cr : m_candRegs)
+                    {
+                        if (my == cr.row && mx >= cr.c0 && mx < cr.c1)
+                        { newHovered = cr.idx; break; }
+                    }
+                    if (newHovered != m_hoveredCand)
+                    {
+                        auto lock = MakeLock();
+                        int oldHovered = m_hoveredCand;
+                        m_hoveredCand  = newHovered;
+                        HighlightCandidate(oldHovered, false);
+                        HighlightCandidate(newHovered, true);
+                        if (newHovered >= 0 && m_descCb)
+                            ShowTooltip(m_descCb(m_lastCandidates[newHovered]));
+                        else
+                            ClearTooltip();
+                        Redraw(m_prompt); // update ghost text for hovered candidate
+                    }
+                }
+                continue;
+            }
 
             if (rec.EventType != KEY_EVENT || !rec.Event.KeyEvent.bKeyDown)
                 continue;
+
+            // Hold the mutex for the entire key-dispatch + redraw
+            auto lock = MakeLock();
 
             const KEY_EVENT_RECORD& ke = rec.Event.KeyEvent;
             WORD    vk = ke.wVirtualKeyCode;
             wchar_t ch = ke.uChar.UnicodeChar;
 
+            // Ignore pure modifier / non-editor keys entirely so they don't
+            // dismiss the AC pane or ghost text (e.g. Win+Shift+S for screenshot).
+            if (IsIgnoredKey(vk)) continue;
+
+            // Tab re-enters DoCompletion which manages its own AC state.
+            // Any other key dismisses the AC pane and clears tracking state.
+            // If the AC pane was active, ClearCandidateState triggers RenderAll
+            // in SplitConsole which blanks the input row — redraw immediately so
+            // the prompt is restored before the key handler runs.
+            if (vk != VK_TAB)
+            {
+                bool acWasActive = (m_acAreaStartRow >= 0);
+                ClearCandidateState();
+                if (acWasActive) Redraw(prompt);
+            }
+
             if (vk == VK_RETURN)
             {
-                // Move past the input line before returning
-                CONSOLE_SCREEN_BUFFER_INFO csbi{};
-                GetConsoleScreenBufferInfo(m_hOut, &csbi);
-                COORD eol{ 0, (SHORT)(csbi.dwCursorPosition.Y + 1) };
-                // Clamp to buffer
-                if (eol.Y >= csbi.dwSize.Y) eol.Y = csbi.dwSize.Y - 1;
-                SetConsoleCursorPosition(m_hOut, { 0, csbi.dwCursorPosition.Y });
-                WriteConsoleW(m_hOut, L"\r\n", 2, nullptr, nullptr);
+                if (m_splitMode)
+                {
+                    CONSOLE_SCREEN_BUFFER_INFO csbi{};
+                    GetConsoleScreenBufferInfo(m_hOut, &csbi);
+                    COORD pos{0, m_row};
+                    DWORD written;
+                    FillConsoleOutputCharacterW(m_hOut, L' ', csbi.dwSize.X, pos, &written);
+                    SetConsoleCursorPosition(m_hOut, pos);
+                }
+                else
+                {
+                    CONSOLE_SCREEN_BUFFER_INFO csbi{};
+                    GetConsoleScreenBufferInfo(m_hOut, &csbi);
+                    SetConsoleCursorPosition(m_hOut, {0, csbi.dwCursorPosition.Y});
+                    WriteConsoleW(m_hOut, L"\r\n", 2, nullptr, nullptr);
+                }
                 break;
             }
 
@@ -140,14 +279,12 @@ public:
                 bool ctrl = (ke.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
                 if (ctrl)
                 {
-                    // Jump to start of previous word
                     int c = m_cursor;
-                    while (c > 0 && m_buf[c - 1] == ' ') --c; // skip spaces
-                    while (c > 0 && m_buf[c - 1] != ' ') --c; // skip word chars
-                    m_cursor = c;
+                    while (c > 0 && m_buf[c - 1] == ' ') --c;
+                    while (c > 0 && m_buf[c - 1] != ' ') --c;
+                    if (c != m_cursor) { m_cursor = c; Redraw(prompt); }
                 }
-                else if (m_cursor > 0) --m_cursor;
-                Redraw(prompt);
+                else if (m_cursor > 0) { --m_cursor; Redraw(prompt); }
                 continue;
             }
 
@@ -156,13 +293,10 @@ public:
                 bool ctrl = (ke.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
                 if (ctrl)
                 {
-                    // Jump to start of next word
-                    int c = m_cursor;
-                    int n = (int)m_buf.size();
-                    while (c < n && m_buf[c] != ' ') ++c; // skip word chars
-                    while (c < n && m_buf[c] == ' ') ++c; // skip spaces
-                    m_cursor = c;
-                    Redraw(prompt);
+                    int c = m_cursor, n = (int)m_buf.size();
+                    while (c < n && m_buf[c] != ' ') ++c;
+                    while (c < n && m_buf[c] == ' ') ++c;
+                    if (c != m_cursor) { m_cursor = c; Redraw(prompt); }
                 }
                 else if (m_cursor < (int)m_buf.size())
                 {
@@ -171,29 +305,43 @@ public:
                 }
                 else
                 {
-                    // At end of buffer: accept inlineText completion
+                    // At end of buffer: accept inlineText ghost completion
                     WinHint hint = Hint();
                     if (!hint.inlineText.empty())
                     {
-                        // inlineText is already visually shown as the dim chars
-                        // ahead — accepting it just moves cursor to end of name
                         m_cursor = std::min(m_cursor + (int)hint.inlineText.size(),
-                            (int)m_buf.size());
+                                            (int)m_buf.size());
                         Redraw(prompt);
                     }
                 }
                 continue;
             }
 
-            if (vk == VK_HOME) { m_cursor = 0;                    Redraw(prompt); continue; }
-            if (vk == VK_END) { m_cursor = (int)m_buf.size();    Redraw(prompt); continue; }
+            // No-redraw guards: skip Redraw when cursor is already at the target position
+            if (vk == VK_HOME) { if (m_cursor != 0)               { m_cursor = 0;               Redraw(prompt); } continue; }
+            if (vk == VK_END)  { int e=(int)m_buf.size(); if (m_cursor != e) { m_cursor = e;     Redraw(prompt); } continue; }
 
-            if (vk == VK_UP) { NavigateHistory(prompt, +1); continue; }
+            if (vk == VK_PRIOR || vk == VK_NEXT)  // PgUp / PgDn — scroll log pane
+            {
+                if (m_splitMode && m_scrollFn)
+                {
+                    CONSOLE_SCREEN_BUFFER_INFO csbi2{};
+                    GetConsoleScreenBufferInfo(m_hOut, &csbi2);
+                    int pageH = std::max(1, (int)(csbi2.srWindow.Bottom - csbi2.srWindow.Top + 1) / 2);
+                    m_scrollFn(vk == VK_PRIOR ? +pageH : -pageH);
+                    Redraw(prompt);
+                }
+                continue;
+            }
+
+            if (vk == VK_UP)   { NavigateHistory(prompt, +1); continue; }
             if (vk == VK_DOWN) { NavigateHistory(prompt, -1); continue; }
 
-            // Ctrl-A / Ctrl-E
-            if (ch == 0x01) { m_cursor = 0;                 Redraw(prompt); continue; }
-            if (ch == 0x05) { m_cursor = (int)m_buf.size(); Redraw(prompt); continue; }
+            // Ctrl-A / Ctrl-E / Ctrl-K / Ctrl-U with no-redraw guards
+            if (ch == 0x01) { if (m_cursor != 0)                   { m_cursor = 0;                Redraw(prompt); } continue; }
+            if (ch == 0x05) { int e=(int)m_buf.size(); if (m_cursor != e) { m_cursor = e;         Redraw(prompt); } continue; }
+            if (ch == 0x0B) { if (m_cursor < (int)m_buf.size())    { m_buf.erase(m_cursor);       Redraw(prompt); } continue; }
+            if (ch == 0x15) { m_buf.erase(0, m_cursor); m_cursor = 0;                             Redraw(prompt); continue; }
 
             // Ctrl-D on empty line → EOF
             if (ch == 0x04 && m_buf.empty())
@@ -203,16 +351,8 @@ public:
                 break;
             }
 
-            // Ctrl-K: kill to end
-            if (ch == 0x0B) { m_buf.erase(m_cursor); Redraw(prompt); continue; }
-
-            // Ctrl-U: kill to start
-            if (ch == 0x15) { m_buf.erase(0, m_cursor); m_cursor = 0; Redraw(prompt); continue; }
-
-            // Tab
             if (vk == VK_TAB) { DoCompletion(prompt); continue; }
 
-            // Printable character
             if (ch >= 0x20 && ch != 0x7F)
             {
                 char narrow[4]{};
@@ -233,7 +373,63 @@ public:
     }
 
 private:
-    // ── Low-level helpers ─────────────────────────────────────────────────
+    // ── Modifier-key filter ───────────────────────────────────────────────
+    // Returns true for keys that carry no semantic meaning for the editor
+    // (pure modifiers, dead keys, media keys, etc.) and should be ignored
+    // completely — no state change, no AC pane dismissal.
+    static bool IsIgnoredKey(WORD vk)
+    {
+        switch (vk)
+        {
+        case VK_SHIFT:    case VK_LSHIFT:   case VK_RSHIFT:
+        case VK_CONTROL:  case VK_LCONTROL: case VK_RCONTROL:
+        case VK_MENU:     case VK_LMENU:    case VK_RMENU:
+        case VK_LWIN:     case VK_RWIN:     case VK_APPS:
+        case VK_CAPITAL:  case VK_NUMLOCK:  case VK_SCROLL:
+        case VK_SNAPSHOT: case VK_PAUSE:    case VK_INSERT:
+        case VK_F1:  case VK_F2:  case VK_F3:  case VK_F4:
+        case VK_F5:  case VK_F6:  case VK_F7:  case VK_F8:
+        case VK_F9:  case VK_F10: case VK_F11: case VK_F12:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    // ── Resize helper ─────────────────────────────────────────────────────
+    // Checks whether the console viewport changed; if so, triggers a full
+    // layout recalc + redraw. Returns true if a resize was handled.
+    bool CheckAndHandleResize(const std::string& prompt)
+    {
+        if (!m_splitMode || !m_splitResizeFn) return false;
+        CONSOLE_SCREEN_BUFFER_INFO csbi{};
+        GetConsoleScreenBufferInfo(m_hOut, &csbi);
+        SHORT newW = csbi.srWindow.Right  - csbi.srWindow.Left + 1;
+        SHORT newH = csbi.srWindow.Bottom - csbi.srWindow.Top  + 1;
+        if (newW == m_viewW && newH == m_viewH) return false;
+        m_viewW = newW;
+        m_viewH = newH;
+        // Drain any queued WINDOW_BUFFER_SIZE_EVENTs to avoid re-entry
+        INPUT_RECORD drain{}; DWORD nDrain = 0;
+        while (PeekConsoleInputW(m_hIn, &drain, 1, &nDrain) && nDrain > 0
+               && drain.EventType == WINDOW_BUFFER_SIZE_EVENT)
+            ReadConsoleInputW(m_hIn, &drain, 1, &nDrain);
+        auto lock = MakeLock();
+        m_splitInputRow = m_splitResizeFn();
+        m_row = m_splitInputRow;
+        Redraw(prompt);
+        return true;
+    }
+
+    // ── Split-mode lock helper ─────────────────────────────────────────────
+    std::unique_lock<std::mutex> MakeLock()
+    {
+        if (m_splitMutex)
+            return std::unique_lock<std::mutex>(*m_splitMutex);
+        return {};
+    }
+
+    // ── Low-level helpers ──────────────────────────────────────────────────
 
     void WriteNarrow(const std::string& s)
     {
@@ -244,7 +440,6 @@ private:
         WriteConsoleW(m_hOut, &w[0], n, &written, nullptr);
     }
 
-    // Number of console columns a UTF-8 string occupies (BMP only).
     int ColWidth(const std::string& s)
     {
         if (s.empty()) return 0;
@@ -255,28 +450,93 @@ private:
 
     WinHint Hint()
     {
+        // When a candidate is hovered, use it as the active completion
+        // regardless of what the regular hint callback would return.
+        if (m_hoveredCand >= 0 && m_hoveredCand < (int)m_lastCandidates.size())
+            return HoverHint(m_lastCandidates[m_hoveredCand]);
         if (!m_hintCb) return {};
         return m_hintCb(m_buf, m_cursor);
     }
 
+    // Build a ghost-text hint for a specific candidate string.
+    // inlineText = the part of the candidate that comes after the cursor position.
+    // appendText = description from m_descCb (if any).
+    WinHint HoverHint(const std::string& candidate)
+    {
+        WinHint h;
+        h.color = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE; // dim gray
+
+        // Chars of candidate beyond current cursor position → ghost text
+        if ((size_t)m_cursor < candidate.size())
+        {
+            std::string remainder = candidate.substr(m_cursor);
+            int ahead = (int)m_buf.size() - m_cursor;
+            if (ahead <= 0)
+            {
+                h.inlineText = remainder;
+            }
+            else
+            {
+                // Cursor is mid-buffer: dim only the chars that match ahead
+                int overlap = std::min((int)remainder.size(), ahead);
+                bool ok = true;
+                for (int i = 0; i < overlap && ok; ++i)
+                    if (tolower((unsigned char)m_buf[m_cursor + i]) !=
+                        tolower((unsigned char)remainder[i])) ok = false;
+                if (ok) h.inlineText = remainder.substr(0, overlap);
+            }
+        }
+
+        if (m_descCb)
+        {
+            std::string desc = m_descCb(candidate);
+            if (!desc.empty()) h.appendText = "  " + desc;
+        }
+        return h;
+    }
+
+    // Change the console color attribute for one candidate cell.
+    // highlight=true → selection color; false → restore default.
+    void HighlightCandidate(int candIdx, bool highlight)
+    {
+        if (candIdx < 0) return;
+        CONSOLE_SCREEN_BUFFER_INFO csbi{};
+        GetConsoleScreenBufferInfo(m_hOut, &csbi);
+        // Selection: bright white on blue; matches classic console "selected" look
+        constexpr WORD kSelAttr = BACKGROUND_BLUE
+                                | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE
+                                | FOREGROUND_INTENSITY;
+        WORD attr = highlight ? kSelAttr : csbi.wAttributes;
+        for (const auto& cr : m_candRegs)
+        {
+            if (cr.idx != candIdx) continue;
+            int w = cr.c1 - cr.c0;
+            if (w <= 0) continue;
+            DWORD written;
+            FillConsoleOutputAttribute(m_hOut, attr, w, {cr.c0, cr.row}, &written);
+        }
+    }
+
     // ── Redraw ────────────────────────────────────────────────────────────
-    //
-    // Always redraws onto m_row.  If the buffer scrolled since we printed
-    // the prompt, m_row will be stale — we detect that by comparing against
-    // the current cursor row and adjust m_row downward accordingly.
 
     void Redraw(const std::string& prompt)
     {
+        m_prompt = prompt;  // store for ShowTooltip / ClearTooltip
+
         CONSOLE_SCREEN_BUFFER_INFO csbi{};
         GetConsoleScreenBufferInfo(m_hOut, &csbi);
         SHORT bufW = csbi.dwSize.X;
-        SHORT curRow = csbi.dwCursorPosition.Y;
 
-        if (curRow < m_row) m_row = curRow;
-        if (m_row < 0) m_row = 0;
-        if (m_row >= csbi.dwSize.Y) m_row = csbi.dwSize.Y - 1;
+        if (m_splitMode)
+            m_row = m_splitGetRowFn ? m_splitGetRowFn() : m_splitInputRow;
+        else
+        {
+            SHORT curRow = csbi.dwCursorPosition.Y;
+            if (curRow < m_row) m_row = curRow;
+            if (m_row < 0) m_row = 0;
+            if (m_row >= csbi.dwSize.Y) m_row = csbi.dwSize.Y - 1;
+        }
 
-        // Erase the row
         COORD home{ 0, m_row };
         DWORD written;
         FillConsoleOutputCharacterW(m_hOut, L' ', bufW, home, &written);
@@ -292,11 +552,7 @@ private:
         if (m_cursor > 0)
             WriteNarrow(m_buf.substr(0, m_cursor));
 
-        // Segment 3: inlineText (name completion ahead of cursor) in hint color
-        // This visually "dims" the characters in buf that complete the current token.
-        // We render the hint inline text here instead of the real buf chars,
-        // because the real buf chars ahead of cursor haven't been typed yet —
-        // inlineText IS those chars (the remainder of the matched name).
+        // Segment 3: inlineText (dim completion ahead of cursor)
         if (!hint.inlineText.empty())
         {
             SetConsoleTextAttribute(m_hOut, hint.color);
@@ -304,25 +560,31 @@ private:
             SetConsoleTextAttribute(m_hOut, csbi.wAttributes);
         }
 
-        // Segment 4: buf[cursor..end] in normal color
-        // (the real text after cursor that was already typed — skip the part
-        //  covered by inlineText since we just rendered it dim above)
+        // Segment 4: buf[cursor+inlineLen..end] in normal color
         {
-            int inlineLen = (int)hint.inlineText.size();
-            int afterInline = m_cursor + inlineLen;
+            int afterInline = m_cursor + (int)hint.inlineText.size();
             if (afterInline < (int)m_buf.size())
                 WriteNarrow(m_buf.substr(afterInline));
         }
 
-        // Segment 5: appendText after end of buffer
+        // Segment 5: appendText — truncated so it never wraps
         if (!hint.appendText.empty())
         {
-            SetConsoleTextAttribute(m_hOut, hint.color);
-            WriteNarrow(hint.appendText);
-            SetConsoleTextAttribute(m_hOut, csbi.wAttributes);
+            int used      = ColWidth(prompt) + ColWidth(m_buf) + ColWidth(hint.inlineText);
+            int available = (int)bufW - used - 1;
+            std::string appendToShow = hint.appendText;
+            if (available <= 0)
+                appendToShow.clear();
+            else if (ColWidth(appendToShow) > available)
+                appendToShow.resize((size_t)available);
+            if (!appendToShow.empty())
+            {
+                SetConsoleTextAttribute(m_hOut, hint.color);
+                WriteNarrow(appendToShow);
+                SetConsoleTextAttribute(m_hOut, csbi.wAttributes);
+            }
         }
 
-        // Park cursor at the edit position
         int col = ColWidth(prompt) + ColWidth(m_buf.substr(0, m_cursor));
         if (col < 0) col = 0;
         if (col >= bufW) col = bufW - 1;
@@ -355,25 +617,65 @@ private:
         Redraw(prompt);
     }
 
-    // ── Tab completion ────────────────────────────────────────────────────
+    // ── WriteLineAt helper — write a UTF-8 string directly to a console row ──
+
+    void WriteLineAt(SHORT row, const std::string& utf8)
+    {
+        CONSOLE_SCREEN_BUFFER_INFO csbi{};
+        GetConsoleScreenBufferInfo(m_hOut, &csbi);
+        SHORT w = csbi.dwSize.X;
+        std::wstring wline;
+        if (!utf8.empty())
+        {
+            int n = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), nullptr, 0);
+            if (n > 0) { wline.resize(n); MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int)utf8.size(), wline.data(), n); }
+        }
+        if ((int)wline.size() > w) wline.resize(w);
+        COORD pos{0, row};
+        DWORD written;
+        FillConsoleOutputCharacterW(m_hOut, L' ', w, pos, &written);
+        FillConsoleOutputAttribute(m_hOut, csbi.wAttributes, w, pos, &written);
+        if (!wline.empty())
+            WriteConsoleOutputCharacterW(m_hOut, wline.c_str(), (DWORD)wline.size(), pos, &written);
+    }
+
+    // ── Tab completion ─────────────────────────────────────────────────────
 
     void DoCompletion(const std::string& prompt)
     {
+        ClearTooltip(); // clear tooltip without collapsing AC pane
+
         if (!m_completionCb) return;
 
         std::vector<std::string> candidates;
         m_completionCb(m_buf, candidates);
-        if (candidates.empty()) return;
+
+        auto dismissAc = [&]()
+        {
+            if (m_acClearFn) m_acClearFn();
+            m_acAreaStartRow = -1;
+            m_candRegs.clear();
+            m_lastCandidates.clear();
+            m_hoveredCand = -1;
+            m_candBaseRow = -1;
+        };
+
+        if (candidates.empty())
+        {
+            dismissAc();
+            return;
+        }
 
         if (candidates.size() == 1)
         {
-            m_buf = candidates[0];
+            m_buf    = candidates[0];
             m_cursor = (int)m_buf.size();
+            dismissAc();
             Redraw(prompt);
             return;
         }
 
-        // Extend to longest common prefix if possible
+        // Extend to longest common prefix
         std::string lcp = candidates[0];
         for (size_t i = 1; i < candidates.size(); ++i)
         {
@@ -381,32 +683,208 @@ private:
             while (j < lcp.size() && j < candidates[i].size() && lcp[j] == candidates[i][j]) ++j;
             lcp = lcp.substr(0, j);
         }
-
         if (lcp.size() > m_buf.size())
         {
-            m_buf = lcp;
+            m_buf    = lcp;
             m_cursor = (int)m_buf.size();
+            dismissAc();
             Redraw(prompt);
             return;
         }
 
-        // Print candidate list on a new line, then redraw the prompt below it.
-        // The new prompt row is one line below wherever we currently are.
-        WriteConsoleW(m_hOut, L"\r\n", 2, nullptr, nullptr);
+        // Multiple candidates — format them into columns
+        CONSOLE_SCREEN_BUFFER_INFO csbiC{};
+        GetConsoleScreenBufferInfo(m_hOut, &csbiC);
+        int candBufW = csbiC.dwSize.X;
+        int maxCandW = 0;
         for (const auto& c : candidates)
-        {
-            WriteNarrow(c);
-            WriteConsoleW(m_hOut, L"  ", 2, nullptr, nullptr);
-        }
-        WriteConsoleW(m_hOut, L"\r\n", 2, nullptr, nullptr);
+            maxCandW = std::max(maxCandW, ColWidth(c));
+        int colW     = maxCandW + 2;
+        int numCols  = std::max(1, candBufW / colW);
+        int numCandRows = ((int)candidates.size() + numCols - 1) / numCols;
 
-        // Update m_row to the new cursor row
+        m_hoveredCand = -1;
+
+        if (m_acResizeFn)
         {
-            CONSOLE_SCREEN_BUFFER_INFO csbi{};
-            GetConsoleScreenBufferInfo(m_hOut, &csbi);
-            m_row = csbi.dwCursorPosition.Y;
+            // Dedicated AC pane mode.
+            // Row 0 of the AC pane is the tooltip row; candidates start at row 1.
+            int maxCandVisible = std::max(1, (csbiC.srWindow.Bottom - csbiC.srWindow.Top + 1) / 2 - 1);
+            int visibleRows    = std::min(numCandRows, maxCandVisible);
+            int acH            = visibleRows + 1; // +1 for tooltip row
+
+            SHORT acStart       = m_acResizeFn(acH); // layout redrawn, AC area cleared
+            m_acAreaStartRow    = acStart;
+            m_lastCandidates    = candidates;
+            m_candRegs.clear();
+
+            for (int r = 0; r < visibleRows; ++r)
+            {
+                SHORT row = static_cast<SHORT>(acStart + 1 + r);
+                int firstIdx = r * numCols;
+                std::string rowStr;
+                for (int col = 0; col < numCols; ++col)
+                {
+                    int idx = firstIdx + col;
+                    if (idx >= (int)candidates.size()) break;
+                    rowStr += candidates[idx];
+                    bool hasMore = (col + 1 < numCols) && (idx + 1 < (int)candidates.size());
+                    if (hasMore)
+                        rowStr += std::string(colW - ColWidth(candidates[idx]), ' ');
+                }
+                WriteLineAt(row, rowStr);
+
+                for (int col = 0; col < numCols; ++col)
+                {
+                    int idx = firstIdx + col;
+                    if (idx >= (int)candidates.size()) break;
+                    SHORT c0 = static_cast<SHORT>(col * colW);
+                    SHORT c1 = static_cast<SHORT>(c0 + ColWidth(candidates[idx]));
+                    m_candRegs.push_back({row, c0, c1, idx});
+                }
+            }
+        }
+        else if (m_splitMode && m_splitLogFn)
+        {
+            // Legacy split mode: send formatted rows to the cmd pane
+            int col = 0;
+            std::string row;
+            for (const auto& c : candidates)
+            {
+                row += c;
+                ++col;
+                if (col == numCols)
+                {
+                    m_splitLogFn(row);
+                    row.clear();
+                    col = 0;
+                }
+                else
+                    row += std::string(colW - ColWidth(c), ' ');
+            }
+            if (!row.empty()) m_splitLogFn(row);
+
+            // Approximate candidate positions for hover tooltip
+            SHORT inputRow2 = m_splitGetRowFn ? m_splitGetRowFn() : m_splitInputRow;
+            m_candBaseRow    = static_cast<SHORT>(inputRow2 - numCandRows);
+            m_lastCandidates = candidates;
+            m_candRegs.clear();
+            for (int i = 0; i < (int)candidates.size(); ++i)
+            {
+                SHORT r  = static_cast<SHORT>(m_candBaseRow + i / numCols);
+                SHORT c0 = static_cast<SHORT>((i % numCols) * colW);
+                SHORT c1 = static_cast<SHORT>(c0 + ColWidth(candidates[i]));
+                m_candRegs.push_back({r, c0, c1, i});
+            }
+        }
+        else
+        {
+            // Normal (non-split) mode: print candidates below the prompt line
+            DWORD written;
+            SHORT candStartRow = m_row;
+            FillConsoleOutputCharacterW(m_hOut, L' ', (DWORD)candBufW, {0, m_row}, &written);
+            FillConsoleOutputAttribute(m_hOut, csbiC.wAttributes, (DWORD)candBufW, {0, m_row}, &written);
+            SetConsoleCursorPosition(m_hOut, {0, m_row});
+
+            int col = 0;
+            for (const auto& c : candidates)
+            {
+                WriteNarrow(c);
+                ++col;
+                if (col == numCols)
+                {
+                    WriteConsoleW(m_hOut, L"\r\n", 2, nullptr, nullptr);
+                    col = 0;
+                }
+                else
+                    WriteNarrow(std::string(colW - ColWidth(c), ' '));
+            }
+            if (col != 0)
+                WriteConsoleW(m_hOut, L"\r\n", 2, nullptr, nullptr);
+
+            GetConsoleScreenBufferInfo(m_hOut, &csbiC);
+            m_row = csbiC.dwCursorPosition.Y;
+
+            m_candBaseRow    = candStartRow;
+            m_lastCandidates = candidates;
+            m_candRegs.clear();
+            for (int i = 0; i < (int)candidates.size(); ++i)
+            {
+                SHORT row = static_cast<SHORT>(candStartRow + i / numCols);
+                SHORT c0  = static_cast<SHORT>((i % numCols) * colW);
+                SHORT c1  = static_cast<SHORT>(c0 + ColWidth(candidates[i]));
+                m_candRegs.push_back({row, c0, c1, i});
+            }
         }
         Redraw(prompt);
+    }
+
+    // ── Tooltip helpers ────────────────────────────────────────────────────
+
+    void ShowTooltip(const std::string& desc)
+    {
+        CONSOLE_SCREEN_BUFFER_INFO csbi{};
+        GetConsoleScreenBufferInfo(m_hOut, &csbi);
+
+        // When AC pane is active, row 0 of the AC area is the dedicated tooltip row.
+        // Otherwise place tooltip one row above the candidate list (or below prompt).
+        SHORT tooltipRow;
+        if (m_acAreaStartRow >= 0)
+            tooltipRow = m_acAreaStartRow;
+        else if (m_candBaseRow > 0)
+            tooltipRow = m_candBaseRow - 1;
+        else if (m_row + 1 < csbi.dwSize.Y)
+            tooltipRow = m_row + 1;
+        else
+            return;
+
+        m_tooltipRow    = tooltipRow;
+        m_tooltipActive = true;
+
+        COORD pos{ 0, tooltipRow };
+        DWORD written;
+        FillConsoleOutputCharacterW(m_hOut, L' ', csbi.dwSize.X, pos, &written);
+        SetConsoleCursorPosition(m_hOut, pos);
+        if (!desc.empty())
+        {
+            SetConsoleTextAttribute(m_hOut, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+            WriteNarrow(desc);
+            SetConsoleTextAttribute(m_hOut, csbi.wAttributes);
+        }
+
+        // Restore cursor to input position
+        int col = ColWidth(m_prompt) + ColWidth(m_buf.substr(0, m_cursor));
+        if (col >= csbi.dwSize.X) col = csbi.dwSize.X - 1;
+        SetConsoleCursorPosition(m_hOut, { (SHORT)col, m_row });
+    }
+
+    void ClearTooltip()
+    {
+        if (!m_tooltipActive) return;
+        CONSOLE_SCREEN_BUFFER_INFO csbi{};
+        GetConsoleScreenBufferInfo(m_hOut, &csbi);
+        COORD pos{ 0, m_tooltipRow };
+        DWORD written;
+        FillConsoleOutputCharacterW(m_hOut, L' ', csbi.dwSize.X, pos, &written);
+        m_tooltipActive = false;
+
+        int col = ColWidth(m_prompt) + ColWidth(m_buf.substr(0, m_cursor));
+        if (col >= csbi.dwSize.X) col = csbi.dwSize.X - 1;
+        SetConsoleCursorPosition(m_hOut, { (SHORT)col, m_row });
+    }
+
+    void ClearCandidateState()
+    {
+        ClearTooltip();
+        if (!m_candRegs.empty() || m_acAreaStartRow >= 0)
+        {
+            if (m_acClearFn) m_acClearFn(); // collapse AC pane in SplitConsole
+            m_acAreaStartRow = -1;
+            m_candRegs.clear();
+            m_lastCandidates.clear();
+            m_hoveredCand = -1;
+            m_candBaseRow = -1;
+        }
     }
 
     // ── Members ───────────────────────────────────────────────────────────
@@ -414,14 +892,42 @@ private:
     HANDLE m_hIn, m_hOut;
 
     std::string m_buf;
-    int         m_cursor = 0;
-    SHORT       m_row = 0; // console row the prompt lives on
+    int         m_cursor  = 0;
+    SHORT       m_row     = 0;
+    std::string m_prompt;  // last prompt string, used by tooltip helpers
 
     int                     m_histMaxLen;
     int                     m_histIdx;
     std::deque<std::string> m_history;
     std::string             m_histScratch;
 
-    WinCompletionCallback m_completionCb;
-    WinHintCallback       m_hintCb;
+    WinCompletionCallback  m_completionCb;
+    WinHintCallback        m_hintCb;
+    WinDescriptionCallback m_descCb;
+
+    // Split-console state
+    bool                                    m_splitMode     = false;
+    SHORT                                   m_splitInputRow = 0;
+    std::mutex*                             m_splitMutex    = nullptr;
+    std::function<void(const std::string&)> m_splitLogFn;
+    std::function<SHORT()>                  m_splitResizeFn;
+    std::function<SHORT()>                  m_splitGetRowFn;
+    std::function<void(int)>                m_scrollFn;
+
+    // Viewport size tracking (drag-resize detection)
+    SHORT m_viewW = 0;
+    SHORT m_viewH = 0;
+
+    // Dedicated AC pane callbacks (set via SetAcMode)
+    std::function<SHORT(int)> m_acResizeFn; // set AC pane height; returns AC start row
+    std::function<void()>     m_acClearFn;  // collapse AC pane
+    SHORT                     m_acAreaStartRow = -1; // tooltip row in AC pane; -1 when unused
+
+    // Candidate hover tooltip state
+    std::vector<CandRegion>  m_candRegs;
+    std::vector<std::string> m_lastCandidates;
+    SHORT                    m_candBaseRow   = -1;
+    int                      m_hoveredCand   = -1;
+    bool                     m_tooltipActive = false;
+    SHORT                    m_tooltipRow    = -1;
 };

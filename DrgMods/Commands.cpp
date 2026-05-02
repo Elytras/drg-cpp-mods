@@ -178,8 +178,8 @@ namespace State
 
     struct ScannedFunction
     {
-        UFunction* Func=nullptr;
-        UObject* Owner=nullptr;
+        UFunction* Func = nullptr;
+        UObject* Owner = nullptr;
         std::string FunctionName;
         std::string OwnerName;
         std::string OwnerClassName;
@@ -217,9 +217,9 @@ namespace TickSystem
         if constexpr (std::is_invocable_v<RateType>)
         {
             return [rate = std::forward<TRate>(rate)]()
-            {
-                return NormalizeIntervalMs(static_cast<long double>(rate()));
-            };
+                {
+                    return NormalizeIntervalMs(static_cast<long double>(rate()));
+                };
         }
         else
         {
@@ -236,9 +236,9 @@ namespace TickSystem
         if constexpr (std::is_invocable_v<RateType>)
         {
             return [rate = std::forward<TRate>(rate)]()
-            {
-                return 1000.0L / NormalizeFrequencyHz(static_cast<long double>(rate()));
-            };
+                {
+                    return 1000.0L / NormalizeFrequencyHz(static_cast<long double>(rate()));
+                };
         }
         else
         {
@@ -282,7 +282,7 @@ namespace TickSystem
     template <typename TIntervalRate>
     CallbackHandle SetTickableFunction_AsIntervalMs(
         std::function<void()> fn,
-        TIntervalRate&&       intervalRate)
+        TIntervalRate&& intervalRate)
     {
         static CallbackHandle nextHandle = 1000;
         CallbackHandle handle = nextHandle++;
@@ -302,7 +302,7 @@ namespace TickSystem
     template <typename TFrequencyRate>
     CallbackHandle SetTickableFunction_AsFrequencyHz(
         std::function<void()> fn,
-        TFrequencyRate&&      frequencyRate)
+        TFrequencyRate&& frequencyRate)
     {
         return SetTickableFunction_AsIntervalMs(
             std::move(fn),
@@ -413,12 +413,12 @@ namespace Tickables
         auto* Player = GetLocalPlayer();
         if (!IsValidOf<APlayerCharacter>(Player)) return;
         if (
-            bool bIsOnSpacerig = false; 
-            !(IsValidOf<ULIB_Game_C>(ULIB_Game_C::GetDefaultObj()) && (ULIB_Game_C::IsOnSpaceRig(GetWorld(), &bIsOnSpacerig), 
-            bIsOnSpacerig))
+            bool bIsOnSpacerig = false;
+            !(IsValidOf<ULIB_Game_C>(ULIB_Game_C::GetDefaultObj()) && (ULIB_Game_C::IsOnSpaceRig(GetWorld(), &bIsOnSpacerig),
+                bIsOnSpacerig))
             ) return;
         Player->Server_CheatDancingCharacterOnSelf(18);
-}
+    }
     void TickSpam()
     {
         static int counter = 0;
@@ -593,9 +593,8 @@ namespace Weapons
     }
 
     void UpgradeLoki(AWPN_LockOnRifle_C* Loki) {
-        
         ASSUME_ASSERT(IsValidOf<AWPN_LockOnRifle_C>(Loki));
-        
+
         Loki->Resupply(100);
         Loki->bAlwaysHitTarget = true;
         Loki->UseLockOnTargetStatusEffect = true;
@@ -929,7 +928,7 @@ namespace Commands
     }
     void CmdVars(const ctx& ctx) {
         using namespace VarSystem;
-        CmdVars(ctx);
+        Cmd_Vars(ctx);
     }
     void CmdUnset(const ctx& ctx) {
         using namespace VarSystem;
@@ -967,9 +966,8 @@ namespace Commands
 
     void SpawnDancer(const ctx& ctx) {
         if (!CanChangeWorld()) return;
-        GetLocalPlayer()->Server_CheatDancingCharacterOnSelf(std::strtol(ctx.Arg(1).c_str(), nullptr,10));
+        GetLocalPlayer()->Server_CheatDancingCharacterOnSelf(std::strtol(ctx.Arg(1).c_str(), nullptr, 10));
     }
-
 
     void ScanDamageMeeterMod(const ctx&) {
         if (!IsValidOf<APlayerCharacter>(GetLocalPlayer())) return;
@@ -1019,28 +1017,34 @@ namespace Commands
 
     void Say(const CommandContext& ctx)
     {
-        auto* Local = GetLocalPlayer();
-        if (!IsValidOf<APlayerCharacter>(Local)) return;
-        const std::string SenderName = ctx.Arg(1);
-        APlayerCharacter* Sender = nullptr;
-        for (APlayerCharacter* Player : ActorLib::GetAllPlayerCharacters(GetWorld())) {
-            if (!IsValidOf<APlayerCharacter>(Player)) continue;
-            if (Player->GetPlayerState()->GetPlayerName().ToString() == SenderName) {
+        UFSDGameInstance* Instance = GameLib::GetFSDGameInstance(GetWorld());
+        if (!IsValidOf<UFSDGameInstance>(Instance)) return;
+        AFSDPlayerState* LocalState = Instance->GetLocalFSDPlayerController()->GetFSDPlayerState();
+        if (!IsValidOf<AFSDPlayerState>(LocalState)) return;
+        const std::string& SenderName = ctx.Arg(1);
+        AFSDPlayerState* Sender = nullptr;
+        for (AFSDPlayerState* Player : UGameFunctionLibrary::GetFSDGameState(GetWorld())->GetNetworkSortedPlayerArray()) {
+            if (!IsValidOf<AFSDPlayerState>(Player)) continue;
+            if (Player->GetPlayerName().ToString() == SenderName) {
                 Sender = Player;
                 break;
             }
         }
         // If no player matched, arg 1 is part of the message, not a name
-        const auto msgBegin = IsValidOf<APlayerCharacter>(Sender)
+        const auto msgBegin = IsValidOf<AFSDPlayerState>(Sender)
             ? ctx.args.begin() + 2
             : ctx.args.begin() + 1;
-        if (!IsValidOf<APlayerCharacter>(Sender)) Sender = Local;
+
+        if (!IsValidOf<AFSDPlayerState>(Sender)) Sender = LocalState;
         std::string msg;
+
         for (auto it = msgBegin; it != ctx.args.end(); ++it) { if (it != msgBegin) msg += ' '; msg += *it; }
-        Local->GetPlayerController()->Server_NewMessage(
-            Sender->PlayerState->GetPlayerName(),
+
+        LocalState->GetPlayerController()->Server_NewMessage(
+            Sender->GetPlayerName(),
             FString(ToWide(msg).c_str()),
-            Sender->GetPlayerState()->GetChatSenderType());
+            Sender->GetChatSenderType()
+        );
     }
 
     void CoilCarve(const CommandContext& ctx)
@@ -1157,7 +1161,7 @@ namespace Commands
         info("[cmd:rename] Current name: '{}'", ObjToStr(Player));
         std::string newName;
         for (size_t i = 1; i < ctx.args.size(); ++i) { if (i > 1) newName += ' '; newName += ctx.args[i]; }
-        UObjectVCalls::Rename::Call(Player, ToWide(newName).c_str(),Player->Outer, REN::None);
+        UObjectVCalls::Rename::Call(Player, ToWide(newName).c_str(), Player->Outer, REN::None);
         info("[cmd:rename] New name: '{}'", ObjToStr(Player));
     }
 
@@ -1427,10 +1431,10 @@ namespace Commands
     void Call(const CommandContext& ctx)
     {
         if (ctx.ArgCount() < 2) { warn("[cmd:call] Usage: call <FunctionName> [arg0 arg1 ...]"); return; }
-        
+
         std::vector<std::string> rest{ ctx.args.begin() + 1, ctx.args.end() };
         std::string funcName; std::vector<std::string> rawArgs;
-        
+
         auto sep = std::find(rest.begin(), rest.end(), "::");
         if (sep == rest.end()) { funcName = rest[0]; rawArgs = { rest.begin() + 1, rest.end() }; }
         else
@@ -1922,7 +1926,8 @@ namespace Commands
                         enemyEntry[key] = value;
 
                     // Add component properties with component name prefix
-                    for (auto* comp : GObjectsOf<UActorComponent>())
+                    auto comps = (*prevPawn)->K2_GetComponentsByClass(UActorComponent::StaticClass());
+                    for (auto* comp : comps)
                     {
                         if (comp->Outer == *prevPawn)
                         {
@@ -1944,11 +1949,11 @@ namespace Commands
                 if (!current)
                 {
                     // Write JSON to file
-                    std::string filename = std::string{OUTPUT_DIR} + "spawndump_" + std::to_string(std::time(nullptr)) + ".json";
+                    std::string filename = std::string{ OUTPUT_DIR } + "spawndump_" + std::to_string(std::time(nullptr)) + ".json";
                     std::ofstream outFile = OpenOutput(filename);
                     if (outFile.is_open())
                     {
-                        outFile << rootJson->dump(2,'\t');
+                        outFile << rootJson->dump(1, '\t');
                         outFile.close();
                         info("[spawndump] Done — {} classes processed, results written to {}", idx, filename);
                     }
@@ -1972,34 +1977,139 @@ namespace Commands
         );
     }
 
+    void SpawnAndDumpMaterials(const CommandContext& ctx)
+    {
+        if (!Kismet::IsServer(GetWorld())) return;
+
+        const long double delayMs = static_cast<long double>(std::max(16.0f, SafeStof(ctx.Arg(1))));
+
+        std::vector<UEnemyDescriptor*> descriptors;
+        descriptors.reserve(512);
+        for (UEnemyDescriptor* Descriptor : GObjectsOf<UEnemyDescriptor>())
+            if (Descriptor->GetName().starts_with("ED_"))
+                descriptors.push_back(Descriptor);
+
+        struct Entry { UClass* cls = nullptr; std::string desc; };
+
+        std::unordered_map<UClass*, Entry> classMap;
+        classMap.reserve(256);
+        for (auto* Desc : descriptors)
+        {
+            UClass* cls = static_cast<UClass*>(Desc->GetEnemyClass(nullptr, false));
+            if (!IsValidClass(cls)) continue;
+            classMap.emplace(cls, Entry{ cls, Desc->GetName() });
+        }
+
+        if (classMap.empty()) { warn("[spawndump] No enemy classes resolved"); return; }
+        info("[spawndump] {} unique classes from {} descriptors, delay={:.0f}ms",
+            classMap.size(), descriptors.size(), static_cast<double>(delayMs));
+
+        APlayerCharacter* Player = GetLocalPlayer();
+        if (!IsValidOf<APlayerCharacter>(Player)) { warn("[spawndump] No local player"); return; }
+
+        const FVector SpawnLoc = Player->K2_GetActorLocation() + Player->GetActorForwardVector() * 400.f;
+
+        auto rootJson = std::make_shared<nlohmann::json>();
+        auto entries  = std::make_shared<std::vector<Entry>>();
+        entries->reserve(classMap.size());
+        for (auto& [_, e] : classMap)
+            entries->push_back(std::move(e));
+
+        std::vector<Entry*> items;
+        items.reserve(entries->size() + 1);
+        for (auto& e : *entries) items.push_back(&e);
+        items.push_back(nullptr); // sentinel — triggers file write
+
+        auto prevPawn  = std::make_shared<APawn*>(nullptr);
+        auto prevEntry = std::make_shared<Entry*>(nullptr);
+
+        auto delay = std::chrono::milliseconds(static_cast<long long>(delayMs));
+        EnqueueThrottled<Entry*>(std::move(items), delay,
+            [prevPawn, prevEntry, entries, SpawnLoc, rootJson](Entry*& current, size_t idx, size_t total) -> bool
+            {
+                // ── Collect materials from the previously spawned pawn ─────
+                if (*prevEntry && *prevPawn)
+                {
+                    const std::string& descName = (*prevEntry)->desc.empty()
+                        ? "Unknown" : (*prevEntry)->desc;
+                    nlohmann::json& enemyMats = (*rootJson)["Enemies"][descName]["Materials"];
+
+                    uint32 matIndex = 0;
+                    TArray<UActorComponent*> comps =
+                        (*prevPawn)->K2_GetComponentsByClass(UPrimitiveComponent::StaticClass());
+                    for (UActorComponent* actorComp : comps)
+                    {
+                        auto* comp = Cast<UPrimitiveComponent>(actorComp);
+                        if (!comp) continue;
+                        for (uint32 i = 0, n = comp->GetNumMaterials(); i < n; ++i)
+                        {
+                            UMaterialInterface* mat = comp->GetMaterial(i);
+                            while (auto* mid = Cast<UMaterialInstanceDynamic>(mat))
+                                mat = mid->Parent;
+                            enemyMats[matIndex++] = mat ? mat->GetName() : "";
+                        }
+                    }
+
+                    (*prevPawn)->K2_DestroyActor();
+                    *prevPawn  = nullptr;
+                    *prevEntry = nullptr;
+                }
+
+                // ── Sentinel: all spawns done, write output ───────────────
+                if (!current)
+                {
+                    std::string filename = std::string{ OUTPUT_DIR } + "MaterialDump.json";
+                    std::ofstream outFile = OpenOutput(filename);
+                    if (!outFile.is_open())
+                        return warn("[spawndump] Failed to open file {} for writing", filename), true;
+                    outFile << rootJson->dump(1, '\t');
+                    outFile.close();
+                    info("[spawndump] Done — {} classes processed, results written to {}", idx, filename);
+                    return true;
+                }
+
+                // ── Spawn next enemy ──────────────────────────────────────
+                static FTransform SpawnTransform{};
+                SpawnTransform.Translation = SpawnLoc;
+
+                APawn* Pawn = nullptr;
+                SpawnActor<APawn>(current->cls, SpawnTransform, Pawn);
+                *prevPawn  = Pawn;
+                *prevEntry = Pawn ? current : nullptr;
+                if (!Pawn)
+                    warn("[spawndump] ({}/{}) Spawn failed: {}", idx, total - 1, current->cls->GetName());
+                return true;
+            });
+    }
+
     void DumpDescriptors(const CommandContext&)
     {
         // UEnum* for a named field via FEnumProperty / FByteProperty reflection
         auto getFieldEnum = [](UClass* Cls, const char* Name) -> UEnum*
-        {
-            FName needle(ToWide(std::string(Name)).c_str());
-            for (FField* field : FFieldRange(Cls->ChildProperties))
             {
-                if (field->Name != needle) continue;
-                if (auto* ep = FieldCast::Cast<FEnumProperty>(field)) return ep->Enum;
-                if (auto* bp = FieldCast::Cast<FByteProperty>(field))  return bp->Enum;
-            }
-            return nullptr;
-        };
+                FName needle(ToWide(std::string(Name)).c_str());
+                for (FField* field : FFieldRange(Cls->ChildProperties))
+                {
+                    if (field->Name != needle) continue;
+                    if (auto* ep = FieldCast::Cast<FEnumProperty>(field)) return ep->Enum;
+                    if (auto* bp = FieldCast::Cast<FByteProperty>(field))  return bp->Enum;
+                }
+                return nullptr;
+            };
 
         // Enum integer → short name via UEnum::Names, strips "EnumClass::" prefix
         auto enumName = [](UEnum* E, int64 Val) -> std::string
-        {
-            if (!E) return std::to_string(Val);
-            for (int32 i = 0; i < E->Names.Num(); ++i)
             {
-                if (E->Names[i].Value() != Val) continue;
-                std::string full = E->Names[i].Key().ToString();
-                const auto sep = full.rfind("::");
-                return sep != std::string::npos ? full.substr(sep + 2) : full;
-            }
-            return std::to_string(Val);
-        };
+                if (!E) return std::to_string(Val);
+                for (int32 i = 0; i < E->Names.Num(); ++i)
+                {
+                    if (E->Names[i].Value() != Val) continue;
+                    std::string full = E->Names[i].Key().ToString();
+                    const auto sep = full.rfind("::");
+                    return sep != std::string::npos ? full.substr(sep + 2) : full;
+                }
+                return std::to_string(Val);
+            };
 
         // One FField walk per enum type, not per descriptor
         UClass* DescClass = UEnemyDescriptor::StaticClass();
@@ -2014,18 +2124,18 @@ namespace Commands
 
             nlohmann::json d;
 
-            d["DifficultyRating"]             = Desc->DifficultyRating;
-            d["MinSpawnCount"]                = Desc->MinSpawnCount;
-            d["MaxSpawnCount"]                = Desc->MaxSpawnCount;
-            d["Rarity"]                       = Desc->Rarity;
-            d["SpawnAmountModifier"]          = Desc->SpawnAmountModifier;
-            d["SpawnSpread"]                  = Desc->SpawnSpread;
+            d["DifficultyRating"] = Desc->DifficultyRating;
+            d["MinSpawnCount"] = Desc->MinSpawnCount;
+            d["MaxSpawnCount"] = Desc->MaxSpawnCount;
+            d["Rarity"] = Desc->Rarity;
+            d["SpawnAmountModifier"] = Desc->SpawnAmountModifier;
+            d["SpawnSpread"] = Desc->SpawnSpread;
             d["CanBeUsedForConstantPressure"] = Desc->CanBeUsedForConstantPressure;
-            d["CanBeUsedInEncounters"]        = Desc->CanBeUsedInEncounters;
-            d["UsesSpawnRarityModifiers"]     = Desc->UsesSpawnRarityModifiers;
+            d["CanBeUsedInEncounters"] = Desc->CanBeUsedInEncounters;
+            d["UsesSpawnRarityModifiers"] = Desc->UsesSpawnRarityModifiers;
 
-            d["Significance"]     = enumName(SigEnum, static_cast<int64>(Desc->EnemySignificance));
-            d["VeteranScaling"]   = enumName(VetEnum, static_cast<int64>(Desc->VeteranScaling));
+            d["Significance"] = enumName(SigEnum, static_cast<int64>(Desc->EnemySignificance));
+            d["VeteranScaling"] = enumName(VetEnum, static_cast<int64>(Desc->VeteranScaling));
             d["UsesVeteranLarge"] = (Desc->VeteranScaling == EVeteranScaling::LargeEnemy);
 
             nlohmann::json vets = nlohmann::json::array();
@@ -2039,7 +2149,7 @@ namespace Commands
             root[Desc->GetName()] = std::move(d);
         }
 
-        const std::string path = std::string{OUTPUT_DIR} + "EnemyDescriptors.json";
+        const std::string path = std::string{ OUTPUT_DIR } + "EnemyDescriptors.json";
         std::ofstream f = OpenOutput(path);
         if (f) { f << root.dump(2); info("[dumpdescriptors] {} descriptors → {}", root.size(), path); }
         else warn("[dumpdescriptors] Failed to open {}", path);
@@ -2061,7 +2171,7 @@ namespace Commands
         State::infiniteAmmoEnabled = !State::infiniteAmmoEnabled;
         if (State::infiniteAmmoEnabled)
         {
-            for ( auto* weapon : Weapons::GetAllAmmoWeapons(LocalPlayer))
+            for (auto* weapon : Weapons::GetAllAmmoWeapons(LocalPlayer))
                 if (Kismet::IsValid(weapon))
                 {
                     State::OldShotCost[weapon] = weapon->ShotCost; weapon->ShotCost = 0;
@@ -2076,12 +2186,6 @@ namespace Commands
         }
         info("[cmd:infiniteammo] {}", State::infiniteAmmoEnabled ? "Enabled" : "Disabled");
     }
-
-    void EquipGown(const ctx&) {
-        auto Local = GetLocalPlayer();
-        if (!IsValidOf<APlayerCharacter>(Local)) return;
-        Local->CharacterVanity->Client_EquipMedicalGown();
-    }
 }
 
 // =========================================================================
@@ -2093,58 +2197,59 @@ void RegisterCommands(CommandHandler& handler)
     using namespace VarSystem;
 
     // Chat
-    handler.Register("logchat",         Commands::LogChat,              "Chat",       R"(Toggle chat message logging)");
-    handler.Register("say",             Commands::Say,                  "Chat",       R"(Send message to chat: say [sender] <message>)");
+    handler.Register("logchat", Commands::LogChat, "Chat", R"(Toggle chat message logging)");
+    handler.Register("say", Commands::Say, "Chat", R"(Send message to chat: say [sender] <message>)");
 
     // Enemies
-    handler.Register("dumpdescriptors", Commands::DumpDescriptors,      "Enemies",    R"(Dump all ED_* descriptor controls to C:\Dumper-7\DescriptorDump.json)");
-    handler.Register("fearall",         Commands::FearAll,              "Enemies",    R"(Instantly fear all enemies (requires Coil Gun equipped))");
-    handler.Register("spawndump",       Commands::SpawnAndDump,         "Enemies",    R"(Dump float/bool/int props for all enemy descriptors x biomes: spawndump [delay_ms])");
-    handler.Register("spawnenemies",    Commands::SpawnEnemies,         "Enemies",    R"(Spawn enemies: spawnenemies <descriptor> <count> <x> <y> <z>)");
+    handler.Register("dumpdescriptors", Commands::DumpDescriptors, "Enemies", R"(Dump all ED_* descriptor controls to C:\Dumper-7\DescriptorDump.json)");
+    handler.Register("fearall", Commands::FearAll, "Enemies", R"(Instantly fear all enemies (requires Coil Gun equipped))");
+    handler.Register("spawndump", Commands::SpawnAndDump, "Enemies", R"(Dump float/bool/int props for all enemy descriptors x biomes: spawndump [delay_ms])");
+    handler.Register("spawnenemies", Commands::SpawnEnemies, "Enemies", R"(Spawn enemies: spawnenemies <descriptor> <count> <x> <y> <z>)");
+    handler.Register("spawnmatdump", Commands::SpawnAndDumpMaterials, "Enemies", R"(Dump material names for all enemy descriptors x biomes: spawnmatdump [delay_ms])");
 
     // Inspection
-    handler.Register("findclass",       Commands::FindClass,            "Inspection", R"(Find classes by name)");
-    handler.Register("inventory",       Commands::Inventory,            "Inspection", R"(Dump local player inventory)");
-    handler.Register("prop",            Commands::Prop,                 "Inspection", R"(prop <cdo|obj> <name> <dump|get|set|list> [...])");
-    handler.Register("scanall",         Commands::ScanAllClasses,       "Inspection", R"(Scan all classes for server RPCs and log them)");
-    handler.Register("scandmg",         Commands::ScanDamageMeeterMod,  "Inspection", R"(Scan damage meeter mod for usable actors)");
-    handler.Register("scanfuncs",       Commands::ScanReplicated,       "Inspection", R"(Scan for usable replicated functions)");
+    handler.Register("findclass", Commands::FindClass, "Inspection", R"(Find classes by name)");
+    handler.Register("inventory", Commands::Inventory, "Inspection", R"(Dump local player inventory)");
+    handler.Register("prop", Commands::Prop, "Inspection", R"(prop <cdo|obj> <name> <dump|get|set|list> [...])");
+    handler.Register("scanall", Commands::ScanAllClasses, "Inspection", R"(Scan all classes for server RPCs and log them)");
+    handler.Register("scandmg", Commands::ScanDamageMeeterMod, "Inspection", R"(Scan damage meeter mod for usable actors)");
+    handler.Register("scanfuncs", Commands::ScanReplicated, "Inspection", R"(Scan for usable replicated functions)");
 
     // Player
-    handler.Register("coilcarve",       Commands::CoilCarve,            "Player",     R"(Carve terrain with the Coil Gun: coilcarve <x1> <y1> <z1> <x2> <y2> <z2> <power>)");
-    handler.Register("godmode",         Commands::ToggleGodmode,        "Player",     R"(Toggle god mode for local player)");
-    handler.Register("infiniteammo",    Commands::ToggleInfiniteAmmo,   "Player",     R"(Toggle infinite ammo for local player)");
-    handler.Register("readname",        Commands::ReadName,             "Player",     R"(Read the name of the local player)");
-    handler.Register("rename",          Commands::Rename,               "Player",     R"(Rename the local player: rename <new_name>)");
+    handler.Register("coilcarve", Commands::CoilCarve, "Player", R"(Carve terrain with the Coil Gun: coilcarve <x1> <y1> <z1> <x2> <y2> <z2> <power>)");
+    handler.Register("godmode", Commands::ToggleGodmode, "Player", R"(Toggle god mode for local player)");
+    handler.Register("infiniteammo", Commands::ToggleInfiniteAmmo, "Player", R"(Toggle infinite ammo for local player)");
+    handler.Register("readname", Commands::ReadName, "Player", R"(Read the name of the local player)");
+    handler.Register("rename", Commands::Rename, "Player", R"(Rename the local player: rename <new_name>)");
 
     // System
-    handler.Register("beginplay",       Commands::BeginPlay,            "System",     R"(Toggle BeginPlay spawn watcher)");
-    handler.Register("call",            Commands::Call,                 "System",     R"(Call a server RPC: call <FunctionName> [args...])");
-    handler.Register("exec",            Commands::Exec,                 "System",     R"(Execute a console command: exec <command>)");
-    handler.Register("ignoreproxy",     Commands::IgnoreProxy,          "System",     R"(Toggle ProxyMod hook)");
-    handler.Register("stoptick",        Commands::StopTick,             "System",     R"(Toggle tick event logging)");
+    handler.Register("beginplay", Commands::BeginPlay, "System", R"(Toggle BeginPlay spawn watcher)");
+    handler.Register("call", Commands::Call, "System", R"(Call a server RPC: call <FunctionName> [args...])");
+    handler.Register("exec", Commands::Exec, "System", R"(Execute a console command: exec <command>)");
+    handler.Register("ignoreproxy", Commands::IgnoreProxy, "System", R"(Toggle ProxyMod hook)");
+    handler.Register("stoptick", Commands::StopTick, "System", R"(Toggle tick event logging)");
 
     // Teleport
-    handler.Register("hidesound",       Commands::HideSound,            "Teleport",   R"(Teleport out of hearing range on the space rig)");
-    handler.Register("ptp",             Commands::PlayerTeleport,       "Teleport",   R"(Player teleport: ptp <name> | target <name> | dest <name>)");
-    handler.Register("tp",              Commands::Teleport,             "Teleport",   R"(Teleport: tp <x> <y> <z> [--rel] [--sweep])");
-    handler.Register("tpall",           Commands::TeleportAllToSelf,    "Teleport",   R"(Teleport all players to self)");
+    handler.Register("hidesound", Commands::HideSound, "Teleport", R"(Teleport out of hearing range on the space rig)");
+    handler.Register("ptp", Commands::PlayerTeleport, "Teleport", R"(Player teleport: ptp <name> | target <name> | dest <name>)");
+    handler.Register("tp", Commands::Teleport, "Teleport", R"(Teleport: tp <x> <y> <z> [--rel] [--sweep])");
+    handler.Register("tpall", Commands::TeleportAllToSelf, "Teleport", R"(Teleport all players to self)");
 
     // Troll
-    handler.Register("67",              Commands::SixSeven,             "Troll",      R"(Send 'Six Seven' chat message to twerking players)");
-    handler.Register("cleartwerkers",   Commands::ClearTwerkers,        "Troll",      R"(Clear the vanity dwarfs)");
-    handler.Register("crash",           Commands::Crash,                "Troll",      R"(Crash host)");
-    handler.Register("dance",           Commands::Dance,                "Troll",      R"(Show local player dance state)");
-    handler.Register("dancer",          Commands::SpawnDancer,          "Troll",      R"(Spawn a dancing dwarf on self)");
-    handler.Register("troll",           Commands::Troll,                "Troll",      R"(Troll all players with random teleports)");
-    handler.Register("twerk",           Commands::Twerk,                "Troll",      R"(Toggle anti-twerk filter)");
-    handler.Register("untwerk",         Commands::DoUntwerk,            "Troll",      R"(Stop all other players from twerking)");
+    handler.Register("67", Commands::SixSeven, "Troll", R"(Send 'Six Seven' chat message to twerking players)");
+    handler.Register("cleartwerkers", Commands::ClearTwerkers, "Troll", R"(Clear the vanity dwarfs)");
+    handler.Register("crash", Commands::Crash, "Troll", R"(Crash host)");
+    handler.Register("dance", Commands::Dance, "Troll", R"(Show local player dance state)");
+    handler.Register("dancer", Commands::SpawnDancer, "Troll", R"(Spawn a dancing dwarf on self)");
+    handler.Register("troll", Commands::Troll, "Troll", R"(Troll all players with random teleports)");
+    handler.Register("twerk", Commands::Twerk, "Troll", R"(Toggle anti-twerk filter)");
+    handler.Register("untwerk", Commands::DoUntwerk, "Troll", R"(Stop all other players from twerking)");
 
     // Variables
-    handler.Register("get",             Commands::CmdGet,               "Variables",  R"(Get a variable: get <n>)");
-    handler.Register("set",             Commands::CmdSet,               "Variables",  R"(Set a variable: set <n> <value>)");
-    handler.Register("unset",           Commands::CmdUnset,             "Variables",  R"(Delete a variable: unset <n>)");
-    handler.Register("vars",            Commands::CmdVars,              "Variables",  R"(List all variables)");
+    handler.Register("get", Commands::CmdGet, "Variables", R"(Get a variable: get <n>)");
+    handler.Register("set", Commands::CmdSet, "Variables", R"(Set a variable: set <n> <value>)");
+    handler.Register("unset", Commands::CmdUnset, "Variables", R"(Delete a variable: unset <n>)");
+    handler.Register("vars", Commands::CmdVars, "Variables", R"(List all variables)");
 }
 
 void SendCommandList(const CommandContext& ctx, const CommandHandler& handler)

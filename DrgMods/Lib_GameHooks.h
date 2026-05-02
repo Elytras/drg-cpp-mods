@@ -712,66 +712,58 @@ namespace GameHooks
 
 // Enqueues work items one at a time on the game thread, rate-limited by interval.
 // fn receives the current item and its index. Returns early if fn returns false.
-template<typename T>
+template<typename T, bool CanThrow = true>
 void EnqueueThrottled(
-    std::vector<T>          items,
+    std::vector<T> items,
     std::chrono::milliseconds interval,
-    std::function<bool(T&, size_t index, size_t total)> fn)
+    std::function<bool(T&, size_t, size_t)> fn)
 {
-    DBG_ASSERT(!items.empty(), "EnqueueThrottled called with empty items");
-    DBG_ASSERT(fn, "Null function passed to EnqueueThrottled");
-    DBG_ASSERT(interval.count() > 0, "Invalid interval");
-
     auto& hook = GameHooks::ProcessEventHook::Get();
-    auto  shared = std::make_shared<std::vector<T>>(std::move(items));
-    auto  index = std::make_shared<size_t>(0);
-    auto  lastFire = std::make_shared<std::chrono::steady_clock::time_point>(
-        std::chrono::steady_clock::now() - std::chrono::seconds(10));
-    auto  schedule = std::make_shared<std::function<void()>>();
 
-    DBG_CHECK_PTR(shared.get());
-    DBG_CHECK_PTR(index.get());
-    DBG_CHECK_PTR(lastFire.get());
+    auto shared = std::make_shared<std::vector<T>>(std::move(items));
+    auto index = std::make_shared<size_t>(0);
+    auto lastFire = std::make_shared<std::chrono::steady_clock::time_point>(
+        std::chrono::steady_clock::now() - interval);
+
+    auto schedule = std::make_shared<std::function<void()>>();
 
     *schedule = [shared, index, lastFire, interval, fn, schedule, &hook]() mutable
         {
-            DBG_CHECK_PTR(shared.get());
-            DBG_CHECK_PTR(index.get());
-
-            if (*index >= shared->size()) return;
+            if (*index >= shared->size())
+                return;
 
             auto now = std::chrono::steady_clock::now();
-            if (now - *lastFire < interval) 
-            { 
-                DBG_ASSERT(*schedule, "Null schedule callback");
-                hook.Enqueue(*schedule); 
-                return; 
+            if (now - *lastFire < interval)
+            {
+                hook.Enqueue(*schedule);
+                return;
             }
 
             *lastFire = now;
+
             T& item = (*shared)[*index];
-            
+
             bool keepGoing = false;
-            try
-            {
-                keepGoing = fn(item, *index, shared->size());
+            if constexpr (CanThrow) {
+                try
+                {
+                    keepGoing = fn(item, *index, shared->size());
+                }
+                catch (...)
+                {
+                    keepGoing = false;
+                }
             }
-            catch (const std::exception& ex)
-            {
-                (void)ex;
-                DBG_ASSERT(false, "EnqueueThrottled function threw exception");
-                keepGoing = false;
+            else {
+                keepGoing = fn(item, *index, shared->size());
             }
 
             ++(*index);
-            DBG_CHECK_RANGE(*index, 0, shared->size() + 1);
 
             if (keepGoing && *index < shared->size())
-            {
-                DBG_ASSERT(*schedule, "Null schedule callback");
                 hook.Enqueue(*schedule);
-            }
         };
 
+    // IMPORTANT: start execution immediately, not delayed
     hook.Enqueue(*schedule);
 }
