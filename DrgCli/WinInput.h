@@ -196,6 +196,24 @@ public:
                         Redraw(m_prompt); // update ghost text for hovered candidate
                     }
                 }
+                else if (me.dwEventFlags == 0
+                      && (me.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED)
+                      && !m_candRegs.empty())
+                {
+                    // Left-click on a candidate cell: accept it into the input buffer.
+                    SHORT mx = me.dwMousePosition.X;
+                    SHORT my = me.dwMousePosition.Y;
+                    for (const auto& cr : m_candRegs)
+                    {
+                        if (my != cr.row || mx < cr.c0 || mx >= cr.c1) continue;
+                        auto lock = MakeLock();
+                        m_buf    = m_lastCandidates[cr.idx];
+                        m_cursor = (int)m_buf.size();
+                        ClearCandidateState(); // dismisses AC pane + tooltip
+                        Redraw(prompt);
+                        break;
+                    }
+                }
                 continue;
             }
 
@@ -691,6 +709,12 @@ private:
             Redraw(prompt);
             return;
         }
+
+        // Same candidates already showing (TAB held, nothing changed).
+        // The AC pane and input row are both already correct — return without
+        // any redraw to avoid flicker while the key is held down.
+        if (!m_lastCandidates.empty() && candidates == m_lastCandidates)
+            return;
 
         // Multiple candidates — format them into columns
         CONSOLE_SCREEN_BUFFER_INFO csbiC{};

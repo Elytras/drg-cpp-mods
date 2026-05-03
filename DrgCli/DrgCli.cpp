@@ -754,6 +754,43 @@ struct CallParse
     std::string currentToken;
 };
 
+// Strips a single surrounding quote pair from a function prefix typed by the user.
+// e.g. `"Fix Wid` → {"Fix Wid", '"'},  `Fix` → {"Fix", 0}
+static std::pair<std::string, char> StripFuncQuotes(const std::string& s)
+{
+    if (s.empty()) return { s, 0 };
+    char q = s.front();
+    if (q != '"' && q != '\'') return { s, 0 };
+    std::string stripped = s.substr(1);
+    if (!stripped.empty() && stripped.back() == q)
+        stripped.pop_back();
+    return { stripped, q };
+}
+
+// Splits on the LAST "::" to separate an optional owner-filter prefix from the name part.
+// "BP_Player_C::Fix"                → {"BP_Player_C",             "Fix"}
+// "BP_Player_C::BP_Player_0::Fix W" → {"BP_Player_C::BP_Player_0", "Fix W"}
+// "FixWidgets"                       → {"",                         "FixWidgets"}
+static std::pair<std::string, std::string> SplitOwnerPrefix(const std::string& s)
+{
+    size_t pos = s.rfind("::");
+    if (pos == std::string::npos) return { "", s };
+    return { s.substr(0, pos), s.substr(pos + 2) };
+}
+
+// Checks whether fn matches an ownerPart::namePart query.
+// ownerPart may be "Class::Instance" — only its first segment is compared against fn.owner.
+static bool MatchesFunction(const KnownFunction& fn,
+    const std::string& ownerPart, const std::string& namePart)
+{
+    if (!IStartsWith(fn.name, namePart)) return false;
+    if (ownerPart.empty()) return true;
+    size_t colonPos = ownerPart.find("::");
+    const std::string classFilter = (colonPos == std::string::npos)
+        ? ownerPart : ownerPart.substr(0, colonPos);
+    return IStartsWith(fn.owner, classFilter);
+}
+
 static CallParse ParseBuffer(const std::string& buf)
 {
     CallParse p;
@@ -805,7 +842,7 @@ static CallParse ParseBuffer(const std::string& buf)
         }
 
         p.mode = CallParse::Mode::Args;
-        p.funcName = fnPart;
+        p.funcName = SplitOwnerPrefix(StripFuncQuotes(fnPart).first).second;
 
         size_t last = words.size() - 1;
         p.argIndex = std::max(0, (int)(last - sepIdx) - 1);
@@ -860,13 +897,23 @@ static void CompletionCallback(const std::string& buf, std::vector<std::string>&
     }
     else if (p.mode == CallParse::Mode::FuncName)
     {
+        auto sq = StripFuncQuotes(p.funcPrefix);
+        const std::string& stripped = sq.first;
+        const char quoteChar = sq.second;
+        auto op = SplitOwnerPrefix(stripped);
+        const std::string& ownerPart = op.first;
+        const std::string& namePart  = op.second;
         for (const auto& fn : g_KnownFunctions)
         {
-            if (!IStartsWith(fn.name, p.funcPrefix)) continue;
-            if (IEquals(fn.name, p.funcPrefix))
-                out.push_back(p.beforeToken + fn.name + " :: ");
+            if (!MatchesFunction(fn, ownerPart, namePart)) continue;
+            std::string fullRef = ownerPart.empty() ? fn.name : ownerPart + "::" + fn.name;
+            std::string quoted = quoteChar
+                ? std::string(1, quoteChar) + fullRef + quoteChar
+                : fullRef;
+            if (IEquals(fn.name, namePart))
+                out.push_back(p.beforeToken + quoted + " :: ");
             else
-                out.push_back(p.beforeToken + fn.name);
+                out.push_back(p.beforeToken + quoted);
         }
     }
     // Mode::Args — no completion for argument values
@@ -940,11 +987,16 @@ static WinHint HintCallback(const std::string& buf, int cursor)
 
     if (p.mode == CallParse::Mode::FuncName && !p.funcPrefix.empty())
     {
+        auto sq = StripFuncQuotes(p.funcPrefix);
+        const std::string& stripped = sq.first;
+        auto op = SplitOwnerPrefix(stripped);
+        const std::string& ownerPart = op.first;
+        const std::string& namePart  = op.second;
         std::vector<const KnownFunction*> matches;
         for (const auto& fn : g_KnownFunctions)
-            if (IStartsWith(fn.name, p.funcPrefix)) matches.push_back(&fn);
+            if (MatchesFunction(fn, ownerPart, namePart)) matches.push_back(&fn);
         if (matches.empty()) return {};
-        return makeNameHint(matches[0]->name, p.funcPrefix.size(),
+        return makeNameHint(matches[0]->name, namePart.size(),
             matches[0]->params, matches[0]->owner, matches.size());
     }
 

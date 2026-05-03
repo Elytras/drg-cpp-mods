@@ -3,8 +3,10 @@
 //                        Also provides VarSystem command implementations
 //                        (deferred from Lib_VarSystem.h due to CommandContext dependency).
 
+#include <algorithm>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -42,6 +44,51 @@ struct MutableContext
     inline const std::string& Arg(size_t i, const std::string& fallback = "") const
     {
         return i < args.size() ? args[i] : fallback;
+    }
+
+    // ── Consume helpers ───────────────────────────────────────────────────
+    // Each method removes the matched element(s) from args in-place so that
+    // subsequent Arg(0)/Arg(1)... accesses see only what's left.
+
+    // Remove every occurrence of `flag` (e.g. "--sweep", "tp").
+    // Returns true if at least one instance was found and removed.
+    bool ConsumeFlag(const std::string& flag)
+    {
+        return std::erase(args, flag) > 0;
+    }
+
+    // Remove `key` and the single value that immediately follows it.
+    // Returns the value string, or nullopt if `key` was not present.
+    // If `key` is found but there is no following token, returns an empty string.
+    std::optional<std::string> ConsumeValue(const std::string& key)
+    {
+        auto it = std::find(args.begin(), args.end(), key);
+        if (it == args.end()) return std::nullopt;
+        auto valIt = std::next(it);
+        std::string val = (valIt != args.end()) ? *valIt : "";
+        args.erase(it, valIt != args.end() ? std::next(valIt) : valIt);
+        return val;
+    }
+
+    // Remove `key` and every token that follows it up to (but not including)
+    // `stopKey`, or up to end-of-args if `stopKey` is empty or not found.
+    // Returns the collected tokens, or nullopt if `key` was not present.
+    //
+    // Example — parse "target <name> dest <name>" in either order:
+    //   auto targetParts = ctx.ConsumeKeyword("target", "dest");
+    //   auto destParts   = ctx.ConsumeKeyword("dest",   "target");
+    std::optional<std::vector<std::string>> ConsumeKeyword(
+        const std::string& key,
+        const std::string& stopKey = "")
+    {
+        auto it = std::find(args.begin(), args.end(), key);
+        if (it == args.end()) return std::nullopt;
+        std::vector<std::string> result;
+        auto next = std::next(it);
+        while (next != args.end() && (stopKey.empty() || *next != stopKey))
+            result.push_back(*next++);
+        args.erase(it, next); // removes key + all collected values
+        return result;
     }
 
     MutableContext(std::vector<std::string>& a) : args(a) {}

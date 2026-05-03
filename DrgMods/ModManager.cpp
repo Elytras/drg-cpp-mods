@@ -1,7 +1,9 @@
 ﻿#include "ModManager.h"
 #include "Commands.h"
 using namespace l;
-static inline const constexpr bool UseThreads = false;
+static inline constexpr     bool UseThreads     = false;
+static inline thread_local  bool bInGameThread  = false;
+
 static bool StartupInfo() {
     // 1. Validate Engine
     auto* engine = SDK::UEngine::GetEngine();
@@ -33,9 +35,8 @@ static bool StartupInfo() {
     return true;
 }
 static void WaitForShutdown(){
-    return;
-    //while (GameHooks::ProcessEventHook::Get().IsInstalled())
-    //    Sleep(1);
+    if (bInGameThread) return;
+    while (GameHooks::ProcessEventHook::Get().IsInstalled()) Sleep(1);
 }
 // =========================================================================
 // Constructor
@@ -74,6 +75,7 @@ void ModManager::LoadMods()
 
 void ModManager::LoadModsGameThread()
 {
+    bInGameThread = true;
     info("----------------------------------------");
     info("[ModManager] Starting initialization...");
     if (!GameHooks::InstallProcessEventHook()) [[unlikely]]
@@ -94,7 +96,7 @@ void ModManager::LoadModsGameThread()
 void ModManager::UnloadMods()
 {
     info("----------------------------------------");
-    info("[ModManager] Unloading...");
+    info("[ModManager] Unloading... ");
     TickSystem::Reset();
     ResetCallbackHandles();
     VarSystem::Clear();

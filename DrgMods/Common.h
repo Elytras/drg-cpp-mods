@@ -67,9 +67,12 @@ constexpr size_t RESPONSE_BUFFER_SIZE = KB(512);  // 512 KB
 //-----------------------------------------------------------------------------
 struct ScannedFunctionInfo
 {
-    char name[MAX_FUNC_NAME];    // e.g. "Server_SetHeadLight"
-    char owner[MAX_FUNC_NAME];   // e.g. "BP_GunnerCharacter_C"
-    char params[MAX_PARAM_STR];  // comma-separated, empty if none
+    char name[MAX_FUNC_NAME];          // e.g. "Server_SetHeadLight"
+    char owner[MAX_FUNC_NAME];         // class name,  e.g. "BP_GunnerCharacter_C"
+    char ownerInstance[MAX_FUNC_NAME]; // object name, e.g. "GunnerCharacter_0"
+    char params[MAX_PARAM_STR];        // comma-separated parameter list, empty if none
+    // Explicit call name is owner + "::" + ownerInstance + "::" + name
+    // and is the key the `call` command uses when a base name is ambiguous.
 };
 
 struct CmdEntry

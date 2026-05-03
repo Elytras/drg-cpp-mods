@@ -22,6 +22,7 @@
 #include "SDK/SDK/FSDEngine_classes.hpp"
 #include "SDK/SDK/Engine_classes.hpp"
 //#include "SDK/SDK/BP_BhaBarnacleWorm_classes.hpp"
+#include "SDK/SDK/BP_PlayerCharacter_classes.hpp"
 #include "SDK/SDK/LIB_Game_classes.hpp"
 #include "SDK/SDK/Engine_parameters.hpp"
 #include "SDK/SDK/BP_LockOnRifle_AoE_classes.hpp"
@@ -47,6 +48,15 @@ using namespace GameHooks;
 using namespace VarSystem;
 
 using ctx = CommandContext;
+
+enum ELocalGameOwnerStatus : uint8 {
+    Default = 0,
+    DLC = 1 << 0,
+    Streamer = 1 << 1,
+    Translator = 1 << 2,
+    Developer = 1 << 3,
+    ModdedHost = 1 << 4,
+};
 // =========================================================================
 // Forward Declarations
 // =========================================================================
@@ -494,6 +504,7 @@ namespace Tickables
     }
 
     void LockPlayers() {
+        if (!GetWorld()) return;
         static const std::vector<std::string> playersToLock = { "29 Phantom" };
         auto Local = GetLocalPlayer();
         if (bool on_rig; ULIB_Game_C::IsOnSpaceRig(GetWorld(), &on_rig), !on_rig) return;
@@ -1276,19 +1287,60 @@ namespace Commands
 
     void BeginPlay(const CommandContext&)
     {
+        enum nullObject : uint8 {
+            World,
+            GameInstance,
+            PlayerController,
+            PlayerState
+        };
         if (State::BeginPlayCallback == 0)
         {
             State::BeginPlayCallback = GameHooks::OnProcessEventByNameAndClass(
                 "ReceiveBeginPlay", SDK::AActor::StaticClass(),
                 [](UObject* object, UFunction*, void*)
                 {
+                    nullObject Error = nullObject::World;
+                    UWorld* World = nullptr;
+                    UFSDGameInstance* Instance = nullptr;
+                    AFSDPlayerController* PC = nullptr;
+                    AFSDPlayerState* PS = nullptr;
                     if (!object || !object->Class) return;
-                    for (const wchar_t* name : { L"Core_C", L"NoVines_C", L"TickManager_C" })
+                    for (const wchar_t* name : { L"Core_C", L"NoVines_C", L"TickManager_C", L"FSDPlayerState" })
                         if (IsChildOfByName(object, name))
                         {
-                            info("[BeginPlay] {} spawned: {}",
-                                object->Class->Name.ToString(), object->Name.ToString());
+                            info("[BeginPlay] {} spawned: {}", object->Class->Name.ToString(), object->Name.ToString());
+                            World = GetTypedOuter<UWorld>(object);
+                            if (!IsValidOf<UWorld>(World)) {
+                                Error = nullObject::World;
+                                goto error;
+                                return;
+                            }
+                            Instance = GameLib::GetFSDGameInstance(World);
+                            if (!IsValidOf<UFSDGameInstance>(Instance)) {
+                                Error = nullObject::GameInstance;
+                                goto error;
+                                return;
+                            }
+                            PC = Instance->GetLocalFSDPlayerController();
+                            if (!IsValidOf<AFSDPlayerController>(PC)) {
+                                Error = nullObject::PlayerController;
+                                goto error;
+                            }
+                            PS = PC->GetFSDPlayerState();
+                            if (!IsValidOf<AFSDPlayerState>(PS)) {
+                                Error = nullObject::PlayerState;
+                                goto error;
+                            }
+                            PS->Server_SetGameOwnerStatus(ELocalGameOwnerStatus::Developer);
                             break;
+                        error:
+                            const char* ErrorType =
+                                Error == nullObject::World ? "World" :
+                                Error == nullObject::GameInstance ? "GameInstance" :
+                                Error == nullObject::PlayerController ? "PlayerController" :
+                                Error == nullObject::PlayerState ? "PlayerState" : "Unknown";
+                            warn("[BeginPlay] failed to set game owner status: {} was null or invalid", ErrorType);
+                            return;
                         }
                 });
             info("[beginplay] Watcher registered");
@@ -1359,7 +1411,15 @@ namespace Commands
                     params = sig.substr(paren + 1);
                     auto close = params.rfind(')');
                     if (close != std::string::npos) params = params.substr(0, close);
-                    for (auto& c : params) if (c == '\n' || c == '\t' || c == '║' || c == ' ') c = ' ';
+                    // Collapse every control character and every non-ASCII byte (including
+                    // all bytes of multi-byte glyphs like the box-drawing ║ U+2551 that
+                    // BuildFuncSig injects into vertical-format signatures) into a space.
+                    // ASCII printable chars (0x20–0x7E) pass through unchanged.
+                    for (auto& c : params)
+                    {
+                        unsigned char uc = (unsigned char)c;
+                        if (uc < 0x20 || uc >= 0x80) c = ' ';
+                    }
                     auto new_end = std::unique(params.begin(), params.end(),
                         [](char a, char b) { return a == ' ' && b == ' '; });
                     params.erase(new_end, params.end());
@@ -1367,7 +1427,8 @@ namespace Commands
                     if (!params.empty() && params.back() == ' ') params.pop_back();
                 }
                 strncpy_s(out.name, fname.c_str(), MAX_FUNC_NAME - 1);
-                strncpy_s(out.owner, owner.c_str(), MAX_FUNC_NAME - 1);
+                strncpy_s(out.owner, owner.c_str(),
+                    MAX_FUNC_NAME - 1);
                 strncpy_s(out.params, params.c_str(), MAX_PARAM_STR - 1);
             };
 
@@ -2010,7 +2071,7 @@ namespace Commands
         const FVector SpawnLoc = Player->K2_GetActorLocation() + Player->GetActorForwardVector() * 400.f;
 
         auto rootJson = std::make_shared<nlohmann::json>();
-        auto entries  = std::make_shared<std::vector<Entry>>();
+        auto entries = std::make_shared<std::vector<Entry>>();
         entries->reserve(classMap.size());
         for (auto& [_, e] : classMap)
             entries->push_back(std::move(e));
@@ -2020,7 +2081,7 @@ namespace Commands
         for (auto& e : *entries) items.push_back(&e);
         items.push_back(nullptr); // sentinel — triggers file write
 
-        auto prevPawn  = std::make_shared<APawn*>(nullptr);
+        auto prevPawn = std::make_shared<APawn*>(nullptr);
         auto prevEntry = std::make_shared<Entry*>(nullptr);
 
         auto delay = std::chrono::milliseconds(static_cast<long long>(delayMs));
@@ -2051,7 +2112,7 @@ namespace Commands
                     }
 
                     (*prevPawn)->K2_DestroyActor();
-                    *prevPawn  = nullptr;
+                    *prevPawn = nullptr;
                     *prevEntry = nullptr;
                 }
 
@@ -2074,12 +2135,81 @@ namespace Commands
 
                 APawn* Pawn = nullptr;
                 SpawnActor<APawn>(current->cls, SpawnTransform, Pawn);
-                *prevPawn  = Pawn;
+                *prevPawn = Pawn;
                 *prevEntry = Pawn ? current : nullptr;
                 if (!Pawn)
                     warn("[spawndump] ({}/{}) Spawn failed: {}", idx, total - 1, current->cls->GetName());
                 return true;
             });
+    }
+
+    void SetPlayerName(const CommandContext& ctx)
+    {
+        if (ctx.ArgCount() < 2) { warn("[cmd:setname] Usage: setname <name>"); return; }
+        auto* Local = GetLocalPlayer();
+        if (IsValidOf<APlayerCharacter>(Local)) return;
+        auto* PS = Cast<AFSDPlayerState>(Local->PlayerState);
+        if (!Kismet::IsValid(PS)) return;
+    }
+
+    void SetOwnerStatus(const CommandContext& ctx)
+    {
+        enum class nullObject : uint8 {
+            World,
+            GameInstance,
+            PlayerController,
+            PlayerState
+        };
+
+        UWorld* World = nullptr;
+        UFSDGameInstance* Instance = nullptr;
+        AFSDPlayerController* PC = nullptr;
+        AFSDPlayerState* PS = nullptr;
+        nullObject Error;
+
+        auto Getter = [](const std::string& ref) -> ELocalGameOwnerStatus {
+            if (ref == "DLC")       return ELocalGameOwnerStatus::DLC;
+            if (ref == "Streamer")  return ELocalGameOwnerStatus::Streamer;
+            if (ref == "Translator") return ELocalGameOwnerStatus::Translator;
+            if (ref == "Dev")       return ELocalGameOwnerStatus::Developer;
+            if (ref == "Modder")    return ELocalGameOwnerStatus::ModdedHost;
+            return ELocalGameOwnerStatus::Default;
+            };
+
+        if (ctx.ArgCount() < 2) { warn("[cmd:setownerstatus] Usage: setownerstatus <status>"); return; }
+
+        World = GetWorld();
+        if (!IsValidOf<UWorld>(World)) {
+            Error = nullObject::World;
+            goto error;
+            return;
+        }
+        Instance = GameLib::GetFSDGameInstance(World);
+        if (!IsValidOf<UFSDGameInstance>(Instance)) {
+            Error = nullObject::GameInstance;
+            goto error;
+            return;
+        }
+        PC = Instance->GetLocalFSDPlayerController();
+        if (!IsValidOf<AFSDPlayerController>(PC)) {
+            Error = nullObject::PlayerController;
+            goto error;
+        }
+        PS = PC->GetFSDPlayerState();
+        if (!IsValidOf<AFSDPlayerState>(PS)) {
+            Error = nullObject::PlayerState;
+            goto error;
+        }
+        PS->Server_SetGameOwnerStatus(Getter(ctx.Arg(1)));
+        return;
+    error:
+        const char* ErrorType =
+            Error == nullObject::World ? "World" :
+            Error == nullObject::GameInstance ? "GameInstance" :
+            Error == nullObject::PlayerController ? "PlayerController" :
+            Error == nullObject::PlayerState ? "PlayerState" : "Unknown";
+        warn("[cmd::status] failed to set game owner status: {} was null or invalid", ErrorType);
+        return;
     }
 
     void DumpDescriptors(const CommandContext&)
@@ -2221,6 +2351,7 @@ void RegisterCommands(CommandHandler& handler)
     handler.Register("infiniteammo", Commands::ToggleInfiniteAmmo, "Player", R"(Toggle infinite ammo for local player)");
     handler.Register("readname", Commands::ReadName, "Player", R"(Read the name of the local player)");
     handler.Register("rename", Commands::Rename, "Player", R"(Rename the local player: rename <new_name>)");
+    handler.Register("setstatus", Commands::SetOwnerStatus, "Player", R"(Set game owner status: setstatus <DLC|Streamer|Translator|Dev|Modder>)");
 
     // System
     handler.Register("beginplay", Commands::BeginPlay, "System", R"(Toggle BeginPlay spawn watcher)");
@@ -2281,7 +2412,7 @@ void InitDefaultCallbacks()
     RegisterBuiltinBindings();
 
     TickSystem::SetTickableFunction_AsIntervalMs(Tickables::DeletePitjaws, 5000L);
-    TickSystem::SetTickableFunction_AsFrequencyHz(Tickables::LockPlayers, 1L);
+    //TickSystem::SetTickableFunction_AsFrequencyHz(Tickables::LockPlayers, 1L);
     //TickSystem::SetTickableFunction_AsFrequencyHz(Tickables::SpawnTwerk,Twerking::GetSpawnTwerkTrailFrequencyHz);
     //TickSystem::SetTickableFunction_AsFrequencyHz(Tickables::FearAura, 2L);
     //TickSystem::SetTickableFunction_AsIntervalMs(Tickables::LokiAbuse, 2500L);

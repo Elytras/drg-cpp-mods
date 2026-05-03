@@ -360,6 +360,15 @@ inline APlayerCharacter* GetLocalPlayer()
     return GameLib::GetLocalPlayerCharacter(GetWorld());
 }
 
+inline AFSDPlayerState* GetLocalPlayerState() 
+{   
+    AFSDPlayerState* OutState = nullptr;
+    UWorld* World = GetWorld();
+
+
+    return OutState;
+}
+
 // =========================================================================
 // Asset registry
 // =========================================================================
