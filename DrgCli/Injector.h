@@ -1,0 +1,667 @@
+#pragma once
+// Injector.h — DLL injection, shared memory, Dumper7, and background watcher threads.
+// Included once by DrgCli.cpp after all globals are declared.
+
+#include <Windows.h>
+#include <TlHelp32.h>
+#include <filesystem>
+
+#include "CliTypes.h"
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Process helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+static DWORD_PTR FindRemoteModuleByName(DWORD pid, const std::wstring& moduleName)
+{
+    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+    if (hSnap == INVALID_HANDLE_VALUE) return 0;
+
+    MODULEENTRY32W entry{ .dwSize = sizeof(entry) };
+    DWORD_PTR result = 0;
+    if (Module32FirstW(hSnap, &entry))
+    {
+        do {
+            if (!_wcsicmp(entry.szModule, moduleName.c_str()))
+            {
+                result = reinterpret_cast<DWORD_PTR>(entry.hModule);
+                break;
+            }
+        } while (Module32NextW(hSnap, &entry));
+    }
+    CloseHandle(hSnap);
+    return result;
+}
+
+static DWORD GetProcId(const wchar_t* procName)
+{
+    DWORD  procId = 0;
+    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnap == INVALID_HANDLE_VALUE) return 0;
+
+    PROCESSENTRY32W entry{ .dwSize = sizeof(entry) };
+    if (Process32FirstW(hSnap, &entry))
+    {
+        do {
+            if (!_wcsicmp(entry.szExeFile, procName))
+            {
+                procId = entry.th32ProcessID;
+                break;
+            }
+        } while (Process32NextW(hSnap, &entry));
+    }
+    CloseHandle(hSnap);
+    return procId;
+}
+
+static bool IsProcessAlive(HANDLE hProcess)
+{
+    if (!hProcess) return false;
+    DWORD exitCode = 0;
+    return GetExitCodeProcess(hProcess, &exitCode) && exitCode == STILL_ACTIVE;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  DLL path helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+static bool SourceDllUpdated()
+{
+    if (g_SourceDllPath.empty()) return false;
+    WIN32_FILE_ATTRIBUTE_DATA info{};
+    if (!GetFileAttributesExW(g_SourceDllPath.c_str(), GetFileExInfoStandard, &info))
+        return false;
+    return CompareFileTime(&info.ftLastWriteTime, &g_LastInjectedTime) > 0;
+}
+
+static bool ResolveDllPaths()
+{
+    wchar_t modulePath[MAX_PATH] = {};
+    GetModuleFileNameW(NULL, modulePath, MAX_PATH);
+    std::filesystem::path exeDir = std::filesystem::path(modulePath).parent_path();
+
+#ifdef _DEBUG
+    constexpr wchar_t kConfig[] = L"Debug";
+#else
+    constexpr wchar_t kConfig[] = L"Release";
+#endif
+
+    wchar_t relBuf[MAX_PATH];
+    std::wstring relPath = std::wstring(L"..\\x64\\") + kConfig + L"\\" + DLL_FILENAME;
+    GetFullPathNameW(relPath.c_str(), MAX_PATH, relBuf, nullptr);
+    std::wstring firstCandidate = relBuf;
+
+    if (GetFileAttributesW(relBuf) != INVALID_FILE_ATTRIBUTES)
+    {
+        g_SourceDllPath = relBuf;
+    }
+    else
+    {
+        std::wstring sideCandidate = (exeDir / DLL_FILENAME).wstring();
+        if (GetFileAttributesW(sideCandidate.c_str()) != INVALID_FILE_ATTRIBUTES)
+        {
+            g_SourceDllPath = sideCandidate;
+        }
+        else
+        {
+            std::wcout << L"[INJ] DLL not found: " << firstCandidate
+                << L" or " << sideCandidate << L"\n";
+            return false;
+        }
+    }
+
+    g_CopyDllPath = (exeDir /
+        (std::filesystem::path(DLL_FILENAME).stem().wstring() + L"_copy.dll")).wstring();
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Debug auto-attach  (Debug builds only)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#ifdef _DEBUG
+static void AttachDebugger(DWORD pid, DWORD timeoutMs = 15000)
+{
+    wchar_t cmdLine[128];
+    swprintf_s(cmdLine, L"vsjitdebugger.exe -p %lu", pid);
+
+    STARTUPINFOW        si{ .cb = sizeof(si) };
+    PROCESS_INFORMATION pi{};
+
+    Log("Debug: launching vsjitdebugger for PID " + std::to_string(pid) + "...");
+
+    if (!CreateProcessW(nullptr, cmdLine, nullptr, nullptr,
+        FALSE, 0, nullptr, nullptr, &si, &pi))
+    {
+        Log("Debug: failed to launch vsjitdebugger (err " +
+            std::to_string(GetLastError()) + ") — continuing without debugger.");
+        return;
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+
+    Log("Debug: waiting for debugger to attach...");
+    DWORD waited = 0;
+    constexpr DWORD kPoll = 200;
+    while (waited < timeoutMs)
+    {
+        Sleep(kPoll);
+        waited += kPoll;
+
+        HANDLE hTmp = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+        if (!hTmp)
+        {
+            Log("Debug: target process disappeared while waiting for debugger.");
+            return;
+        }
+
+        typedef LONG(WINAPI* NtQIP)(HANDLE, UINT, PVOID, ULONG, PULONG);
+        static auto NtQueryInformationProcess =
+            reinterpret_cast<NtQIP>(
+                GetProcAddress(GetModuleHandleW(L"ntdll.dll"),
+                    "NtQueryInformationProcess"));
+
+        bool attached = false;
+        if (NtQueryInformationProcess)
+        {
+            HANDLE debugPort = nullptr;
+            LONG status = NtQueryInformationProcess(hTmp, 7,
+                &debugPort, sizeof(debugPort), nullptr);
+            attached = (status == 0 && debugPort != nullptr);
+        }
+        CloseHandle(hTmp);
+
+        if (attached)
+        {
+            Log("Debug: debugger attached successfully.");
+            return;
+        }
+    }
+    Log("Debug: timed out waiting for debugger — continuing anyway.");
+}
+#endif // _DEBUG
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Shared memory  (created here; DLL opens/maps the same named objects)
+// ─────────────────────────────────────────────────────────────────────────────
+
+static bool InitSharedMemory()
+{
+    g_hLogEvent = CreateEventW(NULL, FALSE, FALSE, EVENT_LOG_READY);
+    g_hCmdEvent = CreateEventW(NULL, FALSE, FALSE, EVENT_CMD_READY);
+    g_hShutdownEvent = CreateEventW(NULL, TRUE, FALSE, EVENT_SHUTDOWN);
+
+    if (!g_hLogEvent || !g_hCmdEvent || !g_hShutdownEvent)
+    {
+        Log("Failed to create events (err " + std::to_string(GetLastError()) + ")");
+        return false;
+    }
+
+    // Log buffer (DLL → host)
+    g_hLogMapping = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
+        0, sizeof(LogBuffer), SHMEM_LOGS);
+    if (!g_hLogMapping) { Log("Failed to create log mapping"); return false; }
+    bool logNew = (GetLastError() != ERROR_ALREADY_EXISTS);
+    g_pLogBuffer = static_cast<LogBuffer*>(MapViewOfFile(g_hLogMapping, FILE_MAP_ALL_ACCESS, 0, 0, 0));
+    if (!g_pLogBuffer) { Log("Failed to map log buffer"); return false; }
+    if (logNew) new (g_pLogBuffer) LogBuffer();
+
+    // Command buffer (host → DLL)
+    g_hCmdMapping = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
+        0, sizeof(CommandBuffer), SHMEM_CMD);
+    if (!g_hCmdMapping) { Log("Failed to create command mapping"); return false; }
+    bool cmdNew = (GetLastError() != ERROR_ALREADY_EXISTS);
+    g_pCmdBuffer = static_cast<CommandBuffer*>(MapViewOfFile(g_hCmdMapping, FILE_MAP_ALL_ACCESS, 0, 0, 0));
+    if (!g_pCmdBuffer) { Log("Failed to map command buffer"); return false; }
+    if (cmdNew) new (g_pCmdBuffer) CommandBuffer();
+
+    // Response buffer (DLL → CLI)
+    g_hRespEvent = CreateEventW(NULL, TRUE, FALSE, EVENT_RESP_READY);
+    if (!g_hRespEvent) { Log("Failed to create response event"); return false; }
+    g_hRespMapping = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
+        0, sizeof(ResponseBuffer), SHMEM_RESPONSE);
+    if (!g_hRespMapping) { Log("Failed to create response mapping"); return false; }
+    bool respNew = (GetLastError() != ERROR_ALREADY_EXISTS);
+    g_pRespBuffer = static_cast<ResponseBuffer*>(MapViewOfFile(g_hRespMapping, FILE_MAP_ALL_ACCESS, 0, 0, 0));
+    if (!g_pRespBuffer) { Log("Failed to map response buffer"); return false; }
+    if (respNew) new (g_pRespBuffer) ResponseBuffer();
+
+    return true;
+}
+
+static void CleanupSharedMemory()
+{
+    if (g_pLogBuffer)  UnmapViewOfFile(g_pLogBuffer);
+    if (g_pCmdBuffer)  UnmapViewOfFile(g_pCmdBuffer);
+    if (g_pRespBuffer) UnmapViewOfFile(g_pRespBuffer);
+
+    if (g_hLogMapping)    CloseHandle(g_hLogMapping);
+    if (g_hCmdMapping)    CloseHandle(g_hCmdMapping);
+    if (g_hRespMapping)   CloseHandle(g_hRespMapping);
+    if (g_hLogEvent)      CloseHandle(g_hLogEvent);
+    if (g_hCmdEvent)      CloseHandle(g_hCmdEvent);
+    if (g_hShutdownEvent) CloseHandle(g_hShutdownEvent);
+    if (g_hRespEvent)     CloseHandle(g_hRespEvent);
+
+    g_pLogBuffer = nullptr;
+    g_pCmdBuffer = nullptr;
+    g_pRespBuffer = nullptr;
+
+    g_hLogMapping = NULL;
+    g_hCmdMapping = NULL;
+    g_hRespMapping = NULL;
+    g_hLogEvent = NULL;
+    g_hCmdEvent = NULL;
+    g_hShutdownEvent = NULL;
+    g_hRespEvent = NULL;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Inject / Unload
+// ─────────────────────────────────────────────────────────────────────────────
+
+static bool InjectDLL()
+{
+    std::lock_guard<std::mutex> lock(g_InjectionMutex);
+    if (DllActive()) return true;
+    if (!ResolveDllPaths()) return false;
+
+    DWORD pid = GetProcId(TARGET_PROCESS);
+    if (pid)
+    {
+        std::wstring copyFilename = std::filesystem::path(g_CopyDllPath).filename().wstring();
+        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+        if (hSnap != INVALID_HANDLE_VALUE)
+        {
+            MODULEENTRY32W entry{ .dwSize = sizeof(entry) };
+            if (Module32FirstW(hSnap, &entry))
+            {
+                do {
+                    if (!_wcsicmp(entry.szModule, copyFilename.c_str()))
+                    {
+                        Log("InjectDLL: DLL already mapped in target — adopting existing instance.");
+                        g_hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+                        g_InjState.store(InjectionState::Active);
+                        CloseHandle(hSnap);
+                        return true;
+                    }
+                } while (Module32NextW(hSnap, &entry));
+            }
+            CloseHandle(hSnap);
+        }
+    }
+
+    if (g_Dumper7Loaded.load())
+    {
+        DWORD pidCheck = GetProcId(TARGET_PROCESS);
+        if (pidCheck)
+        {
+            std::wstring dumperName = std::filesystem::path(kDumper7Path).filename().wstring();
+            if (FindRemoteModuleByName(pidCheck, dumperName))
+            {
+                Log("InjectDLL: aborting — Dumper7 is attached (unsafe to inject alongside it).");
+                return false;
+            }
+            g_Dumper7Loaded.store(false);
+        }
+    }
+
+    bool copied = false;
+    for (int i = 0; i < 10; ++i)
+    {
+        if (CopyFileW(g_SourceDllPath.c_str(), g_CopyDllPath.c_str(), FALSE))
+        {
+            copied = true;
+            break;
+        }
+        if (GetLastError() != ERROR_SHARING_VIOLATION) break;
+        Log("DLL copy locked, retrying... (" + std::to_string(i + 1) + "/10)");
+        Sleep(500);
+    }
+    if (!copied) { Log("Failed to copy DLL (err " + std::to_string(GetLastError()) + ")"); return false; }
+
+    WIN32_FILE_ATTRIBUTE_DATA info{};
+    if (GetFileAttributesExW(g_SourceDllPath.c_str(), GetFileExInfoStandard, &info))
+        g_LastInjectedTime = info.ftLastWriteTime;
+
+    pid = GetProcId(TARGET_PROCESS);
+    if (!pid) { Log("Target process not found."); return false; }
+
+#ifdef _DEBUG
+    AttachDebugger(pid);
+#endif
+
+    g_hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+    if (!g_hProcess) { Log("Failed to open process. Run as Administrator."); return false; }
+
+    void* loc = VirtualAllocEx(g_hProcess, nullptr,
+        (g_CopyDllPath.size() + 1) * sizeof(wchar_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!loc)
+    {
+        Log("Memory allocation failed.");
+        CloseHandle(g_hProcess); g_hProcess = NULL;
+        return false;
+    }
+
+    WriteProcessMemory(g_hProcess, loc, g_CopyDllPath.c_str(),
+        (g_CopyDllPath.size() + 1) * sizeof(wchar_t), nullptr);
+
+    HANDLE hThread = CreateRemoteThread(g_hProcess, nullptr, 0,
+        reinterpret_cast<LPTHREAD_START_ROUTINE>(LoadLibraryW), loc, 0, nullptr);
+    if (!hThread)
+    {
+        Log("CreateRemoteThread failed.");
+        VirtualFreeEx(g_hProcess, loc, 0, MEM_RELEASE);
+        CloseHandle(g_hProcess); g_hProcess = NULL;
+        return false;
+    }
+
+    WaitForSingleObject(hThread, INFINITE);
+    DWORD exitCode = 0;
+    GetExitCodeThread(hThread, &exitCode);
+    CloseHandle(hThread);
+    VirtualFreeEx(g_hProcess, loc, 0, MEM_RELEASE);
+
+    if (exitCode == 0)
+    {
+        Log("LoadLibraryW returned NULL — injection failed.");
+        CloseHandle(g_hProcess); g_hProcess = NULL;
+        return false;
+    }
+
+    g_InjState.store(InjectionState::Active);
+    Log("DLL injected successfully.");
+    return true;
+}
+
+// suppress=true  → called by explicit "unload"; watcher goes Suppressed
+// suppress=false → called internally (hot-reload, crash recovery); watcher stays Watching
+static void UnloadDLL(bool suppress = false)
+{
+    std::lock_guard<std::mutex> lock(g_InjectionMutex);
+    if (!DllActive()) { Log("UnloadDLL: not active, skipping."); return; }
+    if (!g_hProcess) { Log("UnloadDLL: no process handle.");   return; }
+
+    if (!IsProcessAlive(g_hProcess))
+    {
+        Log("UnloadDLL: target process is no longer running.");
+        CloseHandle(g_hProcess); g_hProcess = NULL;
+        g_InjState.store(suppress ? InjectionState::Suppressed : InjectionState::Watching);
+        return;
+    }
+
+    if (!g_hShutdownEvent)
+    {
+        Log("UnloadDLL: shutdown event handle is NULL.");
+    }
+    else
+    {
+        Log("UnloadDLL: signaling shutdown...");
+        SetEvent(g_hShutdownEvent);
+
+        HANDLE hDone = OpenEventW(SYNCHRONIZE, FALSE, EVENT_SHUTDOWN_DONE);
+        if (hDone)
+        {
+            DWORD w = WaitForSingleObject(hDone, 5000);
+            if (w == WAIT_OBJECT_0)     Log("UnloadDLL: DLL cleanup complete.");
+            else if (w == WAIT_TIMEOUT) Log("UnloadDLL: timed out waiting for DLL cleanup.");
+            else                        Log("UnloadDLL: wait failed: " + std::to_string(GetLastError()));
+            CloseHandle(hDone);
+        }
+        else
+        {
+            Log("UnloadDLL: could not open done event (err " +
+                std::to_string(GetLastError()) + "), waiting 2s as fallback.");
+            Sleep(2000);
+        }
+        ResetEvent(g_hShutdownEvent);
+    }
+
+    DWORD pid = GetProcId(TARGET_PROCESS);
+    if (!pid)
+    {
+        Log("UnloadDLL: could not find PID.");
+        CloseHandle(g_hProcess); g_hProcess = NULL;
+        g_InjState.store(suppress ? InjectionState::Suppressed : InjectionState::Watching);
+        return;
+    }
+
+    std::wstring copyFilename = std::filesystem::path(g_CopyDllPath).filename().wstring();
+    HMODULE      hRemoteModule = NULL;
+    HANDLE       hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+
+    if (hSnap != INVALID_HANDLE_VALUE)
+    {
+        MODULEENTRY32W entry{ .dwSize = sizeof(entry) };
+        if (Module32FirstW(hSnap, &entry))
+        {
+            do {
+                if (!_wcsicmp(entry.szModule, copyFilename.c_str()))
+                {
+                    hRemoteModule = entry.hModule;
+                    break;
+                }
+            } while (Module32NextW(hSnap, &entry));
+        }
+        CloseHandle(hSnap);
+    }
+
+    if (!hRemoteModule)
+    {
+        Log("UnloadDLL: DLL copy not found in target — already unloaded?");
+        CloseHandle(g_hProcess); g_hProcess = NULL;
+        g_InjState.store(suppress ? InjectionState::Suppressed : InjectionState::Watching);
+        return;
+    }
+
+    HANDLE hThread = CreateRemoteThread(g_hProcess, nullptr, 0,
+        reinterpret_cast<LPTHREAD_START_ROUTINE>(FreeLibrary),
+        hRemoteModule, 0, nullptr);
+
+    if (!hThread)
+    {
+        Log("UnloadDLL: CreateRemoteThread failed: " + std::to_string(GetLastError()));
+    }
+    else
+    {
+        DWORD w = WaitForSingleObject(hThread, 5000);
+        if (w == WAIT_OBJECT_0)
+        {
+            DWORD ec = 0;
+            GetExitCodeThread(hThread, &ec);
+            Log(ec ? "UnloadDLL: FreeLibrary succeeded." : "UnloadDLL: FreeLibrary returned FALSE.");
+        }
+        else if (w == WAIT_TIMEOUT)
+        {
+            Log("UnloadDLL: FreeLibrary thread timed out.");
+        }
+        CloseHandle(hThread);
+    }
+
+    CloseHandle(g_hProcess); g_hProcess = NULL;
+    g_InjState.store(suppress ? InjectionState::Suppressed : InjectionState::Watching);
+    Log("UnloadDLL: complete.");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Dumper7 attachment
+// ─────────────────────────────────────────────────────────────────────────────
+
+static bool LoadDumper7()
+{
+    std::lock_guard<std::mutex> lock(g_InjectionMutex);
+
+    DWORD pid = GetProcId(TARGET_PROCESS);
+    if (!pid) { Log("Dumper7: target process not found."); return false; }
+
+    std::wstring dumperName = std::filesystem::path(kDumper7Path).filename().wstring();
+    if (g_Dumper7Loaded.load())
+    {
+        if (FindRemoteModuleByName(pid, dumperName))
+        {
+            Log("Dumper7: already marked as loaded.");
+            return true;
+        }
+        Log("Dumper7: marked as loaded but not found in target; correcting state.");
+        g_Dumper7Loaded.store(false);
+    }
+
+    if (!g_CopyDllPath.empty())
+    {
+        std::wstring usualName = std::filesystem::path(g_CopyDllPath).filename().wstring();
+        if (FindRemoteModuleByName(pid, usualName))
+        {
+            Log("Dumper7: aborting — usual DLL is present in target.");
+            return false;
+        }
+    }
+
+    if (FindRemoteModuleByName(pid, dumperName))
+    {
+        g_Dumper7Loaded.store(true);
+        Log("Dumper7: already present in target; marked as loaded.");
+        return true;
+    }
+
+    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+    if (!hProcess) { Log("Dumper7: OpenProcess failed."); return false; }
+
+    size_t sizeBytes = (wcslen(kDumper7Path) + 1) * sizeof(wchar_t);
+    void* remoteBuf = VirtualAllocEx(hProcess, nullptr, sizeBytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!remoteBuf)
+    {
+        Log("Dumper7: VirtualAllocEx failed.");
+        CloseHandle(hProcess);
+        return false;
+    }
+
+    if (!WriteProcessMemory(hProcess, remoteBuf, kDumper7Path, static_cast<SIZE_T>(sizeBytes), nullptr))
+    {
+        Log("Dumper7: WriteProcessMemory failed.");
+        VirtualFreeEx(hProcess, remoteBuf, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        return false;
+    }
+
+    HANDLE hThread = CreateRemoteThread(hProcess, nullptr, 0,
+        reinterpret_cast<LPTHREAD_START_ROUTINE>(LoadLibraryW), remoteBuf, 0, nullptr);
+    if (!hThread)
+    {
+        Log("Dumper7: CreateRemoteThread failed.");
+        VirtualFreeEx(hProcess, remoteBuf, 0, MEM_RELEASE);
+        CloseHandle(hProcess);
+        return false;
+    }
+
+    WaitForSingleObject(hThread, 5000);
+    DWORD exitCode = 0;
+    GetExitCodeThread(hThread, &exitCode);
+    CloseHandle(hThread);
+    VirtualFreeEx(hProcess, remoteBuf, 0, MEM_RELEASE);
+    CloseHandle(hProcess);
+
+    if (exitCode == 0) { Log("Dumper7: LoadLibraryW returned NULL — load failed."); return false; }
+
+    g_Dumper7Loaded.store(true);
+    Log("Dumper7: loaded (attach-and-forget).");
+    return true;
+}
+
+static bool UnloadDumper7()
+{
+    Log("Dumper7: external unload disabled — press F6 in-game to unload.");
+    return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Background threads
+// ─────────────────────────────────────────────────────────────────────────────
+
+static void DllLogThread(LogBuffer* pLog, HANDLE hLogEvent)
+{
+    uint32_t myReadPos = pLog->writePos.load(std::memory_order_acquire);
+    char lineBuf[1024];
+    size_t linePos = 0;
+
+    while (g_Running)
+    {
+        WaitForSingleObject(hLogEvent, 100);
+
+        while (true)
+        {
+            uint32_t writePos = pLog->writePos.load(std::memory_order_acquire);
+            if (myReadPos == writePos) break;
+
+            char c = pLog->data[myReadPos % LOG_BUFFER_SIZE];
+            ++myReadPos;
+
+            if (c == '\n' || linePos >= sizeof(lineBuf) - 1)
+            {
+                lineBuf[linePos] = '\0';
+                if (linePos > 0 && g_pSplit)
+                    g_pSplit->PrintLog(std::string("[DLL] ") + lineBuf);
+                linePos = 0;
+            }
+            else
+            {
+                lineBuf[linePos++] = c;
+            }
+        }
+    }
+}
+
+static void HotReloadThread()
+{
+    while (g_Running)
+    {
+        Sleep(kWatchPollMs);
+        if (!DllActive() || g_SourceDllPath.empty()) continue;
+
+        if (SourceDllUpdated())
+        {
+            Log("HotReload: newer DLL detected, reloading...");
+            UnloadDLL(false);
+            Sleep(300);
+            InjectDLL();
+        }
+    }
+}
+
+static void ProcessWatcherThread()
+{
+    while (g_Running)
+    {
+        Sleep(kWatchPollMs);
+
+        InjectionState state = g_InjState.load();
+
+        if (state == InjectionState::Suppressed) continue;
+
+        if (state == InjectionState::Active)
+        {
+            if (!IsProcessAlive(g_hProcess))
+            {
+                Log("ProcessWatcher: target process exited unexpectedly — waiting for relaunch...");
+                if (g_hProcess) { CloseHandle(g_hProcess); g_hProcess = NULL; }
+                g_InjState.store(InjectionState::Watching);
+                kWatchPollMs = 50;
+                Log("NewDelay: " + std::to_string(kWatchPollMs) + " ms");
+            }
+            continue;
+        }
+
+        // Watching: look for target and inject
+        DWORD pid = GetProcId(TARGET_PROCESS);
+        if (!pid) continue;
+
+        Log("ProcessWatcher: target process found (PID " + std::to_string(pid) + "), injecting...");
+        if (InjectDLL())
+        {
+            kWatchPollMs = 1000;
+            Log("ProcessWatcher: auto-inject succeeded.");
+            Log("NewDelay: " + std::to_string(kWatchPollMs) + " ms");
+        }
+        else
+            Log("ProcessWatcher: inject failed, will retry...");
+    }
+}

@@ -69,7 +69,7 @@ namespace VarSystem
             std::vector<APlayerCharacter*> validPlayers;
             for (auto p : Players) if (p && p != GetLocalPlayer()) validPlayers.push_back(p);
             if (validPlayers.empty()) return BindObject(nullptr);
-            srand(time(nullptr)); 
+            srand(static_cast<uint32>(time(nullptr)));
             APlayerCharacter* randomPlayer = validPlayers[rand() % validPlayers.size()];
             return BindObject(reinterpret_cast<UObject*>(randomPlayer));
             });

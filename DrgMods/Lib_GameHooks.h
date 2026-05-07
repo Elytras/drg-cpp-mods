@@ -1,5 +1,5 @@
 #pragma once
-// Lib_GameHooks.h — ProcessEventHook and GameHooks convenience API.
+// Lib_GameHooks.h ï¿½ ProcessEventHook and GameHooks convenience API.
 
 #include <atomic>
 #include <cassert>
@@ -117,6 +117,8 @@ namespace GameHooks
             }
         };
 
+        static constexpr size_t               kMaxDispatchBuf = 32;
+
         static ProcessEventHook* instance;
         static void(*OriginalProcessEvent)(UObject*, UFunction*, void*);
         static inline std::atomic<int>        executionDepth_{ 0 };
@@ -211,9 +213,12 @@ namespace GameHooks
             UObject* Object, UFunction* Function, void* Parms)
         {
             DBG_CHECK_PTR(Object);
-            DBG_CHECK_RANGE(count, 0, 32);
+            DBG_CHECK_RANGE(count, 0, kMaxDispatchBuf);
 
             bool ok = true;
+            bool skipFired = false;
+            int  callOriginalRan = 0;
+
             for (size_t n = 0; n < count; ++n)
             {
                 DBG_CHECK_RANGE(idx[n], 0, list.size());
@@ -234,9 +239,16 @@ namespace GameHooks
                 {
                     DBG_ASSERT(false, "Callback threw exception");
                 }
-                
-                if (e.mode == ExecutionMode::SkipOriginal) ok = false;
+
+                if (e.mode == ExecutionMode::SkipOriginal) { ok = false; skipFired = true; }
+                else                                         ++callOriginalRan;
             }
+
+            if (skipFired && callOriginalRan > 0)
+                spdlog::warn("[GameHooks] SkipOriginal suppressed the original for {} CallOriginal callback(s) on the same event (function: '{}')",
+                    callOriginalRan,
+                    Function && !Function->Name.IsNone() ? Function->Name.ToString() : "<unknown>");
+
             return ok;
         }
 
@@ -244,7 +256,7 @@ namespace GameHooks
             UObject* Object, UFunction* Function, void* Parms)
         {
             DBG_CHECK_PTR(Object);
-            DBG_CHECK_RANGE(count, 0, 32);
+            DBG_CHECK_RANGE(count, 0, kMaxDispatchBuf);
 
             for (size_t n = 0; n < count; ++n)
             {
@@ -271,6 +283,8 @@ namespace GameHooks
 
         static void __fastcall HookedProcessEvent(UObject* Object, UFunction* Function, void* Parms)
         {
+            if (!OriginalProcessEvent) return;
+
             DBG_CHECK_PTR(Object);
             // Function can be null in some cases, don't assert
 
@@ -315,11 +329,11 @@ namespace GameHooks
 
                 if (!state->list.empty())
                 {
-                    size_t buf[32]; 
+                    size_t buf[kMaxDispatchBuf];
                     size_t cnt = 0;
-                    auto push = [&](size_t i) 
-                    { 
-                        if (cnt < 32) 
+                    auto push = [&](size_t i)
+                    {
+                        if (cnt < kMaxDispatchBuf)
                         {
                             DBG_CHECK_RANGE(i, 0, state->list.size());
                             buf[cnt++] = i; 
@@ -348,9 +362,10 @@ namespace GameHooks
                     for (size_t i : state->cache.wildcards) push(i);
 
                     bool callOriginal = RunBeforePass(state->list, buf, cnt, Object, Function, Parms);
-                    
-                    if (callOriginal && OriginalProcessEvent)
+
+                    if (callOriginal)
                     {
+                        __assume(OriginalProcessEvent != nullptr);
                         try
                         {
                             OriginalProcessEvent(Object, Function, Parms);
@@ -364,8 +379,9 @@ namespace GameHooks
                     RunAfterPass(state->list, buf, cnt, Object, Function, Parms);
                 }
             }
-            else if (OriginalProcessEvent)
+            else
             {
+                __assume(OriginalProcessEvent != nullptr);
                 try
                 {
                     OriginalProcessEvent(Object, Function, Parms);

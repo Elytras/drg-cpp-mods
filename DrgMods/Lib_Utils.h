@@ -118,8 +118,8 @@ template<typename T, typename... Ts> bool AnyOf(T c, Ts... ts) { return ((c == t
 // String / FString
 // =========================================================================
 
-inline std::wstring ToWide(const std::string& in) { return UtfN::StringToWString(in); }
-inline FString      ToFString(const std::string& str) { return FString(UtfN::StringToWString(str).c_str()); }
+inline std::wstring ToWide(std::string_view in) { return StringLib::ToWide(in); }
+inline FString      ToFString(std::string_view str) { return FString(ToWide(str).c_str()); }
 
 // =========================================================================
 // Core helpers (definitions for forward decls in Lib_Forward.h)
@@ -148,7 +148,7 @@ inline uint64_t GetTimeMs()
 
 inline void Exec(std::string cmd)
 {
-    Kismet::ExecuteConsoleCommand(GetWorld(), FString(UtfN::StringToWString(cmd).c_str()), nullptr);
+    Kismet::ExecuteConsoleCommand(GetWorld(), FString(StringLib::ToWide(cmd).c_str()), nullptr);
 }
 
 // =========================================================================
@@ -213,25 +213,10 @@ inline AActorType* GetActorOfClass(UClass* Class)
         return nullptr;
     }
 
-    UObject* Base = GetWorld();
-    if (!Base)
+    for (AActor* Object : GObjectsOf<AActor>())
     {
-        spdlog::warn("GetActorOfClass: Invalid world");
-        return nullptr;
-    }
-
-    for (int i = 0; i < Base->GObjects->Num(); ++i)
-    {
-        UObject* Object = Base->GObjects->GetByIndex(i);
-        if (!Object) continue;
-
-        if (Object->HasTypeFlag(EClassCastFlags::Actor) &&
-            IsValidOf<AActor>(Object) &&
-            (Object->Class->IsSubclassOf(Class) || Object->Class->IsA(Class)) &&
-            !Object->IsDefaultObject())
-        {
+        if ((Object->Class->IsSubclassOf(Class) || Object->Class->IsA(Class)) && !Object->IsDefaultObject())
             return static_cast<AActorType*>(Object);
-        }
     }
 
     spdlog::warn("GetActorOfClass: No actor of class {} found", Class->StaticName().ToString());
@@ -345,16 +330,6 @@ inline APlayerCharacter* GetLocalPlayerCharacterBlocking(uint64_t MaxWaitMs)
     return Player;
 }
 
-inline APlayerCharacter* GetLocalPlayerCharacterImmediate()
-{
-    UWorld* World = GetWorld();
-    if (!IsValid(World)) return nullptr;
-    APlayerCharacter* Player = GameLib::GetLocalPlayerCharacter(World);
-    if (Player && IsValid(Player) && MathLib::ClassIsChildOf(Player->Class, Player->StaticClass()))
-        return Player;
-    return nullptr;
-}
-
 inline APlayerCharacter* GetLocalPlayer()
 {
     return GameLib::GetLocalPlayerCharacter(GetWorld());
@@ -401,37 +376,71 @@ inline AFSDPlayerState* GetLocalPlayerState()
 //}
 
 namespace {
-    inline UClass* FindClass(const std::string& name)
+    inline UClass* FindClass(std::string_view name)
     {
-        FName needle(ToWide(name).c_str());
-        for (int i = 0; i < UObject::GObjects->Num(); ++i)
-        {
-            auto* obj = UObject::GObjects->GetByIndex(i);
-            if (!obj || !obj->IsA(UClass::StaticClass())) continue;
-            if (obj->Name == needle) return static_cast<UClass*>(obj);
-        }
+        const FName needle(ToWide(name).c_str());
+        for (UClass* cls : GObjectsOf<UClass>())
+            if (cls->Name == needle) return cls;
         return nullptr;
     }
 }
 
-inline AActor* SpawnActorWithTickrate(int)
+
+// =========================================================================
+// Pattern scanner
+// =========================================================================
+
+// Scans all executable sections of a loaded module for a byte pattern.
+// Pattern format: space-separated hex bytes, "??" = wildcard.
+// Returns the address of the first match, or nullptr.
+inline void* FindPattern(const wchar_t* moduleName, std::string_view pattern)
 {
-    static UClass* TickManagerClass = nullptr;
-    if (!TickManagerClass || !Kismet::IsValidClass(TickManagerClass) || TickManagerClass->Name != FName(L"TickManager_C"))
-        TickManagerClass = FindClass("TickManager_C");
+    HMODULE mod = GetModuleHandleW(moduleName);
+    if (!mod) return nullptr;
 
-    if (!TickManagerClass || !Kismet::IsValidClass(TickManagerClass) || TickManagerClass->Name != FName(L"TickManager_C"))
-        return nullptr;
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(mod);
+    auto* nt  = reinterpret_cast<IMAGE_NT_HEADERS64*>(
+        reinterpret_cast<uint8_t*>(mod) + dos->e_lfanew);
 
-    static FTransform SpawnTransform{};
-    AActor* OutActor = UGameplayStatics::BeginDeferredActorSpawnFromClass(
-        GetWorld(), TickManagerClass, SpawnTransform,
-        ESpawnActorCollisionHandlingMethod::AlwaysSpawn, nullptr);
+    std::vector<uint8_t> pat;
+    std::vector<bool>    mask;
+    const char* s = pattern.data();
+    const char* e = s + pattern.size();
+    while (s < e)
+    {
+        while (s < e && *s == ' ') ++s;
+        if (s >= e) break;
+        if (s[0] == '?' && s + 1 < e && s[1] == '?')
+        {
+            pat.push_back(0x00); mask.push_back(false); s += 2;
+        }
+        else
+        {
+            char hex[3] = { s[0], s[1], '\0' };
+            pat.push_back(static_cast<uint8_t>(std::strtoul(hex, nullptr, 16)));
+            mask.push_back(true);
+            s += 2;
+        }
+    }
 
-    if (!OutActor) return nullptr;
-    OutActor = UGameplayStatics::FinishSpawningActor(OutActor, SpawnTransform);
-    UObjectVCalls::Rename::Call(OutActor, L"TickManager", nullptr, REN::ForceGlobalUnique);
-    return OutActor;
+    const size_t len = pat.size();
+    auto* sec = IMAGE_FIRST_SECTION(nt);
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++sec)
+    {
+        if (!(sec->Characteristics & (IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_CNT_CODE)))
+            continue;
+
+        const uint8_t* begin = reinterpret_cast<uint8_t*>(mod) + sec->VirtualAddress;
+        const uint8_t* last  = begin + sec->Misc.VirtualSize - len;
+        for (const uint8_t* p = begin; p <= last; ++p)
+        {
+            bool match = true;
+            for (size_t j = 0; j < len && match; ++j)
+                if (mask[j] && p[j] != pat[j]) match = false;
+            if (match) return const_cast<uint8_t*>(p);
+        }
+    }
+    return nullptr;
 }
 
 inline bool NearlyEqual(double a, double b, double epsilon = 1e-9) {

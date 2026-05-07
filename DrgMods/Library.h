@@ -65,6 +65,7 @@ struct std::hash<SDK::FName>
 #include "Lib_ObjectCast.h"         // ObjectCast, class flags, IsValidRaw
 #include "Lib_PropertyAccess.h"     // GetPropertyPtr, ReadBool/WriteBool, GetTypeName
 #include "Lib_Utils.h"              // SubclassCache, safe parsers, GetLocalPlayer, etc.
+#include "Lib_ObjectFactory.h"      // EInternalObjectFlags, FStaticConstructObjectParameters, NewObject<T>
 #include "Lib_Print.h"              // PrintFieldValue, DumpItemProperties, Detail
 #include "Lib_EasyHook.h"           // MinHook wrapper
 #include "Lib_VTableHook.h"         // VTableHook class

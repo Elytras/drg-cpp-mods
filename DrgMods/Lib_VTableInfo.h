@@ -113,7 +113,7 @@ namespace VTableLayout
         using FGetFunctionCallspace = int32(UObject*, UFunction*, void* /* FFrame* */);
         using FCallRemoteFunction = bool(UObject*, UFunction*, void*, void* /* FOutParmRec* */, void* /* FFrame* */);
         using FProcessConsoleExec = bool(UObject*, const TCHAR*, void* /* FOutputDevice& */, UObject*);
-        using FRegenerateClass = UClass * (UObject*, UClass*, UObject*);
+        using FRegenerateClass = UClass*(UObject*, UClass*, UObject*);
         using FMarkAsEditorOnlySubobject = void(UObject*);
         using FCheckDefaultSubobjectsInternal = bool(const UObject*);
         using FValidateGeneratedRepEnums = void(const UObject*, const void* /* TArray<FRepRecord>& */);

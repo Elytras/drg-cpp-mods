@@ -119,5 +119,17 @@
     <ClInclude Include="Lib_VTableHook.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
+    <ClInclude Include="UnrealCoreTypes.h">
+      <Filter>Header Files\Shared</Filter>
+    </ClInclude>
+    <ClInclude Include="SDK\UnrealContainers.hpp">
+      <Filter>Header Files\SDK Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="SDK\SDK\Basic.hpp">
+      <Filter>Header Files\SDK Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_ObjectFactory.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

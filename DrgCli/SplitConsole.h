@@ -25,9 +25,9 @@
 
 class SplitConsole
 {
-    static constexpr int kCliH   = 3;    // fixed CLI output rows (excluding prompt row)
-    static constexpr int kLogMax = 2000; // log history ring size
-    static constexpr int kCmdMax = 200;  // CLI history ring size
+    static constexpr unsigned long long kCliH   = 3;    // fixed CLI output rows (excluding prompt row)
+    static constexpr unsigned long long kLogMax = 1<<31; // log history ring size
+    static constexpr unsigned long long kCmdMax = 200;  // CLI history ring size
 
 public:
     SplitConsole()

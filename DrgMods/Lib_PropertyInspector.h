@@ -306,7 +306,7 @@ namespace PropertyInspector
             }
             else if constexpr (std::is_same_v<T, FNameProperty>)
             {
-                new (GetPropertyPtr<FName>(base, p->Offset)) FName(BFIU::StringToName(UtfN::StringToWString(token).c_str())); handled = true;
+                new (GetPropertyPtr<FName>(base, p->Offset)) FName((StringLib::ToWide(token).c_str())); handled = true;
             }
             else if constexpr (std::is_same_v<T, FStructProperty>)
             {

@@ -131,7 +131,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions);FMT_HEADER_ONLY;NOMINMAX;WIN32_LEAN_AND_MEAN;</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions);FMT_HEADER_ONLY;NOMINMAX;WIN32_LEAN_AND_MEAN;USEOWNIMPL=0</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpplatest</LanguageStandard>
@@ -175,6 +175,7 @@
     <ClInclude Include="Lib_CommandHandler.h" />
     <ClInclude Include="Lib_EasyHook.h" />
     <ClInclude Include="Lib_GameHooks.h" />
+    <ClInclude Include="Lib_ObjectFactory.h" />
     <ClInclude Include="Lib_PropertyInspector.h" />
     <ClInclude Include="Lib_Utils.h" />
     <ClInclude Include="Lib_Print.h" />
@@ -187,8 +188,11 @@
     <ClInclude Include="Lib_VTableHook.h" />
     <ClInclude Include="Lib_VTableInfo.h" />
     <ClInclude Include="ModManager.h" />
+    <ClInclude Include="SDK\SDK\Basic.hpp" />
     <ClInclude Include="SDK\SDK\FSD_classes.hpp" />
+    <ClInclude Include="SDK\UnrealContainers.hpp" />
     <ClInclude Include="StringLib.h" />
+    <ClInclude Include="UnrealCoreTypes.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -1,7 +1,6 @@
 #pragma once
 // Lib_ObjectCast.h � UObject cast system, class flag helpers, IsValidRaw.
 
-#include <cassert>
 #include "Lib_Forward.h"
 
 namespace ObjectCast

@@ -18,7 +18,7 @@ template <typename T>
 using StringTraits = typename T::value_type::traits_type;
 
 template<class Container>
-    requires std::convertible_to<
+    requires std::same_as<
         typename Container::value_type,
             std::basic_string<StringElem<Container>, StringTraits<Container>>
     >
@@ -52,50 +52,40 @@ Container SplitString(
 }
 
 
-template
-    <
-    class Container, 
-    class CharT, 
-    class Traits = std::char_traits<CharT>
-    >
-    requires 
-        std::convertible_to<
-            typename Container::value_type, 
-            std::basic_string_view<CharT, Traits>
-            >
-std::basic_string<CharT, Traits> JoinStringArray(const Container& array, std::basic_string_view<CharT, Traits> delimiter) {
-    using string_type = std::basic_string<CharT, Traits>;
-    using string_view_type = std::basic_string_view<CharT, Traits>;
+    template<class Container, class CharT, class Traits = std::char_traits<CharT>>
+        requires std::same_as<typename Container::value_type, std::basic_string_view<CharT, Traits>>
+    std::basic_string<CharT, Traits> JoinStringArray(const Container& array, std::basic_string_view<CharT, Traits> delimiter) {
+        using string_type = std::basic_string<CharT, Traits>;
 
-    if (array.empty()) {
-        return {};
+        if (array.empty()) {
+            return {};
+        }
+
+        // Compute total size
+        std::size_t total_size = 0;
+        std::size_t count = 0;
+
+        for (const auto& sv : array) {
+            total_size += sv.size();
+            ++count;
+        }
+
+        total_size += delimiter.size() * (count - 1);
+
+        string_type result;
+        result.reserve(total_size);
+
+        auto it = array.begin();
+        result.append(it->data(), it->size());
+        ++it;
+
+        for (; it != array.end(); ++it) {
+            result.append(delimiter.data(), delimiter.size());
+            result.append(it->data(), it->size());
+        }
+
+        return result;
     }
-
-    std::size_t total_size = 0;
-    std::size_t count = 0;
-
-    for (const auto& elem : array) {
-        string_view_type sv(elem);
-        total_size += sv.size();
-        ++count;
-    }
-
-    total_size += delimiter.size() * (count - 1);
-
-    string_type result;
-    result.reserve(total_size);
-
-    auto it = array.begin();
-    result.append(string_view_type(*it));
-    ++it;
-
-    for (; it != array.end(); ++it) {
-        result.append(delimiter.data(), delimiter.size());
-        result.append(string_view_type(*it));
-    }
-
-    return result;
-}
 
 
     struct CaseInsensitiveHash
