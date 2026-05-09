@@ -22,6 +22,10 @@
 #include "SDK/SDK/FSDEngine_classes.hpp"
 #include "SDK/SDK/Engine_classes.hpp"
 #include "SDK/SDK/JSONValue_classes.hpp"
+#include "SDK/SDK/JSON_classes.hpp"
+#include "SDK/SDK/JSONStream_classes.hpp"
+#include "SDK/SDK/JSON_parameters.hpp"
+#include "SDK/SDK/CD2_Mod_classes.hpp"
 //#include "SDK/SDK/BP_BhaBarnacleWorm_classes.hpp"
 #include "SDK/SDK/LIB_Game_classes.hpp"
 #include "SDK/SDK/Engine_parameters.hpp"
@@ -955,10 +959,33 @@ namespace Commands
         Cmd_Unset(ctx);
     }
 
-    void JSON(const CommandContext& JS) {
-        UJSONValue_C* json = ObjectFactory::NewObject<UJSONValue_C>(GetWorld());
-        json->SetBoolean(true);
-        PropertyInspector::Dump(json, json->Class);
+    void MakeJSON(const CommandContext& JS)
+    {
+        auto* fn = JsonHook::g_Fn;
+        if (!fn)
+        {
+            l::warn("[json] JsonHook::g_Fn is null — Setup() not called yet");
+            return;
+        }
+
+        const bool patched = (fn->ExecFunction == &JsonHook::FromStringExec);
+        l::info("[json] FromString @ {:p}", static_cast<void*>(fn));
+        l::info("[json]   flags=0x{:08X}  {}", fn->FunctionFlags, DumpFunctionFlags(fn->FunctionFlags));
+        l::info("[json]   ExecFunction @ {:p}  {}", reinterpret_cast<void*>(fn->ExecFunction),
+            patched ? "[our stub]" : "[UNPATCHED]");
+
+        // If an argument was given, parse it directly via our C++ parser (bypasses the hook).
+        if (JS.ArgCount() < 2) return;
+
+        const std::string& raw = JS.Arg(1);
+        std::wstring ws(raw.begin(), raw.end());
+        JsonImpl::Parser parser(ws.c_str(), static_cast<int32_t>(ws.size()), GetWorld());
+        auto* root = parser.ParseValue();
+        if (parser.Ok() && root)
+            l::info("[json] direct parse OK — root={:p}  type={}", static_cast<void*>(root),
+                static_cast<int>(root->Type));
+        else
+            l::warn("[json] direct parse FAILED at char {}", parser.Pos());
     }
 
     void LogProcessEvents(const CommandContext&)
@@ -2270,7 +2297,7 @@ void RegisterCommands(CommandHandler& handler)
     handler.Register("ignoreproxy", Commands::IgnoreProxy, "System", R"(Toggle ProxyMod hook)");
     handler.Register("stoptick", Commands::StopTick, "System", R"(Toggle tick event logging)");
     handler.Register("logallevents", Commands::LogProcessEvents, "System", R"(Toggle logging of ALL ProcessEvent calls (very verbose))");
-    handler.Register("json", Commands::JSON, "System", R"(Try construct json object from input)");
+    handler.Register("json", Commands::MakeJSON, "System", R"(Diagnose JsonHook: print hook state; json [string] also runs direct C++ parse)");
 
     // Teleport
     handler.Register("hidesound", Commands::HideSound, "Teleport", R"(Teleport out of hearing range on the space rig)");
@@ -2323,6 +2350,7 @@ void InitDefaultCallbacks()
     Commands::Twerk(State::dummyCtx);
     Commands::BeginPlay(State::dummyCtx);
     RegisterBuiltinBindings();
+    JsonHook::Setup();
 
     TickSystem::SetTickableFunction_AsIntervalMs(Tickables::DeletePitjaws, 5000L);
     TickSystem::SetTickableFunction_AsFrequencyHz(Tickables::LockPlayers, 1L);
@@ -2342,5 +2370,4 @@ void ResetCallbackHandles()
         0;
 }
 
-#include "SDK/SDK/JSONValue_functions.cpp"
 #pragma pop_macro("EOF")

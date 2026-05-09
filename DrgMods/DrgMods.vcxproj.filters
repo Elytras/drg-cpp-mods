@@ -131,5 +131,8 @@
     <ClInclude Include="Lib_ObjectFactory.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
+    <ClInclude Include="Lib_Json.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

@@ -73,3 +73,4 @@ struct std::hash<SDK::FName>
 #include "Lib_VarSystem.h"          // VarSystem (commands deferred to Lib_CommandHandler.h)
 #include "Lib_CommandHandler.h"     // CommandContext, CommandHandler, VarSystem commands
 #include "Lib_PropertyInspector.h"  // PropertyInspector namespace
+#include "Lib_Json.h"               // JsonHook::Setup, JsonImpl::Parser, JSONType constants

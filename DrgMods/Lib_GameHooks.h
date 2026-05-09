@@ -9,6 +9,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <vector>
+#include <type_traits>
 #include <Windows.h>
 #include "Lib_Forward.h"
 #include "Lib_FField.h"
@@ -647,54 +648,63 @@ namespace GameHooks
         return ProcessEventHook::Get().Install(); 
     }
 
-    inline CallbackHandle OnProcessEventByName(const std::string& fn, ProcessEventCallback cb)
+    inline CallbackHandle OnProcessEventByName(const std::string& fn, ProcessEventCallback cb,
+        ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal)
     {
         DBG_ASSERT(!fn.empty(), "Empty function name");
         DBG_ASSERT(cb, "Null callback");
-        return ProcessEventHook::Get().AddCallback(std::move(cb), fn);
+        return ProcessEventHook::Get().AddCallback(std::move(cb), fn, nullptr, nullptr, nullptr, ClassMatchMode::ExactOrSubclass, t, mode);
     }
 
-    inline CallbackHandle OnProcessEventByClass(UClass* cls, ProcessEventCallback cb, ClassMatchMode m = ClassMatchMode::ExactOrSubclass)
+    inline CallbackHandle OnProcessEventByClass(UClass* cls, ProcessEventCallback cb,
+        ClassMatchMode m = ClassMatchMode::ExactOrSubclass,
+        ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal)
     {
         DBG_CHECK_PTR(cls);
         DBG_ASSERT(cb, "Null callback");
-        return ProcessEventHook::Get().AddCallback(std::move(cb), "", cls, nullptr, nullptr, m);
+        return ProcessEventHook::Get().AddCallback(std::move(cb), "", cls, nullptr, nullptr, m, t, mode);
     }
 
-    inline CallbackHandle OnProcessEventByNameAndClass(const std::string& fn, UClass* cls, ProcessEventCallback cb, ClassMatchMode m = ClassMatchMode::ExactOrSubclass)
+    inline CallbackHandle OnProcessEventByNameAndClass(const std::string& fn, UClass* cls, ProcessEventCallback cb,
+        ClassMatchMode m = ClassMatchMode::ExactOrSubclass,
+        ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal)
     {
         DBG_ASSERT(!fn.empty(), "Empty function name");
         DBG_CHECK_PTR(cls);
         DBG_ASSERT(cb, "Null callback");
-        return ProcessEventHook::Get().AddCallback(std::move(cb), fn, cls, nullptr, nullptr, m);
+        return ProcessEventHook::Get().AddCallback(std::move(cb), fn, cls, nullptr, nullptr, m, t, mode);
     }
 
-    inline CallbackHandle OnProcessEventByObject(const UObject* obj, ProcessEventCallback cb)
+    inline CallbackHandle OnProcessEventByObject(const UObject* obj, ProcessEventCallback cb,
+        ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal)
     {
         DBG_CHECK_PTR(obj);
         DBG_ASSERT(cb, "Null callback");
-        return ProcessEventHook::Get().AddCallback(std::move(cb), "", nullptr, obj);
+        return ProcessEventHook::Get().AddCallback(std::move(cb), "", nullptr, obj, nullptr, ClassMatchMode::ExactOrSubclass, t, mode);
     }
 
-    inline CallbackHandle OnProcessEventByFunction(UFunction* func, ProcessEventCallback cb)
+    inline CallbackHandle OnProcessEventByFunction(UFunction* func, ProcessEventCallback cb,
+        ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal)
     {
         DBG_CHECK_PTR(func);
         DBG_ASSERT(cb, "Null callback");
-        return ProcessEventHook::Get().AddCallback(std::move(cb), "", nullptr, nullptr, func);
+        return ProcessEventHook::Get().AddCallback(std::move(cb), "", nullptr, nullptr, func, ClassMatchMode::ExactOrSubclass, t, mode);
     }
 
-    inline CallbackHandle OnProcessEventByFunctionAndObject(UFunction* func, const UObject* obj, ProcessEventCallback cb)
+    inline CallbackHandle OnProcessEventByFunctionAndObject(UFunction* func, const UObject* obj, ProcessEventCallback cb,
+        ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal)
     {
         DBG_CHECK_PTR(func);
         DBG_CHECK_PTR(obj);
         DBG_ASSERT(cb, "Null callback");
-        return ProcessEventHook::Get().AddCallback(std::move(cb), "", nullptr, obj, func);
+        return ProcessEventHook::Get().AddCallback(std::move(cb), "", nullptr, obj, func, ClassMatchMode::ExactOrSubclass, t, mode);
     }
 
-    inline CallbackHandle OnProcessEventAll(ProcessEventCallback cb)
+    inline CallbackHandle OnProcessEventAll(ProcessEventCallback cb,
+        ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal)
     {
         DBG_ASSERT(cb, "Null callback");
-        return ProcessEventHook::Get().AddCallback(std::move(cb));
+        return ProcessEventHook::Get().AddCallback(std::move(cb), "", nullptr, nullptr, nullptr, ClassMatchMode::ExactOrSubclass, t, mode);
     }
 
     inline CallbackHandle OnProcessEventAdvanced(ProcessEventCallback cb,
@@ -704,6 +714,25 @@ namespace GameHooks
     {
         DBG_ASSERT(cb, "Null callback");
         return ProcessEventHook::Get().AddCallback(std::move(cb), fn, cls, obj, func, m, t, mode);
+    }
+
+    struct CallbackParams
+    {
+        std::string     functionName   = "";
+        UClass*         classFilter    = nullptr;
+        const UObject*  objectFilter   = nullptr;
+        UFunction*      functionFilter = nullptr;
+        ClassMatchMode  classMatchMode = ClassMatchMode::ExactOrSubclass;
+        ExecutionTiming timing         = ExecutionTiming::Before;
+        ExecutionMode   mode           = ExecutionMode::CallOriginal;
+    };
+
+    inline CallbackHandle OnProcessEventAdvanced(const CallbackParams& p, ProcessEventCallback cb)
+    {
+        DBG_ASSERT(cb, "Null callback");
+        return ProcessEventHook::Get().AddCallback(std::move(cb),
+            p.functionName, p.classFilter, p.objectFilter, p.functionFilter,
+            p.classMatchMode, p.timing, p.mode);
     }
 
     inline bool RemoveHook(CallbackHandle h) 
@@ -782,4 +811,43 @@ void EnqueueThrottled(
 
     // IMPORTANT: start execution immediately, not delayed
     hook.Enqueue(*schedule);
+}
+
+// Numeric types only — excludes bool and char which are arithmetic but nonsensical as delays.
+template<typename T>
+concept DelayNumeric = std::is_arithmetic_v<T>
+                    && !std::is_same_v<T, bool>
+                    && !std::is_same_v<T, char>
+                    && !std::is_same_v<T, wchar_t>;
+
+// Executes fn once on the game thread after a runtime delay (default 200 ms).
+//   EnqueueDelayed(fn)              — 200 ms
+//   EnqueueDelayed(fn, 500)         — 500 ms
+//   EnqueueDelayed<true>(fn, 1.5f)  — 1.5 s
+//   EnqueueDelayed<true>(fn, 2)     — 2 s
+template<bool IsSeconds = false, DelayNumeric T = int>
+void EnqueueDelayed(std::function<void()> fn, T delay = T(200))
+{
+    delay = delay >= T(0) ? delay : T(0);
+
+    using namespace std::chrono;
+    auto ms = IsSeconds
+        ? duration_cast<milliseconds>(duration<long double>(delay))
+        : milliseconds(static_cast<long long>(delay));
+
+    auto& hook  = GameHooks::ProcessEventHook::Get();
+    auto fireAt = std::make_shared<steady_clock::time_point>(steady_clock::now() + ms);
+    auto task   = std::make_shared<std::function<void()>>();
+
+    *task = [fireAt, fn = std::move(fn), task, &hook]() mutable
+    {
+        if (steady_clock::now() < *fireAt)
+        {
+            hook.Enqueue(*task);
+            return;
+        }
+        fn();
+    };
+
+    hook.Enqueue(*task);
 }

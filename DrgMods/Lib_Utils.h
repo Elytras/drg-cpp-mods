@@ -205,7 +205,7 @@ inline typename Container::value_type GetOrDefault(
 
 template<typename AActorType = AActor>
     requires IsAActor<AActorType>
-inline AActorType* GetActorOfClass(UClass* Class)
+inline AActorType* GetActorOfClass(UClass* Class = AActorType::StaticClass())
 {
     if (!IsValidClass(Class) || !(Class->IsA(EClassCastFlags::Actor) || Class->IsSubclassOf(AActor::StaticClass())))
     {
@@ -691,3 +691,48 @@ constexpr auto range(T begin, T end, T step) { return numeric_range<T>(begin, en
 
 template <nr_detail::NumericPrimitive T>
 constexpr auto range(T end) { return numeric_range<T>(T{ 0 }, end); }
+
+// ── Function flag diagnostics ─────────────────────────────────────────────
+inline std::string DumpFunctionFlags(uint32_t flags)
+{
+    using F = SDK::EFunctionFlags;
+    std::string out;
+    auto add = [&](F f, const char* name) {
+        if (flags & static_cast<uint32_t>(f)) {
+            if (!out.empty()) out += '|';
+            out += name;
+        }
+    };
+    add(F::Final,                 "Final");
+    add(F::RequiredAPI,           "ReqAPI");
+    add(F::BlueprintAuthorityOnly,"BPAuthOnly");
+    add(F::BlueprintCosmetic,     "BPCosmetic");
+    add(F::Net,                   "Net");
+    add(F::NetReliable,           "NetReliable");
+    add(F::NetRequest,            "NetRequest");
+    add(F::Exec,                  "Exec");
+    add(F::Native,                "Native");
+    add(F::Event,                 "Event");
+    add(F::NetResponse,           "NetResponse");
+    add(F::Static,                "Static");
+    add(F::NetMulticast,          "NetMulticast");
+    add(F::UbergraphFunction,     "UbergraphFn");
+    add(F::MulticastDelegate,     "MCDelegate");
+    add(F::Public,                "Public");
+    add(F::Private,               "Private");
+    add(F::Protected,             "Protected");
+    add(F::Delegate,              "Delegate");
+    add(F::NetServer,             "NetServer");
+    add(F::HasOutParms,           "HasOutParms");
+    add(F::HasDefaults,           "HasDefaults");
+    add(F::NetClient,             "NetClient");
+    add(F::DLLImport,             "DLLImport");
+    add(F::BlueprintCallable,     "BPCallable");
+    add(F::BlueprintEvent,        "BPEvent");
+    add(F::BlueprintPure,         "BPPure");
+    add(F::EditorOnly,            "EditorOnly");
+    add(F::Const,                 "Const");
+    add(F::NetValidate,           "NetValidate");
+    if (out.empty()) out = "None";
+    return out;
+}

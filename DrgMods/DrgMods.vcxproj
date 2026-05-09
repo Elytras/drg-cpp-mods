@@ -175,6 +175,7 @@
     <ClInclude Include="Lib_CommandHandler.h" />
     <ClInclude Include="Lib_EasyHook.h" />
     <ClInclude Include="Lib_GameHooks.h" />
+    <ClInclude Include="Lib_Json.h" />
     <ClInclude Include="Lib_ObjectFactory.h" />
     <ClInclude Include="Lib_PropertyInspector.h" />
     <ClInclude Include="Lib_Utils.h" />

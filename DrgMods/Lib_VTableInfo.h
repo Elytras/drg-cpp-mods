@@ -44,7 +44,7 @@ namespace VTableLayout
         using FCreateCluster = void(UObject*);
         using FOnClusterMarkedAsPendingKill = void(UObject*);
 
-        // ── UObject: safe range (slots 7-22, confirmed shipping) ─────────────
+        // ── UObject ───────────────────────────────────────────────────────────
         using FGetDetailedInfoInternal = UC::FString*(UObject*, FString*);
         using FPostInitProperties = void(UObject*);
         using FPostCDOContruct = void(UObject*);
@@ -61,9 +61,6 @@ namespace VTableLayout
         using FSerialize_Structured = void(UObject*, void* /*SDK::FStructuredArchive::FRecord*/);
         using FShutdownAfterError = void(UObject*);
         using FPostInterpChange = void(UObject*, SDK::FProperty*);
-        // ── UObject: unsafe range (slots shift without WITH_EDITOR block) ─────
-        // These follow directly after PostInterpChange in a shipping build
-        // since the entire WITH_EDITOR block is compiled out.
         using FPostRename = void(UObject*, UObject*, const FName);
         using FPreDuplicate = void(UObject*, void* /* FObjectDuplicationParameters& */);
         //using FPostDuplicate_Mode = void(UObject*, EDuplicateMode::Type);
@@ -122,12 +119,9 @@ namespace VTableLayout
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  Absolute vtable slots
-    //
-    //  Safe range  : slots 0-22, order confirmed by both dump and source.
-    //  Unsafe range: slots 23+ assume shipping build (no WITH_EDITOR block).
-    //                verified against source declaration order only.
-    //                Do NOT use these slots against an editor build.
+    //  Absolute vtable slots — shipping build (FSD-Win64-Shipping.exe).
+    //  WITH_EDITOR blocks are compiled out; slot order verified against
+    //  source declaration order and confirmed by vtable dump.
     // ─────────────────────────────────────────────────────────────────────────
     namespace Slots
     {
@@ -142,7 +136,7 @@ namespace VTableLayout
         constexpr int32 CreateCluster = 5;
         constexpr int32 OnClusterMarkedAsPendingKill = 6;
 
-        // ── UObject: safe (7-22) ──────────────────────────────────────────────
+        // ── UObject (7-77) ────────────────────────────────────────────────────
         constexpr int32 GetDetailedInfoInternal = 7;
         constexpr int32 PostInitProperties = 8;
         constexpr int32 PostCDOContruct = 9;
@@ -159,8 +153,6 @@ namespace VTableLayout
         constexpr int32 Serialize_Structured = 20;
         constexpr int32 ShutdownAfterError = 21;
         constexpr int32 PostInterpChange = 22;
-
-        // ── UObject: unsafe/shipping-only (23+) ───────────────────────────────
         constexpr int32 PostRename = 23;
         constexpr int32 PreDuplicate = 24;
         constexpr int32 PostDuplicate_Mode = 25;
@@ -388,7 +380,7 @@ namespace UObjectVCalls
         static FORCEINLINE void Call(UObject* Obj) { GetPtr(Obj)(Obj); }
     };
 
-    // ── UObject: safe range ───────────────────────────────────────────────────
+    // ── UObject ───────────────────────────────────────────────────────────────
 
     struct GetDetailedInfoInternal
     {
@@ -502,7 +494,7 @@ namespace UObjectVCalls
         static FORCEINLINE void Call(UObject* Obj, SDK::FProperty* Prop) { GetPtr(Obj)(Obj, Prop); }
     };
 
-    // ── UObject: unsafe/shipping range ────────────────────────────────────────
+    // ── UObject (continued) ───────────────────────────────────────────────────
 
     struct PostRename
     {

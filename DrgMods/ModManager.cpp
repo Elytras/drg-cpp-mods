@@ -165,6 +165,7 @@ void ModManager::UnloadMods()
     TickSystem::Reset();
     ResetCallbackHandles();
     VarSystem::Clear();
+    JsonHook::Teardown(); // restore ExecFunction/flags before DLL pages are freed
     GameHooks::ProcessEventHook::Get().RequestUninstall();
     WaitForShutdown();
 
