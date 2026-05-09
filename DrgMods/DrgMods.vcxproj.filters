@@ -31,6 +31,9 @@
     <Filter Include="Source Files\SDK Impl">
       <UniqueIdentifier>{7f552e51-84e5-4642-8967-df6a4dd88fd4}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\LibraryImplementations">
+      <UniqueIdentifier>{7df424a2-dfd7-46a6-a839-a20667c615ad}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="SDK\SDK\AssetRegistry_functions.cpp">
@@ -59,6 +62,9 @@
     </ClCompile>
     <ClCompile Include="Commands.cpp">
       <Filter>Source Files\DLL Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="Lib_Json.cpp">
+      <Filter>Source Files\LibraryImplementations</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

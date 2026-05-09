@@ -52,7 +52,7 @@
 template<>
 struct std::hash<SDK::FName>
 {
-    size_t operator()(const SDK::FName& n) const noexcept
+    inline size_t operator()(const SDK::FName& n) const noexcept
     {
         return std::hash<uint64_t>{}(
             (uint64_t)(uint32_t)n.ComparisonIndex << 32 | n.Number);

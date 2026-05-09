@@ -960,33 +960,7 @@ namespace Commands
     }
 
     void MakeJSON(const CommandContext& JS)
-    {
-        auto* fn = JsonHook::g_Fn;
-        if (!fn)
-        {
-            l::warn("[json] JsonHook::g_Fn is null — Setup() not called yet");
-            return;
-        }
-
-        const bool patched = (fn->ExecFunction == &JsonHook::FromStringExec);
-        l::info("[json] FromString @ {:p}", static_cast<void*>(fn));
-        l::info("[json]   flags=0x{:08X}  {}", fn->FunctionFlags, DumpFunctionFlags(fn->FunctionFlags));
-        l::info("[json]   ExecFunction @ {:p}  {}", reinterpret_cast<void*>(fn->ExecFunction),
-            patched ? "[our stub]" : "[UNPATCHED]");
-
-        // If an argument was given, parse it directly via our C++ parser (bypasses the hook).
-        if (JS.ArgCount() < 2) return;
-
-        const std::string& raw = JS.Arg(1);
-        std::wstring ws(raw.begin(), raw.end());
-        JsonImpl::Parser parser(ws.c_str(), static_cast<int32_t>(ws.size()), GetWorld());
-        auto* root = parser.ParseValue();
-        if (parser.Ok() && root)
-            l::info("[json] direct parse OK — root={:p}  type={}", static_cast<void*>(root),
-                static_cast<int>(root->Type));
-        else
-            l::warn("[json] direct parse FAILED at char {}", parser.Pos());
-    }
+    {}
 
     void LogProcessEvents(const CommandContext&)
     {
