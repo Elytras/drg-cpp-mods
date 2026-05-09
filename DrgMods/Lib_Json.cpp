@@ -46,10 +46,10 @@ namespace JsonImpl {
     static constexpr uintptr_t kCRCTableRVA = 0x629c5c0;
 
     struct MapSlot {
-        UC::FString          Key;
-        SDK::UJSONValue_C* Val;
-        int32_t              HashNextId;
-        int32_t              HashIndex;
+        UC::FString             Key;
+        SDK::UJSONValue_C*      Val;
+        int32_t                 HashNextId;
+        int32_t                 HashIndex;
     };
 
     struct RawBitArray {
@@ -60,7 +60,7 @@ namespace JsonImpl {
     };
 
     struct RawSparseArray {
-        MapSlot* DataPtr;
+        MapSlot*    DataPtr;
         int32_t     NumElements;
         int32_t     MaxElements;
         RawBitArray AllocationFlags;
@@ -70,7 +70,9 @@ namespace JsonImpl {
 
     struct RawHashAlloc {
         int32_t  InlineData;
+    private:
         int32_t  _pad;
+    public:
         int32_t* SecondaryData;
     };
 
@@ -78,6 +80,7 @@ namespace JsonImpl {
         RawSparseArray Elements;
         RawHashAlloc   Hash;
         int32_t        HashSize;
+    private:
         int32_t        _pad;
     };
 
@@ -121,7 +124,7 @@ namespace JsonImpl {
 
     class Parser {
         const wchar_t* start_, * cur_, * end_;
-        UObject* outer_;
+        UObject* initialOuter_;
         bool ok_ = true;
         std::wstring scratch_;
 
@@ -210,39 +213,73 @@ namespace JsonImpl {
         }
 
     public:
-        Parser(const wchar_t* data, int32_t len, UObject* outer) : start_(data), cur_(data), end_(data + len), outer_(outer) { scratch_.reserve(256); }
+        Parser(const wchar_t* data, int32_t len, UObject* outer)
+            : start_(data), cur_(data), end_(data + len), initialOuter_(outer) {
+            scratch_.reserve(256);
+        }
 
-        SDK::UJSONValue_C* NewNode() {
-            auto* node = ObjectFactory::NewObject<SDK::UJSONValue_C>(outer_);
+        SDK::UJSONValue_C* NewNode(UObject* currentOuter) {
+            auto* node = ObjectFactory::NewObject<SDK::UJSONValue_C>(currentOuter);
             if (!node) ok_ = false;
             return node;
         }
 
-        SDK::UJSONValue_C* ParseValue() {
+        SDK::UJSONValue_C* ParseValue(UObject* currentOuter) {
             SkipWS();
             if (cur_ >= end_) { ok_ = false; return nullptr; }
             switch (*cur_) {
-            case L'{': return ParseObject();
-            case L'[': return ParseArray();
+            case L'{': return ParseObject(currentOuter);
+            case L'[': return ParseArray(currentOuter);
             case L'"': {
                 auto sv = ParseStringRaw();
-                auto* node = NewNode(); if (!node) return nullptr;
+                auto* node = NewNode(currentOuter);
+                if (!node) return nullptr;
                 node->Type = JSONType::String;
                 node->String = MakeFString(sv.data(), (int32_t)sv.size());
                 return node;
             }
-            case L't': if (end_ - cur_ >= 4 && wcsncmp(cur_, L"true", 4) == 0) { cur_ += 4; auto* n = NewNode(); if (!n) return nullptr; n->Type = JSONType::Boolean; n->Boolean = true; return n; } break;
-            case L'f': if (end_ - cur_ >= 5 && wcsncmp(cur_, L"false", 5) == 0) { cur_ += 5; auto* n = NewNode(); if (!n) return nullptr; n->Type = JSONType::Boolean; n->Boolean = false; return n; } break;
-            case L'n': if (end_ - cur_ >= 4 && wcsncmp(cur_, L"null", 4) == 0) { cur_ += 4; auto* n = NewNode(); if (!n) return nullptr; n->Type = JSONType::Null; return n; } break;
+            case L't':
+                if (end_ - cur_ >= 4 && wcsncmp(cur_, L"true", 4) == 0) {
+                    cur_ += 4;
+                    auto* n = NewNode(currentOuter);
+                    if (!n) return nullptr;
+                    n->Type = JSONType::Boolean;
+                    n->Boolean = true;
+                    return n;
+                }
+                break;
+            case L'f':
+                if (end_ - cur_ >= 5 && wcsncmp(cur_, L"false", 5) == 0) {
+                    cur_ += 5;
+                    auto* n = NewNode(currentOuter);
+                    if (!n) return nullptr;
+                    n->Type = JSONType::Boolean;
+                    n->Boolean = false;
+                    return n;
+                }
+                break;
+            case L'n':
+                if (end_ - cur_ >= 4 && wcsncmp(cur_, L"null", 4) == 0) {
+                    cur_ += 4;
+                    auto* n = NewNode(currentOuter);
+                    if (!n) return nullptr;
+                    n->Type = JSONType::Null;
+                    return n;
+                }
+                break;
             }
-            return ParseNumber();
+            return ParseNumber(currentOuter);
         }
 
-        SDK::UJSONValue_C* ParseObject() {
+        SDK::UJSONValue_C* ParseObject(UObject* currentOuter) {
             Require(L'{');
             if (!ok_) return nullptr;
-            auto* node = NewNode(); if (!node) return nullptr;
+
+            // Create the object node with the current outer
+            auto* node = NewNode(currentOuter);
+            if (!node) return nullptr;
             node->Type = JSONType::Object;
+
             const int32_t N = CountTopLevelItems(L'}');
             if (N == 0) { Require(L'}'); return node; }
 
@@ -256,7 +293,11 @@ namespace JsonImpl {
             int32_t hs = 1; while (hs < N) hs <<= 1;
             m.HashSize = hs;
             int32_t* buckets;
-            if (hs <= 1) { m.Hash.InlineData = -1; m.Hash.SecondaryData = nullptr; buckets = &m.Hash.InlineData; }
+            if (hs <= 1) {
+                m.Hash.InlineData = -1;
+                m.Hash.SecondaryData = nullptr;
+                buckets = &m.Hash.InlineData;
+            }
             else {
                 buckets = static_cast<int32_t*>(UEAlloc(hs * sizeof(int32_t)));
                 m.Hash.SecondaryData = buckets;
@@ -271,14 +312,19 @@ namespace JsonImpl {
                 auto& slot = sa.DataPtr[filled];
                 uint32_t h = StrihashDeprecated(keyView.data(), (int32_t)keyView.size());
                 slot.Key = MakeFString(keyView.data(), (int32_t)keyView.size());
+
                 Require(L':');
-                slot.Val = ParseValue();
+
+                // IMPORTANT: Pass 'node' as the Outer for the child value
+                slot.Val = ParseValue(node);
+
                 if (!ok_) { filled++; break; }
                 int32_t buck = static_cast<int32_t>(h & (hs - 1));
                 slot.HashIndex = buck;
                 slot.HashNextId = buckets[buck];
                 buckets[buck] = filled++;
             } while (Eat(L','));
+
             Require(L'}');
             sa.NumElements = filled;
 
@@ -304,11 +350,15 @@ namespace JsonImpl {
             return node;
         }
 
-        SDK::UJSONValue_C* ParseArray() {
+        SDK::UJSONValue_C* ParseArray(UObject* currentOuter) {
             Require(L'[');
             if (!ok_) return nullptr;
-            auto* node = NewNode(); if (!node) return nullptr;
+
+            // Create the array node with the current outer
+            auto* node = NewNode(currentOuter);
+            if (!node) return nullptr;
             node->Type = JSONType::Array;
+
             const int32_t N = CountTopLevelItems(L']');
             auto& arr = reinterpret_cast<RawTArray<SDK::UJSONValue_C*>&>(node->Array);
             if (N == 0) { Require(L']'); return node; }
@@ -316,15 +366,17 @@ namespace JsonImpl {
             arr.Data = static_cast<SDK::UJSONValue_C**>(UEAlloc(N * sizeof(void*)));
             arr.Max = N;
             do {
-                auto* v = ParseValue();
+                // IMPORTANT: Pass 'node' as the Outer for the child element
+                auto* v = ParseValue(node);
                 if (!ok_) break;
                 arr.Data[arr.Num++] = v;
             } while (Eat(L','));
+
             Require(L']');
             return node;
         }
 
-        SDK::UJSONValue_C* ParseNumber() {
+        SDK::UJSONValue_C* ParseNumber(UObject* currentOuter) {
             SkipWS();
             if (cur_ >= end_) { ok_ = false; return nullptr; }
             const bool neg = (*cur_ == L'-');
@@ -354,9 +406,17 @@ namespace JsonImpl {
                 val = negE ? val / mult : val * mult;
             }
             if (neg) val = -val;
-            auto* node = NewNode(); if (!node) return nullptr;
-            node->Type = JSONType::Number; node->Number = val;
+
+            auto* node = NewNode(currentOuter);
+            if (!node) return nullptr;
+            node->Type = JSONType::Number;
+            node->Number = val;
             return node;
+        }
+
+        // Helper to kick off parsing from the root
+        SDK::UJSONValue_C* Parse() {
+            return ParseValue(initialOuter_);
         }
 
         bool Ok() const { return ok_; }
@@ -417,7 +477,7 @@ namespace JsonHook {
 
         if (!pInput || pInput->Num() <= 1) { WriteResult(nullptr, false); return; }
         JsonImpl::Parser parser(pInput->CStr(), pInput->Num() - 1, outer);
-        auto* root = parser.ParseValue();
+        auto* root = parser.Parse();
         if (parser.Ok() && root) WriteResult(root, true);
         else WriteResult(nullptr, false);
     }
@@ -426,7 +486,7 @@ namespace JsonHook {
         auto* p = reinterpret_cast<SDK::Params::JSON_C_FromString*>(Parms);
         if (p->Input.Num() <= 1) { p->success = false; p->Return = nullptr; return; }
         JsonImpl::Parser parser(p->Input.CStr(), p->Input.Num() - 1, p->Outer_0);
-        auto* root = parser.ParseValue();
+        auto* root = parser.Parse();
         p->success = parser.Ok() && root;
         p->Return = p->success ? root : nullptr;
     }
