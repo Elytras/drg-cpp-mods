@@ -66,6 +66,9 @@
     <ClCompile Include="Lib_Json.cpp">
       <Filter>Source Files\LibraryImplementations</Filter>
     </ClCompile>
+    <ClCompile Include="Lib_EasyHook.cpp">
+      <Filter>Source Files\LibraryImplementations</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Lib_Forward.h">
