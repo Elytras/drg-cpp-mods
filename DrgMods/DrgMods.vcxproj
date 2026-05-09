@@ -156,6 +156,7 @@
     <ClCompile Include="Commands.cpp" />
     <ClCompile Include="Lib_EasyHook.cpp" />
     <ClCompile Include="Lib_Json.cpp" />
+    <ClCompile Include="Lib_VarSystem.cpp" />
     <ClCompile Include="Main.cpp">
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
@@ -175,6 +176,7 @@
     <ClInclude Include="Commands.h" />
     <ClInclude Include="Common.h" />
     <ClInclude Include="Lib_CommandHandler.h" />
+    <ClInclude Include="Lib_Context.h" />
     <ClInclude Include="Lib_EasyHook.h" />
     <ClInclude Include="Lib_GameHooks.h" />
     <ClInclude Include="Lib_Json.h" />
@@ -184,7 +186,6 @@
     <ClInclude Include="Lib_Print.h" />
     <ClInclude Include="Lib_PropertyAccess.h" />
     <ClInclude Include="Lib_ObjectCast.h" />
-    <ClInclude Include="Lib_FField.h" />
     <ClInclude Include="Lib_Forward.h" />
     <ClInclude Include="Library.h" />
     <ClInclude Include="Lib_VarSystem.h" />

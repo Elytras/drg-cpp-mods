@@ -1,14 +1,12 @@
 ﻿#pragma once
-// Lib_CommandHandler.h — CommandContext, MutableContext, CommandHandler.
-//                        Also provides VarSystem command implementations
-//                        (deferred from Lib_VarSystem.h due to CommandContext dependency).
-
+// Lib_CommandHandler.h — CommandHandler.
 #include <functional>
 #include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
 #include "Lib_Forward.h"
+#include "Lib_Context.h"
 #include "Lib_GameHooks.h"
 #include "Lib_VarSystem.h"
 #include "Common.h"
@@ -16,95 +14,6 @@
 
 extern ResponseBuffer* g_pRespBuffer;
 extern void SendResponse(uint32_t cmdSeq, const std::string& msg);
-
-// =========================================================================
-// CommandContext
-// =========================================================================
-
-struct CommandContext
-{
-    const std::vector<std::string>& args;
-    uint32_t seq = 0;
-
-    size_t             ArgCount() const { return args.size(); }
-    inline const std::string& Arg(size_t i, const std::string& fallback = "") const
-    {
-        return i < args.size() ? args[i] : fallback;
-    }
-};
-
-struct MutableContext
-{
-    std::vector<std::string> args;
-    uint32_t seq = 0;
-
-    size_t             ArgCount() const { return args.size(); }
-    inline const std::string& Arg(size_t i, const std::string& fallback = "") const
-    {
-        return i < args.size() ? args[i] : fallback;
-    }
-
-    MutableContext(std::vector<std::string>& a) : args(a) {}
-    MutableContext(std::vector<std::string>&& a) : args(std::move(a)) {}
-    MutableContext(const CommandContext& ctx) : args(ctx.args), seq(ctx.seq) {}
-};
-
-// =========================================================================
-// VarSystem command implementations (deferred because they need CommandContext)
-// =========================================================================
-
-namespace VarSystem
-{
-    inline void Cmd_Set(const CommandContext& ctx)
-    {
-        if (ctx.ArgCount() < 3) [[unlikely]] { spdlog::warn("[var] Usage: set <n> <value>"); return; }
-        const std::string& name = ctx.Arg(1);
-        std::string raw = ctx.Arg(2);
-        for (size_t i = 3; i < ctx.ArgCount(); ++i) raw += ' ' + ctx.Arg(i);
-        Var v = Parse(raw);
-        g_Vars[name] = v;
-        Print(name, v);
-    }
-
-    inline void Cmd_Get(const CommandContext& ctx)
-    {
-        if (ctx.ArgCount() < 2) [[unlikely]] { spdlog::warn("[var] Usage: get <n>"); return; }
-        const std::string& name = ctx.Arg(1);
-        auto it = g_Vars.find(name);
-        if (it == g_Vars.end()) { spdlog::warn("[var] '{}' not defined", name); return; }
-        Print(name, it->second);
-    }
-
-    inline void Cmd_Unset(const CommandContext& ctx)
-    {
-        if (ctx.ArgCount() < 2) [[unlikely]] { spdlog::warn("[var] Usage: unset <n>"); return; }
-        const std::string& name = ctx.Arg(1);
-        if (g_Vars.erase(name)) spdlog::info("[var] '{}' unset", name);
-        else                    spdlog::warn("[var] '{}' was not defined", name);
-    }
-
-    inline void Cmd_Vars(const CommandContext&)
-    {
-        if (g_Vars.empty() && g_Bindings.empty()) { spdlog::info("[var] No variables defined."); return; }
-        if (!g_Vars.empty())
-        {
-            spdlog::info("[var] {} variable(s):", g_Vars.size());
-            for (const auto& [n, v] : g_Vars) Print(n, v);
-        }
-        if (!g_Bindings.empty())
-        {
-            spdlog::info("[var] {} binding(s) (fn:<n>):", g_Bindings.size());
-            for (const auto& [n, fn] : g_Bindings)
-            {
-                ExpandResult r = fn();
-                if (!r.isValid)   spdlog::info("[var]   fn:{} = <invalid>", n);
-                else if (r.object) spdlog::info("[var]   fn:{} = [object] {} ({})", n,
-                    r.object->GetName(), r.object->Class ? r.object->Class->GetName() : "?");
-                else               spdlog::info("[var]   fn:{} = {}", n, r.token);
-            }
-        }
-    }
-} // namespace VarSystem
 
 // =========================================================================
 // CommandHandler

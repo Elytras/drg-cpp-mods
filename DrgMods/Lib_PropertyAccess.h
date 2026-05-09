@@ -2,7 +2,6 @@
 // Lib_PropertyAccess.h — Property memory access helpers and GetTypeName.
 
 #include "Lib_Forward.h"
-#include "Lib_FField.h"
 #include "Lib_ObjectCast.h"
 
 template<typename T> T* GetPropertyPtr(uintptr_t Base, int32 Offset) { return reinterpret_cast<T*>(Base + Offset); }
