@@ -2,7 +2,9 @@
 // Library.h — Single include for all DRG mod utilities.
 // Order matters: each header depends on those above it.
 
+#ifndef EXTRA_LEAN
 #define EXTRA_LEAN
+#endif
 
 // ─── STL ─────────────────────────────────────────────────────────────────────
 #include <algorithm>
@@ -48,19 +50,8 @@
 #undef min
 #endif
 
-// FName hash — needed before GameHooks
-template<>
-struct std::hash<SDK::FName>
-{
-    inline size_t operator()(const SDK::FName& n) const noexcept
-    {
-        return std::hash<uint64_t>{}(
-            (uint64_t)(uint32_t)n.ComparisonIndex << 32 | n.Number);
-    }
-};
 // Listed in dependency order for ease of use. Each header should be self-contained and only depend on those above it.
 #include "Lib_Forward.h"            // namespace/type aliases, forward decls
-#include "Lib_Context.h"            // const and mutable command contexts
 #include "Lib_VTableInfo.h"         // VTable index info for unreal functions
 #include "Lib_ObjectCast.h"         // ObjectCast, class flags, IsValidRaw
 #include "Lib_PropertyAccess.h"     // GetPropertyPtr, ReadBool/WriteBool, GetTypeName
@@ -71,6 +62,6 @@ struct std::hash<SDK::FName>
 #include "Lib_VTableHook.h"         // VTableHook class
 #include "Lib_GameHooks.h"          // ProcessEventHook, GameHooks API
 #include "Lib_VarSystem.h"          // VarSystem (commands deferred to Lib_CommandHandler.h)
-#include "Lib_CommandHandler.h"     // CommandContext, CommandHandler, VarSystem commands
+#include "Lib_CommandHandler.h"     // CommandContext, MutableContext, CommandHandler, VarSystem commands
 #include "Lib_PropertyInspector.h"  // PropertyInspector namespace
 #include "Lib_Json.h"               // JsonHook::Setup, JsonImpl::Parser, JSONType constants

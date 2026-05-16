@@ -4,9 +4,7 @@
 #include <functional>
 #include <string>
 #include <unordered_map>
-#include <spdlog/spdlog.h>
 #include "Lib_Forward.h"
-#include "Lib_Utils.h"
 
 struct CommandContext;
 
@@ -31,7 +29,6 @@ namespace VarSystem
         bool        isValid = true;
     };
 
-    // Global storage (can stay inline—these are just containers)
     extern std::unordered_map<std::string, Var> g_Vars;
 
     using BindingFn = std::function<ExpandResult()>;
@@ -51,7 +48,6 @@ namespace VarSystem
     ExpandResult Expand(const std::string& token);
     void Print(const std::string& name, const Var& v);
 
-    // Command implementations (deferred to .cpp to avoid CommandContext dependency here)
     void Cmd_Set    (const CommandContext& ctx);
     void Cmd_Get    (const CommandContext& ctx);
     void Cmd_Unset  (const CommandContext& ctx);

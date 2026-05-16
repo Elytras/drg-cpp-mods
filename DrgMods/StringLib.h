@@ -1,5 +1,8 @@
 #pragma once
+#ifndef EXTRA_LEAN
 #define EXTRA_LEAN
+#endif
+
 #include <Windows.h>
 #include <vector>
 #include <string>

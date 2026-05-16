@@ -233,7 +233,7 @@ int main()
 
     auto Print = [&](const std::string& s) { split.PrintCmd(s); };
     Print("--- DRG Mod CLI ---  Tab: complete  Right: accept hint  Up/Down: history");
-#ifdef TESTING && TESTING == 1
+#if TESTING 
     Print(
         std::to_string(sizeof(UC::FString)) + " " +
         std::to_string(offsetof(UC::FString, Data)) + " " +

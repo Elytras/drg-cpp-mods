@@ -146,6 +146,9 @@
       <OmitFramePointers>true</OmitFramePointers>
       <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <ControlFlowGuard>false</ControlFlowGuard>
+      <CompileAs>CompileAsCpp</CompileAs>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -154,8 +157,16 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Commands.cpp" />
+    <ClCompile Include="Lib_CommandHandler.cpp" />
     <ClCompile Include="Lib_EasyHook.cpp" />
+    <ClCompile Include="Lib_GameHooks.cpp" />
     <ClCompile Include="Lib_Json.cpp" />
+    <ClCompile Include="Lib_ObjectFactory.cpp" />
+    <ClCompile Include="Lib_ObjectCast.cpp" />
+    <ClCompile Include="Lib_Print.cpp" />
+    <ClCompile Include="Lib_PropertyAccess.cpp" />
+    <ClCompile Include="Lib_PropertyInspector.cpp" />
+    <ClCompile Include="Lib_Utils.cpp" />
     <ClCompile Include="Lib_VarSystem.cpp" />
     <ClCompile Include="Main.cpp">
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
@@ -176,7 +187,6 @@
     <ClInclude Include="Commands.h" />
     <ClInclude Include="Common.h" />
     <ClInclude Include="Lib_CommandHandler.h" />
-    <ClInclude Include="Lib_Context.h" />
     <ClInclude Include="Lib_EasyHook.h" />
     <ClInclude Include="Lib_GameHooks.h" />
     <ClInclude Include="Lib_Json.h" />

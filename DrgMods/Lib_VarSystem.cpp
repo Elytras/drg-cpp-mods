@@ -1,13 +1,5 @@
 ﻿#include "Lib_VarSystem.h"
-template<>
-struct std::hash<SDK::FName>
-{
-    inline size_t operator()(const SDK::FName& n) const noexcept
-    {
-        return std::hash<uint64_t>{}(
-            (uint64_t)(uint32_t)n.ComparisonIndex << 32 | n.Number);
-    }
-};
+#include "Lib_Utils.h"
 #include "Lib_CommandHandler.h"
 #include "Lib_GameHooks.h"
 #include "StringLib.h"

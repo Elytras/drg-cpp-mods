@@ -26,28 +26,11 @@ namespace ObjectCast
 } // namespace ObjectCast
 
 // ClassFlags at 0x00CC (before CastFlags at 0x00D0)
-inline EClassFlags GetClassFlags(const UClass* Class)
-{
-    return *reinterpret_cast<const EClassFlags*>(
-        reinterpret_cast<const uintptr_t>(Class) + 0x00CC);
-}
-
-inline bool HasClassFlag(const UClass* Class, EClassFlags Flag)
-{
-    return (static_cast<uint32>(GetClassFlags(Class)) & static_cast<uint32>(Flag)) != 0;
-}
-
-inline bool IsNativeClass(const UClass* Class) { return Class && HasClassFlag(Class, EClassFlags::Native); }
-inline bool IsBlueprintClass(const UClass* Class) { return Class && HasClassFlag(Class, EClassFlags::CompiledFromBlueprint); }
-
-inline bool IsValidRaw(const UObject* Obj)
-{
-    if (!Obj) return false;
-    constexpr int32 GarbageFlags =
-        (int32)EObjectFlags::BeginDestroyed |
-        (int32)EObjectFlags::MirroredGarbage;
-    return !(Obj->Flags & (EObjectFlags)GarbageFlags);
-}
+EClassFlags GetClassFlags   (const UClass* Class);
+bool        HasClassFlag    (const UClass* Class, EClassFlags Flag);
+bool        IsNativeClass   (const UClass* Class);
+bool        IsBlueprintClass(const UClass* Class);
+bool        IsValidRaw      (const UObject* Obj);
 
 struct UClassHierarchyRange
 {
@@ -137,10 +120,4 @@ public:
 template<typename T = UObject>
 inline GObjectsRange<T> GObjectsOf() { return {}; }
 
-inline bool IsChildOfByName(const UObject* object, const std::wstring& name)
-{
-    const FName target(name.c_str());
-    for (UClass* c : UClassHierarchyRange(object->Class))
-        if (c->Name == target) return true;
-    return false;
-}
+bool IsChildOfByName(const UObject* object, const std::wstring& name);

@@ -77,37 +77,6 @@ namespace EasyHook
         if (initialized_) Uninitialize();
     }
 
-    template<typename FuncType>
-    Hook<FuncType>::Hook(void* targetFunc, FuncType detourFunc)
-        : target_(targetFunc), detour_(detourFunc)
-    {
-        if (!HookManager::Get().IsInitialized())
-            HookManager::Get().Initialize();
-        if (!HookManager::Get().CreateHook(target_, detour_, &original_))
-            throw std::runtime_error("Failed to create hook");
-    }
-
-    template<typename FuncType>
-    bool Hook<FuncType>::Enable()
-    {
-        if (!enabled_) enabled_ = HookManager::Get().EnableHook(target_);
-        return enabled_;
-    }
-
-    template<typename FuncType>
-    bool Hook<FuncType>::Disable()
-    {
-        if (enabled_) enabled_ = !HookManager::Get().DisableHook(target_);
-        return !enabled_;
-    }
-
-    template<typename FuncType>
-    Hook<FuncType>::~Hook()
-    {
-        if (enabled_) Disable();
-        HookManager::Get().RemoveHook(target_);
-    }
-
     bool Init() { return HookManager::Get().Initialize(); }
 
     bool Shutdown() { return HookManager::Get().Uninitialize(); }

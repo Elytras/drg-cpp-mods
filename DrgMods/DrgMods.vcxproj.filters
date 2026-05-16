@@ -72,6 +72,30 @@
     <ClCompile Include="Lib_VarSystem.cpp">
       <Filter>Source Files\LibraryImplementations</Filter>
     </ClCompile>
+    <ClCompile Include="Lib_PropertyAccess.cpp">
+      <Filter>Source Files\LibraryImplementations</Filter>
+    </ClCompile>
+    <ClCompile Include="Lib_ObjectCast.cpp">
+      <Filter>Source Files\LibraryImplementations</Filter>
+    </ClCompile>
+    <ClCompile Include="Lib_CommandHandler.cpp">
+      <Filter>Source Files\LibraryImplementations</Filter>
+    </ClCompile>
+    <ClCompile Include="Lib_Print.cpp">
+      <Filter>Source Files\LibraryImplementations</Filter>
+    </ClCompile>
+    <ClCompile Include="Lib_Utils.cpp">
+      <Filter>Source Files\LibraryImplementations</Filter>
+    </ClCompile>
+    <ClCompile Include="Lib_PropertyInspector.cpp">
+      <Filter>Source Files\LibraryImplementations</Filter>
+    </ClCompile>
+    <ClCompile Include="Lib_GameHooks.cpp">
+      <Filter>Source Files\LibraryImplementations</Filter>
+    </ClCompile>
+    <ClCompile Include="Lib_ObjectFactory.cpp">
+      <Filter>Source Files\LibraryImplementations</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Lib_Forward.h">
@@ -141,9 +165,6 @@
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
     <ClInclude Include="Lib_Json.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Lib_Context.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
   </ItemGroup>
