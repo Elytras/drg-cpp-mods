@@ -220,6 +220,19 @@ namespace GameHooks
 } // namespace GameHooks
 
 // =========================================================================
+// EnqueueOnce — runs fn once on the game thread on the next ProcessEvent tick.
+// =========================================================================
+
+void EnqueueOnce(std::function<void()> fn);
+
+// =========================================================================
+// EnqueueWhile — runs fn on the game thread every tick until fn returns false.
+//   Useful for "do something for as long as a key/condition is active".
+// =========================================================================
+
+void EnqueueWhile(std::function<bool()> fn);
+
+// =========================================================================
 // EnqueueThrottled — schedules items one at a time on the game thread,
 //   rate-limited by interval. fn(item, index, total) returns false to stop.
 // =========================================================================

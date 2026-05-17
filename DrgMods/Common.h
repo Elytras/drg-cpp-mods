@@ -32,10 +32,11 @@ constexpr const char* TARGET_PROCESS_NARROW = "FSD-Win64-Shipping.exe";
 //-----------------------------------------------------------------------------
 // Shared memory / event names
 //-----------------------------------------------------------------------------
-constexpr const wchar_t* SHMEM_LOGS = L"Local\\DRG_Logs";
-constexpr const wchar_t* SHMEM_INJLOG = L"Local\\DRG_InjLog";
-constexpr const wchar_t* SHMEM_CMD = L"Local\\DRG_Commands";
+constexpr const wchar_t* SHMEM_LOGS     = L"Local\\DRG_Logs";
+constexpr const wchar_t* SHMEM_INJLOG   = L"Local\\DRG_InjLog";
+constexpr const wchar_t* SHMEM_CMD      = L"Local\\DRG_Commands";
 constexpr const wchar_t* SHMEM_RESPONSE = L"Local\\DRG_Response";
+constexpr const wchar_t* SHMEM_META     = L"Local\\DRG_Meta";
 
 constexpr const wchar_t* EVENT_LOG_READY = L"Local\\DRG_LogReady";
 constexpr const wchar_t* EVENT_INJLOG_READY = L"Local\\DRG_InjLogReady";
@@ -140,6 +141,17 @@ enum class CommandType : uint32_t
     Reload,
     Custom,
 };
+
+//-----------------------------------------------------------------------------
+// Meta buffer — CLI publishes its console HWND here; DLL reads it for
+// focus-mode keybinding dispatch.
+//-----------------------------------------------------------------------------
+struct MetaBuffer
+{
+    uintptr_t cliHwnd{ 0 };
+    uint8_t   _reserved[56]{};
+};
+static_assert(sizeof(MetaBuffer) == 64, "MetaBuffer layout changed");
 
 //-----------------------------------------------------------------------------
 // Assume-Assert

@@ -96,6 +96,9 @@
     <ClCompile Include="Lib_ObjectFactory.cpp">
       <Filter>Source Files\LibraryImplementations</Filter>
     </ClCompile>
+    <ClCompile Include="Lib_KeyBindings.cpp">
+      <Filter>Source Files\LibraryImplementations</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Lib_Forward.h">
@@ -165,6 +168,9 @@
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
     <ClInclude Include="Lib_Json.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_KeyBindings.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
   </ItemGroup>

@@ -65,3 +65,4 @@
 #include "Lib_CommandHandler.h"     // CommandContext, MutableContext, CommandHandler, VarSystem commands
 #include "Lib_PropertyInspector.h"  // PropertyInspector namespace
 #include "Lib_Json.h"               // JsonHook::Setup, JsonImpl::Parser, JSONType constants
+#include "Lib_KeyBindings.h"        // Key, Mod, Trigger, Focus, KeyBindings:: API

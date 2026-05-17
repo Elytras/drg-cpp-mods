@@ -80,9 +80,33 @@ bool NearlyEqual(double a, double b, double epsilon)
     return std::fabs(a - b) <= epsilon * (std::max)({ 1.0, std::fabs(a), std::fabs(b) });
 }
 
+bool IsOnSpacerig() {
+    UWorld* World = GetWorld();
+    return World ? World->GetName().starts_with("LVL_SpaceRig") : false;
+}
+
 // =========================================================================
 // Player helpers
 // =========================================================================
+
+AFSDPlayerController* GetLocalController() {
+    UWorld* World = GetWorld();
+    UFSDGameInstance* GameInstance = GameLib::GetFSDGameInstance(World);
+    return GameInstance ? GameInstance->GetLocalFSDPlayerController() : nullptr;
+};
+
+APlayerCharacter* GetLocalPlayer() {
+    UWorld* World = GetWorld();
+    UFSDGameInstance* GameInstance = GameLib::GetFSDGameInstance(World);
+    UObject* OutCharacter = GameInstance ? GameInstance->LocalPlayerCharacter.Get() : nullptr;
+    return IsValidOf<APlayerCharacter>(OutCharacter) ? ObjectCast::CastChecked<APlayerCharacter>(OutCharacter) : nullptr;
+}
+
+AFSDPlayerState* GetLocalPlayerState()
+{
+    AFSDPlayerController* LocalController = GetLocalController();
+    return LocalController ? ObjectCast::Cast<AFSDPlayerState>(LocalController->PlayerState) : nullptr;
+}
 
 APlayerCharacter* GetLocalPlayerCharacterBlocking(uint64_t MaxWaitMs)
 {
@@ -92,26 +116,13 @@ APlayerCharacter* GetLocalPlayerCharacterBlocking(uint64_t MaxWaitMs)
     APlayerCharacter* Player = nullptr;
     while ((GetTimeMs() - start) < MaxWaitMs)
     {
-        Player = GameLib::GetLocalPlayerCharacter(World);
-        if (Player && IsValid(Player) && MathLib::ClassIsChildOf(Player->Class, Player->StaticClass()))
-            break;
-        Player = nullptr;
+        Player = GetLocalPlayer();
+        if (Player) break;
         SleepNow(16);
     }
     return Player;
 }
-
-APlayerCharacter* GetLocalPlayer()
-{
-    return GameLib::GetLocalPlayerCharacter(GetWorld());
-}
-
-AFSDPlayerState* GetLocalPlayerState()
-{
-    AFSDPlayerState* OutState = nullptr;
-    return OutState;
-}
-
+    
 // =========================================================================
 // Misc non-template helpers
 // =========================================================================
@@ -125,7 +136,8 @@ std::vector<AFSDPawn*> GetAliveNonFriendlies()
     for (auto A : Out) {
         auto Enemy = ObjectCast::Cast<AFSDPawn>(A);
         if (!IsValidOf<AFSDPawn>(Enemy)) continue;
-        if (!Enemy->GetHealthComponent()->IsAlive()) continue;
+        UHealthComponentBase* Health = GetComponent<UHealthComponentBase>(Enemy);
+        if (!Health || !Health->IsAlive() || !Health->GetHealth() > 0.01) continue;
         if (Enemy->GetAttitude() == EPawnAttitude::Friendly) continue;
         Actors.push_back(Enemy);
     }

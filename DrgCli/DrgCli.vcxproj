@@ -147,7 +147,10 @@
     </ProjectReference>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Completion.cpp" />
     <ClCompile Include="DrgCli.cpp" />
+    <ClCompile Include="Injector.cpp" />
+    <ClCompile Include="SplitConsole.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CliTypes.h" />

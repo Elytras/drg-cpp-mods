@@ -10,6 +10,7 @@
 #include <spdlog/spdlog.h>
 
 #include "Common.h"
+#include "Lib_KeyBindings.h"
 #include "ModManager.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -26,14 +27,16 @@ HANDLE g_hShutdownEvent = NULL;
 HANDLE g_hRespEvent = NULL;
 
 // Mappings
-HANDLE g_hLogMapping = NULL;
-HANDLE g_hCmdMapping = NULL;
+HANDLE g_hLogMapping  = NULL;
+HANDLE g_hCmdMapping  = NULL;
 HANDLE g_hRespMapping = NULL;
+HANDLE g_hMetaMapping = NULL;
 
 // Buffers
-LogBuffer* g_pLogBuffer = nullptr;
-CommandBuffer* g_pCmdBuffer = nullptr;
+LogBuffer*      g_pLogBuffer  = nullptr;
+CommandBuffer*  g_pCmdBuffer  = nullptr;
 ResponseBuffer* g_pRespBuffer = nullptr;
+MetaBuffer*     g_pMetaBuffer = nullptr;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Response channel
@@ -127,6 +130,11 @@ bool InitSharedMemory()
         g_hRespEvent = OpenEventW(EVENT_MODIFY_STATE, FALSE, EVENT_RESP_READY);
     }
 
+    // Meta buffer — optional; carries CLI HWND for focus-aware keybindings
+    g_hMetaMapping = OpenFileMappingW(FILE_MAP_READ, FALSE, SHMEM_META);
+    if (g_hMetaMapping)
+        g_pMetaBuffer = static_cast<MetaBuffer*>(MapViewOfFile(g_hMetaMapping, FILE_MAP_READ, 0, 0, 0));
+
     return true;
 }
 
@@ -135,26 +143,30 @@ void CleanupSharedMemory()
     if (g_pLogBuffer)  UnmapViewOfFile(g_pLogBuffer);
     if (g_pCmdBuffer)  UnmapViewOfFile(g_pCmdBuffer);
     if (g_pRespBuffer) UnmapViewOfFile(g_pRespBuffer);
+    if (g_pMetaBuffer) UnmapViewOfFile(g_pMetaBuffer);
 
     if (g_hLogMapping)    CloseHandle(g_hLogMapping);
     if (g_hCmdMapping)    CloseHandle(g_hCmdMapping);
     if (g_hRespMapping)   CloseHandle(g_hRespMapping);
+    if (g_hMetaMapping)   CloseHandle(g_hMetaMapping);
     if (g_hLogEvent)      CloseHandle(g_hLogEvent);
     if (g_hCmdEvent)      CloseHandle(g_hCmdEvent);
     if (g_hShutdownEvent) CloseHandle(g_hShutdownEvent);
     if (g_hRespEvent)     CloseHandle(g_hRespEvent);
 
-    g_pLogBuffer = nullptr;
-    g_pCmdBuffer = nullptr;
+    g_pLogBuffer  = nullptr;
+    g_pCmdBuffer  = nullptr;
     g_pRespBuffer = nullptr;
+    g_pMetaBuffer = nullptr;
 
-    g_hLogMapping = NULL;
-    g_hCmdMapping = NULL;
-    g_hRespMapping = NULL;
-    g_hLogEvent = NULL;
-    g_hCmdEvent = NULL;
+    g_hLogMapping    = NULL;
+    g_hCmdMapping    = NULL;
+    g_hRespMapping   = NULL;
+    g_hMetaMapping   = NULL;
+    g_hLogEvent      = NULL;
+    g_hCmdEvent      = NULL;
     g_hShutdownEvent = NULL;
-    g_hRespEvent = NULL;
+    g_hRespEvent     = NULL;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -184,6 +196,10 @@ void WorkerThread()
             g_pRespBuffer ? " (response channel active)" : " (no response channel)");
     }
     catch (...) { return; }
+
+    if (g_pMetaBuffer)
+        KeyBindings::SetCLIWindow(g_pMetaBuffer->cliHwnd);
+    KeyBindings::Init();
 
     ModManager manager;
     manager.LoadMods();
@@ -224,6 +240,7 @@ void WorkerThread()
     }
 
     manager.UnloadMods();
+    KeyBindings::Shutdown();
     spdlog::info("DLL shutdown complete");
     spdlog::shutdown();
     CleanupSharedMemory();

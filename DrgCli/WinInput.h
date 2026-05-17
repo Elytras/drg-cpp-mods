@@ -155,6 +155,7 @@ public:
                     {
                         auto lock = MakeLock();
                         m_scrollFn((delta > 0) ? +3 : -3);
+                        Redraw(prompt);  // restore cursor to correct column after scroll
                     }
                     else
                     {
@@ -194,6 +195,24 @@ public:
                         else
                             ClearTooltip();
                         Redraw(m_prompt); // update ghost text for hovered candidate
+                    }
+                }
+                else if (me.dwEventFlags == 0 && (me.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED)
+                         && !m_candRegs.empty())
+                {
+                    SHORT mx = me.dwMousePosition.X;
+                    SHORT my = me.dwMousePosition.Y;
+                    for (const auto& cr : m_candRegs)
+                    {
+                        if (my == cr.row && mx >= cr.c0 && mx < cr.c1)
+                        {
+                            auto lock = MakeLock();
+                            m_buf    = m_lastCandidates[cr.idx];
+                            m_cursor = (int)m_buf.size();
+                            ClearCandidateState();
+                            Redraw(prompt);
+                            break;
+                        }
                     }
                 }
                 continue;
@@ -318,8 +337,22 @@ public:
             }
 
             // No-redraw guards: skip Redraw when cursor is already at the target position
-            if (vk == VK_HOME) { if (m_cursor != 0)               { m_cursor = 0;               Redraw(prompt); } continue; }
-            if (vk == VK_END)  { int e=(int)m_buf.size(); if (m_cursor != e) { m_cursor = e;     Redraw(prompt); } continue; }
+            if (vk == VK_HOME)
+            {
+                // Split mode: jump to oldest log entry (scroll offset = max).
+                // Otherwise: move text cursor to start of input buffer.
+                if (m_splitMode && m_scrollFn) { m_scrollFn(INT_MAX);  Redraw(prompt); }
+                else if (m_cursor != 0)        { m_cursor = 0;         Redraw(prompt); }
+                continue;
+            }
+            if (vk == VK_END)
+            {
+                // Split mode: jump to newest log entry (scroll offset = 0).
+                // Otherwise: move text cursor to end of input buffer.
+                if (m_splitMode && m_scrollFn)              { m_scrollFn(-INT_MAX); Redraw(prompt); }
+                else { int e=(int)m_buf.size(); if (m_cursor != e) { m_cursor = e;  Redraw(prompt); } }
+                continue;
+            }
 
             if (vk == VK_PRIOR || vk == VK_NEXT)  // PgUp / PgDn — scroll log pane
             {
@@ -351,7 +384,21 @@ public:
                 break;
             }
 
-            if (vk == VK_TAB) { DoCompletion(prompt); continue; }
+            if (vk == VK_TAB)
+            {
+                if (m_hoveredCand >= 0 && m_hoveredCand < (int)m_lastCandidates.size())
+                {
+                    m_buf    = m_lastCandidates[m_hoveredCand];
+                    m_cursor = (int)m_buf.size();
+                    ClearCandidateState();
+                    Redraw(prompt);
+                }
+                else
+                {
+                    DoCompletion(prompt);
+                }
+                continue;
+            }
 
             if (ch >= 0x20 && ch != 0x7F)
             {

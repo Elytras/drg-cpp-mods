@@ -29,5 +29,4 @@
 namespace JsonHook {
     void Setup();
     void Teardown();
-    void ProbeTypeEnum();
 }

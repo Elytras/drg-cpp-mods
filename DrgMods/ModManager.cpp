@@ -1,5 +1,6 @@
 ﻿#include "ModManager.h"
 #include "Commands.h"
+#include "Library.h"
 #if USEOWNIMPL
 #include "UnrealCoreTypes.h"
 #endif
@@ -68,7 +69,7 @@ namespace Internal
             return false;
         }
 
-        memcpy(mem, "Hello from GMalloc!", 21);
+        memcpy(mem, "Hello from GMalloc!\0", 21);
 
         uint64 actualSize = 0;
         const bool sizeOk = allocator->GetAllocationSize(mem, actualSize);

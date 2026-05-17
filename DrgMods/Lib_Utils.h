@@ -110,6 +110,8 @@ void        SleepNow       (uint64_t ms);
 uint64_t    GetTimeMs      ();
 void        Exec           (std::string cmd);
 bool        NearlyEqual    (double a, double b, double epsilon = 1e-9);
+bool        IsOnSpacerig   ();
+inline bool IsOnSpaceRig() { return IsOnSpacerig(); }
 
 // =========================================================================
 // Templates
@@ -222,6 +224,12 @@ bool SpawnActor(TSubclassOf<T> ActorClass, const FTransform& SpawnTransform, T*&
     return OutActor != nullptr;
 }
 
+template<typename T >
+    requires IsUComponent<T>
+T* GetComponent(AActor* Actor) {
+    return ObjectCast::Cast<T>(Actor->GetComponentByClass(T::StaticClass()));
+}
+
 template<typename T = AActor>
     requires IsAActor<T>
 TArray<AActor*> GetAllActorsOfClass()
@@ -235,6 +243,7 @@ TArray<AActor*> GetAllActorsOfClass()
 // Player helpers
 // =========================================================================
 
+AFSDPlayerController* GetLocalController();
 APlayerCharacter* GetLocalPlayerCharacterBlocking(uint64_t MaxWaitMs);
 APlayerCharacter* GetLocalPlayer();
 AFSDPlayerState*  GetLocalPlayerState();

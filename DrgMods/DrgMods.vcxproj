@@ -161,6 +161,7 @@
     <ClCompile Include="Lib_EasyHook.cpp" />
     <ClCompile Include="Lib_GameHooks.cpp" />
     <ClCompile Include="Lib_Json.cpp" />
+    <ClCompile Include="Lib_KeyBindings.cpp" />
     <ClCompile Include="Lib_ObjectFactory.cpp" />
     <ClCompile Include="Lib_ObjectCast.cpp" />
     <ClCompile Include="Lib_Print.cpp" />
@@ -190,6 +191,7 @@
     <ClInclude Include="Lib_EasyHook.h" />
     <ClInclude Include="Lib_GameHooks.h" />
     <ClInclude Include="Lib_Json.h" />
+    <ClInclude Include="Lib_KeyBindings.h" />
     <ClInclude Include="Lib_ObjectFactory.h" />
     <ClInclude Include="Lib_PropertyInspector.h" />
     <ClInclude Include="Lib_Utils.h" />

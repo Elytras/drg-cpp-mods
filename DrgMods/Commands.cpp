@@ -3,6 +3,7 @@
 #include "ModManager.h"
 #include "Library.h"
 #include "Common.h"
+#include "Lib_Utils.h"
 
 #include <array>
 #include <atomic>
@@ -148,6 +149,217 @@ namespace Enum {
 }
 
 namespace Helpers {
+
+    struct FDamageInfo
+    {
+        float Damage = 0.f;
+        float RadialDamage = 0.f;
+
+        bool IsValid() const
+        {
+            return Damage > 0.001f || RadialDamage > 0.01f;
+        }
+    };
+
+    static bool ExtractDamageInfo(
+        UDamageComponent* DamageComponent,
+        FDamageInfo& OutInfo)
+    {
+        if (!DamageComponent)
+            return false;
+
+        OutInfo.Damage = DamageComponent->Damage;
+        OutInfo.RadialDamage = DamageComponent->RadialDamage;
+
+        return true;
+    }
+
+    static bool GetDamageInfoFromProjectileClass(
+        UClass* ProjectileClass,
+        FDamageInfo& OutInfo)
+    {
+        if (!ProjectileClass)
+            return false;
+
+        AProjectileBase* ProjectileCDO =
+            Cast<AProjectileBase>(ProjectileClass->ClassDefaultObject);
+
+        if (!ProjectileCDO)
+            return false;
+
+        // Try CDO first
+        if (ExtractDamageInfo(
+            Cast<UDamageComponent>(
+                ProjectileCDO->GetComponentByClass(
+                    UDamageComponent::StaticClass())),
+            OutInfo))
+        {
+            return true;
+        }
+
+        // Runtime-created components fallback
+        FTransform Transform{};
+        Transform.Translation = FVector{ 9999999,9999999,9999999 };
+
+        AProjectileBase* SpawnedProjectile = nullptr;
+
+        if (!SpawnActor<AProjectileBase>(
+            ProjectileClass,
+            Transform,
+            SpawnedProjectile))
+        {
+            return false;
+        }
+
+        bool bResult = ExtractDamageInfo(
+            Cast<UDamageComponent>(
+                SpawnedProjectile->GetComponentByClass(
+                    UDamageComponent::StaticClass())),
+            OutInfo);
+
+        SpawnedProjectile->K2_DestroyActor();
+
+        return bResult;
+    }
+    // GetMesh() on AEnemyPawn is a BlueprintImplementableEvent with no C++ body — always null.
+    // Use K2_GetComponentsByClass for AEnemyPawn; direct field for ADeepPathfinderCharacter.
+    static std::vector<USkeletalMeshComponent*> GetEnemyMeshes(AFSDPawn* Enemy)
+    {
+        using namespace ObjectCast;
+
+        if (auto* dp = Cast<AEnemyDeepPathfinderCharacter>(Enemy))
+            return dp->Mesh ? std::vector<USkeletalMeshComponent*>{ dp->Mesh }
+                            : std::vector<USkeletalMeshComponent*>{};
+
+        std::vector<USkeletalMeshComponent*> result;
+        auto comps = Enemy->K2_GetComponentsByClass(USkeletalMeshComponent::StaticClass());
+        for (int32 i = 0; i < comps.Num(); ++i)
+            if (auto* smc = Cast<USkeletalMeshComponent>(comps[i]))
+                result.push_back(smc);
+        return result;
+    }
+
+    // Returns true if the weakpoint physics body identified by BoneName is visible from CamLoc.
+    // Uses physics-body trace (bTraceComplex=false) so FHitResult::BoneName is populated,
+    // allowing a direct name match instead of a fragile distance threshold.
+    static bool IsWeakpointVisible(APlayerCharacter* LocalPlayer, AFSDPawn* Enemy,
+                                   const FVector& CamLoc, const FVector& WPos, FName BoneName)
+    {
+        TArray<AActor*> NoIgnore;
+        FHitResult Hit;
+        const bool bHit = UKismetSystemLibrary::LineTraceSingle(
+            LocalPlayer, CamLoc, WPos,
+            ETraceTypeQuery::TraceTypeQuery1, false,  // false = physics bodies, populates BoneName
+            NoIgnore, EDrawDebugTrace::None,
+            &Hit, true,                               // bIgnoreSelf — skips LocalPlayer pawn
+            FLinearColor{}, FLinearColor{}, 0.f);
+
+        if (!bHit) return true;                                           // clear path
+        if (Hit.Actor.Get() != static_cast<AActor*>(Enemy)) return false; // terrain or other actor
+        return Hit.BoneName == BoneName;                                  // hit THIS weakpoint body
+    }
+
+    // ── Breakable weakpoint / armor state ────────────────────────────────────────────────
+
+    struct BreakableWpState
+    {
+        bool  isBreakable = false;
+        float health      = -1.f;   // -1 = no per-bone health (SimpleArmor or unmatched)
+        bool  isDestroyed = false;
+    };
+
+    // UE4 4.27 TMap AllocationFlags: inline uint32[4] starts at map_base+0x10.
+    // Returns whether slot i contains a live element.
+    static bool TMapSlotValid(const void* m, int32 i)
+    {
+        if (i < 0 || i >= 128) return false;
+        const auto* f = reinterpret_cast<const uint32*>(static_cast<const uint8*>(m) + 0x10);
+        return (f[i >> 5] >> (i & 31)) & 1u;
+    }
+
+    // Given a weakpoint physics body (bone + material) on a specific mesh component,
+    // finds the UBaseArmorDamageComponent that manages it and returns its health/broken state.
+    // Returns isBreakable=false if no armor component matches (non-breakable weakpoint).
+    //
+    // TMap<FName(8), Value(0x18)> element stride: sizeof(TSetElement<TPair<K,V>>) = 40
+    //   slot+0x00: FName key (8 bytes)
+    //   slot+0x08: Value (24 bytes)
+    //   slot+0x20: HashNextId (4 bytes)
+    //   slot+0x24: HashIndex (4 bytes)
+    static BreakableWpState GetBreakableWpState(
+        AFSDPawn* Enemy, USkeletalMeshComponent* Mesh,
+        FName BoneName, UFSDPhysicalMaterial* PhysMat)
+    {
+        using namespace ObjectCast;
+        BreakableWpState r;
+
+        auto comps = Enemy->K2_GetComponentsByClass(UBaseArmorDamageComponent::StaticClass());
+        for (int32 ci = 0; ci < comps.Num(); ++ci)
+        {
+            auto* base = Cast<UBaseArmorDamageComponent>(comps[ci]);
+            if (!base || base->Mesh != Mesh) continue;
+
+            bool manages = false;
+            for (int32 mi = 0; mi < base->ArmorPhysMats.Num(); ++mi)
+                if (base->ArmorPhysMats[mi] == PhysMat) { manages = true; break; }
+            if (!manages) continue;
+
+            r.isBreakable = true;
+
+            if (auto* hc = Cast<UArmorHealthDamageComponent>(base))
+            {
+                const void*  mp     = &hc->PhysBoneToArmor;
+                const int32  nSlots = *reinterpret_cast<const int32*>(static_cast<const uint8*>(mp) + 0x08);
+                const uint8* buf    = *reinterpret_cast<uint8* const*>(mp);
+                if (!buf) break;
+
+                for (int32 i = 0; i < nSlots; ++i)
+                {
+                    if (!TMapSlotValid(mp, i)) continue;
+                    const uint8*            slot  = buf + i * 40;
+                    const FArmorHealthItem* item  = reinterpret_cast<const FArmorHealthItem*>(slot + 8);
+                    const bool              byMask = (hc->ArmorDamageInfo.ArmorIndexMask >> item->MaterialIndex) & 1;
+
+                    for (int32 bi = 0; bi < item->ArmorBones.Num(); ++bi)
+                    {
+                        const FArmorHealthSubItem& sub = item->ArmorBones[bi];
+                        bool match = (sub.BoneName == BoneName);
+                        if (!match)
+                            for (int32 ai = 0; !match && ai < sub.AdditionalBones.Num(); ++ai)
+                                if (sub.AdditionalBones[ai] == BoneName) match = true;
+                        if (!match) continue;
+                        r.health      = sub.Health;
+                        r.isDestroyed = byMask || sub.Health <= 0.f;
+                        return r;
+                    }
+                }
+            }
+            else if (auto* sc = Cast<USimpleArmorDamageComponent>(base))
+            {
+                const void*  mp     = &sc->PhysBoneToArmor;
+                const int32  nSlots = *reinterpret_cast<const int32*>(static_cast<const uint8*>(mp) + 0x08);
+                const uint8* buf    = *reinterpret_cast<uint8* const*>(mp);
+                if (!buf) break;
+
+                for (int32 i = 0; i < nSlots; ++i)
+                {
+                    if (!TMapSlotValid(mp, i)) continue;
+                    const uint8*                    slot = buf + i * 40;
+                    const FDestructableBodypartItem* item = reinterpret_cast<const FDestructableBodypartItem*>(slot + 8);
+
+                    for (int32 bi = 0; bi < item->ArmorBones.Num(); ++bi)
+                    {
+                        if (item->ArmorBones[bi] != BoneName) continue;
+                        r.isDestroyed = (sc->ArmorDamageInfo.ArmorIndexMask >> item->MaterialIndex) & 1;
+                        return r;
+                    }
+                }
+            }
+            break; // found managing component
+        }
+        return r;
+    }
+
     const std::array<float, static_cast<int>(EEnemyHealthScaling::EEnemyHealthScaling_MAX)> GetCurrentEnemyHealthScalings() {
         std::array<float, static_cast<int>(EEnemyHealthScaling::EEnemyHealthScaling_MAX)> Scalings{};
 
@@ -183,6 +395,22 @@ namespace State
 
     bool infiniteAmmoEnabled = false;
     std::unordered_map<UObject*, int> OldShotCost;
+
+    struct RecoilState {
+    bool    RecoilEnabled      = false;
+    bool    RCSInitialized     = false;
+    float   RCSDesiredPitch    = 0.f;
+    float   RCSPrevCtrlPitch   = 0.f;
+    float   RCSDesiredYaw      = 0.f;
+    float   RCSPrevCtrlYaw     = 0.f;
+    };
+    static struct RecoilState RState;
+
+
+    bool          SilentAimEnabled   = false;
+    CallbackHandle SilentAimHandle   = 0;
+    bool          AimbotEnabled      = false;
+    bool          AimbotHasTarget    = false;
 
     struct ScannedFunction
     {
@@ -420,11 +648,7 @@ namespace Tickables
         if (!GetWorld()) return;
         auto* Player = GetLocalPlayer();
         if (!IsValidOf<APlayerCharacter>(Player)) return;
-        if (
-            bool bIsOnSpacerig = false;
-            !(IsValidOf<ULIB_Game_C>(ULIB_Game_C::GetDefaultObj()) && (ULIB_Game_C::IsOnSpaceRig(GetWorld(), &bIsOnSpacerig),
-                bIsOnSpacerig))
-            ) return;
+        if (!IsOnSpacerig()) return;
         Player->Server_CheatDancingCharacterOnSelf(18);
     }
     void TickSpam()
@@ -1011,7 +1235,7 @@ namespace Commands
         GetLocalPlayer()->Server_CheatDancingCharacterOnSelf(std::strtol(ctx.Arg(1).c_str(), nullptr, 10));
     }
 
-    void ScanDamageMeeterMod(const ctx&) {
+    void ScanDamageMeeterMod(const ctx& = State::dummyCtx) {
         if (!IsValidOf<APlayerCharacter>(GetLocalPlayer())) return;
         TArray<AActor*> FoundActors = GetAllActorsOfClass<AActor>();
 
@@ -1048,7 +1272,7 @@ namespace Commands
         Player->Server_SetIsDancing(0, -1);
     }
 
-    void Crash(const CommandContext&)
+    void Crash(const CommandContext& = State::dummyCtx)
     {
         auto* Local = GetLocalPlayer();
         if (!Local || !Kismet::IsValid(Local)) return info("Aborting crash, no local player");
@@ -1056,7 +1280,6 @@ namespace Commands
         Local->Server_SpawnEnemies(UEnemyDescriptor::GetDefaultObj(), 100000);
         info("Crash triggered.");
     }
-
     void Say(const CommandContext& ctx)
     {
         UFSDGameInstance* Instance = GameLib::GetFSDGameInstance(GetWorld());
@@ -1102,7 +1325,90 @@ namespace Commands
         CoilGun->Server_HitTerrain(Start, End, SafeStof(ctx.Arg(7)));
     }
 
-    void FearAll(const CommandContext&)
+    void WPInfo(const CommandContext& = State::dummyCtx)
+    {
+        using namespace ObjectCast;
+
+        if (IsOnSpaceRig()) { spdlog::info("[wpinfo] on space rig"); return; }
+
+        std::vector<AFSDPawn*> Enemies = GetAliveNonFriendlies();
+        if (Enemies.empty()) { spdlog::info("[wpinfo] no enemies"); return; }
+
+        APlayerCharacter* LocalPlayer = GetLocalPlayer();
+        FVector CamLoc = {};
+        if (IsValidOf<APlayerCharacter>(LocalPlayer)) {
+            if (auto* Ctrl = Cast<AFSDPlayerController>(LocalPlayer->Controller))
+                if (auto* CamMgr = Ctrl->PlayerCameraManager)
+                    CamLoc = CamMgr->GetCameraLocation();
+        }
+
+        AFSDPawn* Target = nullptr;
+        float BestDist = FLT_MAX;
+        for (AFSDPawn* E : Enemies) {
+            if (!IsValidOf<AFSDPawn>(E)) continue;
+            FVector D = E->K2_GetActorLocation() - CamLoc;
+            float Dist = D.X*D.X + D.Y*D.Y + D.Z*D.Z;
+            if (Dist < BestDist) { BestDist = Dist; Target = E; }
+        }
+        if (!Target) { spdlog::info("[wpinfo] no valid target"); return; }
+
+        const char* Branch = Cast<AEnemyDeepPathfinderCharacter>(Target) ? "DeepPathfinder"
+                           : Cast<AEnemyPawn>(Target)                  ? "EnemyPawn"
+                           : "unknown";
+        auto Meshes = Helpers::GetEnemyMeshes(Target);
+        spdlog::info("[wpinfo] branch={} meshes={}", Branch, Meshes.size());
+
+        int32 wpCount = 0;
+        for (int32 m = 0; m < (int32)Meshes.size(); ++m)
+        {
+            auto* Mesh = Meshes[m];
+            auto* SkelAsset = Mesh->SkeletalMesh;
+            auto* PhysAsset = SkelAsset ? SkelAsset->PhysicsAsset : nullptr;
+            spdlog::info("[wpinfo] mesh[{}] bones={} skelMesh={} physAsset={} bodies={}",
+                m, Mesh->GetNumBones(),
+                SkelAsset ? "ok" : "NULL", PhysAsset ? "ok" : "NULL",
+                PhysAsset ? PhysAsset->SkeletalBodySetups.Num() : 0);
+            if (!PhysAsset) continue;
+
+            for (int32 i = 0; i < PhysAsset->SkeletalBodySetups.Num(); ++i) {
+                auto* Body = PhysAsset->SkeletalBodySetups[i];
+                if (!Body) continue;
+                auto* FSDMat = Body->PhysMaterial ? Cast<UFSDPhysicalMaterial>(Body->PhysMaterial) : nullptr;
+                if (!FSDMat || !FSDMat->IsWeakPoint) continue;
+
+                ++wpCount;
+                const int32   BoneIdx = Mesh->GetBoneIndex(Body->BoneName);
+                const FVector Pos     = Mesh->GetSocketLocation(Body->BoneName);
+                const bool    bVis    = IsValidOf<APlayerCharacter>(LocalPlayer)
+                    ? Helpers::IsWeakpointVisible(LocalPlayer, Target, CamLoc, Pos, Body->BoneName)
+                    : false;
+                const auto WpState = Helpers::GetBreakableWpState(Target, Mesh, Body->BoneName, FSDMat);
+                if (WpState.isBreakable)
+                {
+                    if (WpState.health >= 0.f)
+                        spdlog::info("[wpinfo]  WP[{}] bone='{}' boneIdx={} mult={:.2f} {} breakable hp={:.1f}{}",
+                            i, Body->BoneName.ToString(), BoneIdx, FSDMat->DamageMultiplier,
+                            bVis ? "VIS" : "OCC", WpState.health,
+                            WpState.isDestroyed ? " DESTROYED" : "");
+                    else
+                        spdlog::info("[wpinfo]  WP[{}] bone='{}' boneIdx={} mult={:.2f} {} breakable{}",
+                            i, Body->BoneName.ToString(), BoneIdx, FSDMat->DamageMultiplier,
+                            bVis ? "VIS" : "OCC",
+                            WpState.isDestroyed ? " DESTROYED" : "");
+                }
+                else
+                {
+                    spdlog::info("[wpinfo]  WP[{}] bone='{}' boneIdx={} mult={:.2f} {} pos=({:.0f},{:.0f},{:.0f})",
+                        i, Body->BoneName.ToString(), BoneIdx, FSDMat->DamageMultiplier,
+                        bVis ? "VIS" : "OCC",
+                        Pos.X, Pos.Y, Pos.Z);
+                }
+            }
+        }
+        spdlog::info("[wpinfo] {} weakpoint(s) total", wpCount);
+    }
+
+    void FearAll(const CommandContext& = State::dummyCtx)
     {
         APlayerCharacter* Player = GetLocalPlayer();
         if (!Kismet::IsValid(Player)) return;
@@ -1153,7 +1459,7 @@ namespace Commands
         }
     }
 
-    void LogChat(const CommandContext&)
+    void LogChat(const CommandContext& = State::dummyCtx)
     {
         if (State::ServerChatCallback == 0)
         {
@@ -1174,7 +1480,7 @@ namespace Commands
         }
     }
 
-    void SixSeven(const CommandContext&)
+    void SixSeven(const CommandContext& = State::dummyCtx)
     {
         auto  Players = ActorLib::GetAllPlayerCharacters(GetWorld());
         auto* Player = GetLocalPlayer();
@@ -1188,7 +1494,7 @@ namespace Commands
         }
     }
 
-    void Dance(const CommandContext&)
+    void Dance(const CommandContext& = State::dummyCtx)
     {
         auto* Player = GetLocalPlayer();
         if (!Kismet::IsValid(Player)) { warn("[cmd:dance] Local player not valid."); return; }
@@ -1207,14 +1513,14 @@ namespace Commands
         info("[cmd:rename] New name: '{}'", ObjToStr(Player));
     }
 
-    void ReadName(const CommandContext&)
+    void ReadName(const CommandContext& = State::dummyCtx)
     {
         auto* Player = GetLocalPlayer();
         if (!Kismet::IsValid(Player)) { warn("[cmd:readname] Local player not valid."); return; }
         info("[cmd:readname] Player name: '{}'", ObjToStr(Player));
     }
 
-    void Twerk(const CommandContext&)
+    void Twerk(const CommandContext& = State::dummyCtx)
     {
         if (State::DanceCallback == 0)
         {
@@ -1233,7 +1539,7 @@ namespace Commands
         }
     }
 
-    void DoUntwerk(const CommandContext&)
+    void DoUntwerk(const CommandContext& = State::dummyCtx)
     {
         auto  Players = ActorLib::GetAllPlayerCharacters(GetWorld());
         auto* Local = GetLocalPlayer();
@@ -1255,7 +1561,7 @@ namespace Commands
         }
     }
 
-    void Inventory(const CommandContext&)
+    void Inventory(const CommandContext& = State::dummyCtx)
     {
         auto* Player = GetLocalPlayer();
         if (!Kismet::IsValid(Player)) { warn("[cmd:inventory] Local player not valid."); return; }
@@ -1269,7 +1575,7 @@ namespace Commands
         }
     }
 
-    void IgnoreProxy(const CommandContext&)
+    void IgnoreProxy(const CommandContext& = State::dummyCtx)
     {
         if (State::ProxyModCallback == 0)
         {
@@ -1300,7 +1606,7 @@ namespace Commands
         ::Exec(cmd);
     }
 
-    void StopTick(const CommandContext&)
+    void StopTick(const CommandContext& = State::dummyCtx)
     {
         if (State::TickCallback == 0)
         {
@@ -1316,7 +1622,7 @@ namespace Commands
         }
     }
 
-    void BeginPlay(const CommandContext&)
+    void BeginPlay(const CommandContext& = State::dummyCtx)
     {
         if (State::BeginPlayCallback == 0)
         {
@@ -1343,7 +1649,7 @@ namespace Commands
         }
     }
 
-    void ScanAllClasses(const CommandContext&)
+    void ScanAllClasses(const CommandContext& = State::dummyCtx)
     {
         int totalClasses = 0, totalFuncs = 0;
         info("[cmd:scanall] Starting global CDO scan...");
@@ -1631,7 +1937,7 @@ namespace Commands
         info("[cmd:call] Called '{}' on '{}'.", funcName, Owner->GetName());
     }
 
-    void TeleportAllToSelf(const ctx&) {
+    void TeleportAllToSelf(const ctx& = State::dummyCtx) {
         if (!IsValidOf<APlayerCharacter>(GetLocalPlayer())) return;
         TArray<APlayerCharacter*> Players = ActorLib::GetAllPlayerCharacters(GetWorld());
         FVector Coords = GetLocalPlayer()->K2_GetActorLocation();
@@ -1803,11 +2109,9 @@ namespace Commands
         info("[cmd:tp] Teleported to ({}, {}, {})", Coords.X, Coords.Y, Coords.Z);
     }
 
-    void HideSound(const CommandContext&)
+    void HideSound(const CommandContext& = State::dummyCtx)
     {
-        bool OnSpacerig{};
-        ULIB_Game_C::GetDefaultObj()->IsOnSpaceRig(GetWorld(), &OnSpacerig);
-        if (!OnSpacerig) return;
+        if (!IsOnSpaceRig()) return;
         auto* Local = GetLocalPlayer();
         if (!Kismet::IsValid(Local)) return;
         if (Kismet::IsServer(GetWorld()))
@@ -1823,7 +2127,7 @@ namespace Commands
         }
     }
 
-    void Troll(const CommandContext&)
+    void Troll(const CommandContext& = State::dummyCtx)
     {
         APlayerCharacter* Local = GetLocalPlayer();
         AReplicatedActor_C* ActualTeleporter = nullptr;
@@ -2124,7 +2428,7 @@ namespace Commands
             });
     }
 
-    void DumpDescriptors(const CommandContext&)
+    void DumpDescriptors(const CommandContext& = State::dummyCtx)
     {
         // UEnum* for a named field via FEnumProperty / FByteProperty reflection
         auto getFieldEnum = [](UClass* Cls, const char* Name) -> UEnum*
@@ -2197,7 +2501,7 @@ namespace Commands
         else warn("[dumpdescriptors] Failed to open {}", path);
     }
 
-    void ToggleGodmode(const CommandContext&)
+    void ToggleGodmode(const CommandContext& = State::dummyCtx)
     {
         auto* Local = GetLocalPlayer();
         if (!Kismet::IsValid(Local)) return;
@@ -2206,10 +2510,14 @@ namespace Commands
         info("[cmd:godmode] God mode enabled for local player.");
     }
 
-    void ToggleInfiniteAmmo(const CommandContext&)
+    void ToggleInfiniteAmmo(const CommandContext& = State::dummyCtx)
     {
         auto* LocalPlayer = GetLocalPlayer();
-        if (!LocalPlayer || !Kismet::IsValid(LocalPlayer->InventoryComponent)) return;
+        if (!LocalPlayer || !Kismet::IsValid(LocalPlayer->InventoryComponent)) 
+        {
+            State::infiniteAmmoEnabled = false;
+            return;
+        }
         State::infiniteAmmoEnabled = !State::infiniteAmmoEnabled;
         if (State::infiniteAmmoEnabled)
         {
@@ -2230,6 +2538,460 @@ namespace Commands
     }
 }
 
+namespace Binds {
+    void Crash() {
+        Commands::Crash();
+    }
+    struct BaseGunStats{};
+
+    std::unordered_map<FName, BaseGunStats> Stats;
+    void AimbotDisable() {}
+
+    struct WpTargetResult
+    {
+        FVector pos        = {};
+        bool hasWeakpoints = false; // enemy has WP bodies in physics asset at all
+        bool anyVisible    = false; // at least one visible, alive WP was found
+    };
+
+    // Scans all mesh components for visible, alive weakpoint bodies.
+    // hasWeakpoints=true even if all are occluded or destroyed (enemy IS a WP enemy).
+    // anyVisible=true only if the returned pos is a valid WP target.
+    static WpTargetResult GetWeakpointTarget(AFSDPawn* Enemy, const std::vector<USkeletalMeshComponent*>& Meshes,
+                                              const FVector& CamLoc, const FVector& Forward,
+                                              APlayerCharacter* LocalPlayer)
+    {
+        using namespace ObjectCast;
+        static constexpr float kDeg2Rad = 3.14159265f / 180.f;
+
+        WpTargetResult result;
+        FVector BestPos  = {};
+        float   BestMult = -1.f;
+        float   BestDot  = -2.f;
+
+        for (USkeletalMeshComponent* Mesh : Meshes)
+        {
+            if (!Mesh) continue;
+            auto* SkelAsset = Mesh->SkeletalMesh;
+            if (!SkelAsset) continue;
+            auto* PhysAsset = SkelAsset->PhysicsAsset;
+            if (!PhysAsset) continue;
+
+            for (int32 i = 0; i < PhysAsset->SkeletalBodySetups.Num(); ++i)
+            {
+                USkeletalBodySetup* Body = PhysAsset->SkeletalBodySetups[i];
+                if (!Body || !Body->PhysMaterial) continue;
+
+                UFSDPhysicalMaterial* FSDMat = Cast<UFSDPhysicalMaterial>(Body->PhysMaterial);
+                if (!FSDMat || !FSDMat->IsWeakPoint) continue;
+
+                result.hasWeakpoints = true;
+
+                auto WpState = Helpers::GetBreakableWpState(Enemy, Mesh, Body->BoneName, FSDMat);
+                if (WpState.isBreakable && WpState.isDestroyed) continue;
+
+                const FVector WPos = Mesh->GetSocketLocation(Body->BoneName);
+
+                FVector Dir = WPos - CamLoc;
+                const float Dist = std::sqrt(Dir.X*Dir.X + Dir.Y*Dir.Y + Dir.Z*Dir.Z);
+                if (Dist < 1.f) continue;
+                Dir.X /= Dist; Dir.Y /= Dist; Dir.Z /= Dist;
+
+                if (!Helpers::IsWeakpointVisible(LocalPlayer, Enemy, CamLoc, WPos, Body->BoneName)) continue;
+
+                const float Dot  = Forward.X*Dir.X + Forward.Y*Dir.Y + Forward.Z*Dir.Z;
+                const float Mult = FSDMat->DamageMultiplier;
+
+                if (Mult > BestMult || (Mult >= BestMult && Dot > BestDot))
+                    { BestMult = Mult; BestDot = Dot; BestPos = WPos; result.anyVisible = true; }
+            }
+        }
+
+        result.pos = result.anyVisible ? BestPos : Enemy->K2_GetActorLocation();
+        return result;
+    }
+
+    void Aimbot() {
+        using namespace ObjectCast;
+        static constexpr float kDeg2Rad = 3.14159265f / 180.f;
+        struct Config {
+            float FOV        = 90.f;   // aim cone half-angle in degrees
+            float DeadzoneDeg = 2.f;   // don't correct if already within this many degrees
+        };
+        static Config Config;
+
+        State::AimbotHasTarget = false;
+        if (IsOnSpaceRig()) return;
+
+        APlayerCharacter* LocalPlayer = GetLocalPlayer();
+        if (!IsValidOf<APlayerCharacter>(LocalPlayer)) return;
+
+        AFSDPlayerController* LocalController = Cast<AFSDPlayerController>(LocalPlayer->Controller);
+        if (!IsValidOf<AFSDPlayerController>(LocalController)) return;
+
+        APlayerCameraManager* CamMgr = LocalController->PlayerCameraManager;
+        if (!CamMgr) return;
+
+        UInventoryComponent* Inventory = LocalPlayer->InventoryComponent;
+        if (!Inventory) return;
+
+        AItem* Equipped = Inventory->GetEquippedItem();
+        if (!Equipped) return;
+        
+        Helpers::FDamageInfo DamageInfo;
+        
+        if (UDamageComponent* DamageComponent = GetComponent<UDamageComponent>(Equipped))
+            Helpers::ExtractDamageInfo(DamageComponent, DamageInfo);
+        else
+        {
+            UProjectileLauncherComponent* Launcher = GetComponent<UProjectileLauncherComponent>(Equipped);
+            if (!Launcher) return;
+
+            if (!GetDamageInfoFromProjectileClass(Launcher->ProjectileClass, DamageInfo) ) return;
+        }
+        if (!DamageInfo.IsValid()) return;
+
+        std::vector<AFSDPawn*> Enemies = GetAliveNonFriendlies();
+        if (Enemies.empty()) return;
+
+        const FVector  CamLoc = CamMgr->GetCameraLocation();
+        const FRotator CamRot = CamMgr->GetCameraRotation();
+
+        const float PR = CamRot.Pitch * kDeg2Rad;
+        const float YR = CamRot.Yaw   * kDeg2Rad;
+        const FVector Forward{
+            std::cos(PR) * std::cos(YR),
+            std::cos(PR) * std::sin(YR),
+            std::sin(PR)
+        };
+
+        const float HalfFOVCos = std::cos(Config.FOV * 0.5f * kDeg2Rad);
+
+        // Collect all candidates inside the FOV cone, sorted closest-to-crosshair first.
+        struct Candidate { float dot; AFSDPawn* enemy; };
+        std::vector<Candidate> candidates;
+        for (AFSDPawn* Enemy : Enemies)
+        {
+            if (!IsValidOf<AFSDPawn>(Enemy)) continue;
+            FVector ToEnemy = Enemy->K2_GetActorLocation() - CamLoc;
+            const float Dist = std::sqrt(ToEnemy.X*ToEnemy.X + ToEnemy.Y*ToEnemy.Y + ToEnemy.Z*ToEnemy.Z);
+            if (Dist < 0.01f) continue;
+            ToEnemy.X /= Dist; ToEnemy.Y /= Dist; ToEnemy.Z /= Dist;
+            const float Dot = Forward.X*ToEnemy.X + Forward.Y*ToEnemy.Y + Forward.Z*ToEnemy.Z;
+            if (Dot >= HalfFOVCos) candidates.push_back({Dot, Enemy});
+        }
+        std::sort(candidates.begin(), candidates.end(),
+            [](const Candidate& a, const Candidate& b) { return a.dot > b.dot; });
+
+        // Pick the first candidate that either has no weakpoints (aim at center)
+        // or has at least one visible, alive weakpoint.
+        AFSDPawn* BestTarget = nullptr;
+        FVector   AimPos     = {};
+        for (auto& c : candidates)
+        {
+            auto meshes = Helpers::GetEnemyMeshes(c.enemy);
+            if (meshes.empty()) {
+                // No mesh data — fall back to actor center.
+                BestTarget = c.enemy;
+                AimPos     = c.enemy->K2_GetActorLocation();
+                break;
+            }
+            auto wp = GetWeakpointTarget(c.enemy, meshes, CamLoc, Forward, LocalPlayer);
+            if (wp.hasWeakpoints && !wp.anyVisible) continue; // WP enemy, but none visible
+            BestTarget = c.enemy;
+            AimPos     = wp.pos;
+            break;
+        }
+        if (!BestTarget) return;
+
+        const FRotator AimRot = UKismetMathLibrary::FindLookAtRotation(CamLoc, AimPos);
+
+        // Deadzone: skip correction if already aimed within DeadzoneDeg of the target.
+        {
+            const float AP = AimRot.Pitch * kDeg2Rad, AY = AimRot.Yaw * kDeg2Rad;
+            const FVector AimDir{ std::cos(AP)*std::cos(AY), std::cos(AP)*std::sin(AY), std::sin(AP) };
+            const float dotToAim = Forward.X*AimDir.X + Forward.Y*AimDir.Y + Forward.Z*AimDir.Z;
+            if (dotToAim >= std::cos(Config.DeadzoneDeg * kDeg2Rad)) return;
+        }
+
+        State::AimbotHasTarget = true;
+        const FRotator CtrlRot = LocalController->GetControlRotation();
+        LocalPlayer->K2_SetActorRotation({0.f, AimRot.Yaw, 0.f}, false);
+        LocalController->SetControlRotation({AimRot.Pitch, AimRot.Yaw, CtrlRot.Roll});
+    }
+
+    void EnableAimbot() {
+        if (State::AimbotEnabled) return;
+        State::AimbotEnabled = true;
+        EnqueueWhile([]() -> bool {
+            if (!State::AimbotEnabled) return false;
+            Aimbot();
+            return true;
+        });
+    }
+
+    void DisableAimbot() {
+        State::AimbotEnabled   = false;
+        State::AimbotHasTarget = false;
+    }
+
+    void ToggleRecoilControl() {
+        State::RecoilState& RState = State::RState;
+        RState.RecoilEnabled  = !RState.RecoilEnabled;
+        RState.RCSInitialized = false;
+
+        if (RState.RecoilEnabled) {
+            struct RCSConfig { float Factor = 1.0f; };
+            static RCSConfig RCSConfig;
+
+            // UE4 pitch is in [0,360): looking up ~350, horizontal ~0, down ~90.
+            // Normalize to [-180,180] so arithmetic and clamps work correctly.
+            auto normP = [](float p) -> float {
+                p = std::fmod(p, 360.f);
+                if (p > 180.f)  p -= 360.f;
+                if (p < -180.f) p += 360.f;
+                return p;
+            };
+
+            EnqueueWhile([normP]() -> bool {
+                State::RecoilState& RState = State::RState;
+                if (!RState.RecoilEnabled) return false;
+
+                using namespace ObjectCast;
+                APlayerCharacter* Player = GetLocalPlayer();
+                if (!IsValidOf<APlayerCharacter>(Player)) return true;
+                if (!GetComponent<UPlayerHealthComponent>(Player)->IsAlive()) return true;
+                AFSDPlayerController* Ctrl = Cast<AFSDPlayerController>(Player->Controller);
+                if (!IsValidOf<AFSDPlayerController>(Ctrl)) return true;
+
+                APlayerCameraManager* CamMgr = Ctrl->PlayerCameraManager;
+                if (!CamMgr) return true;
+
+                const FRotator ctrl = Ctrl->GetControlRotation();
+                const FRotator cam  = CamMgr->GetCameraRotation();
+                const float ctrlPitch = normP(ctrl.Pitch);
+                const float camPitch  = normP(cam.Pitch);
+                const float ctrlYaw   = normP(ctrl.Yaw);
+                const float camYaw    = normP(cam.Yaw);
+
+                // EnqueueWhile fires on every ProcessEvent — many times per rendered
+                // frame. The camera updates once per frame. Gate on camPitch actually
+                // changing so we run exactly one correction per camera frame, not N.
+                static float lastCamPitch = 1e9f;
+
+                if (!RState.RCSInitialized) {
+                    lastCamPitch            = camPitch;
+                    RState.RCSDesiredPitch  = ctrlPitch;
+                    RState.RCSPrevCtrlPitch = ctrlPitch;
+                    RState.RCSDesiredYaw    = ctrlYaw;
+                    RState.RCSPrevCtrlYaw   = ctrlYaw;
+                    RState.RCSInitialized   = true;
+                    return true;
+                }
+                if (camPitch == lastCamPitch) return true;
+                lastCamPitch = camPitch;
+
+                // While aimbot is steering, sync our baseline to its output and stand
+                // down. When it loses the target, RCS resumes from the right state and
+                // immediately cancels whatever recoil the spring modifier has built up.
+                if (State::AimbotHasTarget) {
+                    RState.RCSDesiredPitch  = ctrlPitch;
+                    RState.RCSPrevCtrlPitch = ctrlPitch;
+                    RState.RCSDesiredYaw    = ctrlYaw;
+                    RState.RCSPrevCtrlYaw   = ctrlYaw;
+                    return true;
+                }
+
+                // Fold in actual mouse input (the ctrl change we didn't write).
+                RState.RCSDesiredPitch += normP(ctrlPitch - RState.RCSPrevCtrlPitch);
+                RState.RCSDesiredPitch = std::clamp(RState.RCSDesiredPitch, -90.f, 90.f);
+                RState.RCSDesiredYaw   += normP(ctrlYaw - RState.RCSPrevCtrlYaw);
+
+                // Cancel camera modifier offset for both axes.
+                const float newPitch = std::clamp(
+                    RState.RCSDesiredPitch - (camPitch - ctrlPitch) * RCSConfig.Factor,
+                    -90.f, 90.f);
+                const float newYaw = RState.RCSDesiredYaw - (camYaw - ctrlYaw) * RCSConfig.Factor;
+
+                FRotator rot = ctrl;
+                rot.Pitch = newPitch;
+                rot.Yaw   = newYaw;
+                Ctrl->SetControlRotation(rot);
+                RState.RCSPrevCtrlPitch = newPitch;
+                RState.RCSPrevCtrlYaw   = newYaw;
+
+                return true;
+            });
+        }
+        spdlog::info("[recoil] {}", RState.RecoilEnabled ? "ON" : "OFF");
+    }
+
+    void ToggleSilentAim() {
+        State::SilentAimEnabled = !State::SilentAimEnabled;
+        if (State::SilentAimEnabled) {
+            State::SilentAimHandle = GameHooks::OnProcessEventByNameAndClass(
+                "Fire", UWeaponFireComponent::StaticClass(),
+                [](UObject* Obj, UFunction*, void* Parms) {
+                    using namespace ObjectCast;
+                    if (!Parms) return;
+
+                    auto* Weapon = Cast<AAmmoDrivenWeapon>(Obj->Outer);
+                    if (!IsValidOf<AAmmoDrivenWeapon>(Weapon)) return;
+
+                    APlayerCharacter* Player = GetLocalPlayer();
+                    if (!IsValidOf<APlayerCharacter>(Player)) return;
+                    if (Weapon->Character != Player || !Weapon->IsEquipped) return;
+
+                    AFSDPlayerController* Ctrl = Cast<AFSDPlayerController>(Player->Controller);
+                    if (!IsValidOf<AFSDPlayerController>(Ctrl)) return;
+
+                    APlayerCameraManager* CamMgr = Ctrl->PlayerCameraManager;
+                    if (!CamMgr) return;
+
+                    if (IsOnSpaceRig()) return;
+
+                    std::vector<AFSDPawn*> Enemies = GetAliveNonFriendlies();
+                    if (Enemies.empty()) return;
+
+                    static constexpr float kDeg2Rad = 3.14159265f / 180.f;
+                    struct Config { float FOV = 30.f; };
+                    static Config Config;
+
+                    const FVector  CamLoc = CamMgr->GetCameraLocation();
+                    const FRotator CamRot = CamMgr->GetCameraRotation();
+                    const float PR = CamRot.Pitch * kDeg2Rad;
+                    const float YR = CamRot.Yaw   * kDeg2Rad;
+                    const FVector Forward{
+                        std::cos(PR) * std::cos(YR),
+                        std::cos(PR) * std::sin(YR),
+                        std::sin(PR)
+                    };
+
+                    const float HalfFOVCos = std::cos(Config.FOV * 0.5f * kDeg2Rad);
+
+                    struct Candidate { float dot; AFSDPawn* enemy; };
+                    std::vector<Candidate> candidates;
+                    for (AFSDPawn* Enemy : Enemies)
+                    {
+                        if (!IsValidOf<AFSDPawn>(Enemy)) continue;
+                        FVector ToEnemy = Enemy->K2_GetActorLocation() - CamLoc;
+                        const float Dist = std::sqrt(ToEnemy.X*ToEnemy.X + ToEnemy.Y*ToEnemy.Y + ToEnemy.Z*ToEnemy.Z);
+                        if (Dist < 0.01f) continue;
+                        ToEnemy.X /= Dist; ToEnemy.Y /= Dist; ToEnemy.Z /= Dist;
+                        const float Dot = Forward.X*ToEnemy.X + Forward.Y*ToEnemy.Y + Forward.Z*ToEnemy.Z;
+                        if (Dot >= HalfFOVCos) candidates.push_back({Dot, Enemy});
+                    }
+                    if (candidates.empty()) return;
+                    std::sort(candidates.begin(), candidates.end(),
+                        [](const Candidate& a, const Candidate& b) { return a.dot > b.dot; });
+
+                    AFSDPawn* BestTarget = nullptr;
+                    FVector   AimPos     = {};
+                    for (auto& c : candidates)
+                    {
+                        auto meshes = Helpers::GetEnemyMeshes(c.enemy);
+                        if (meshes.empty()) { BestTarget = c.enemy; AimPos = c.enemy->K2_GetActorLocation(); break; }
+                        auto wp = GetWeakpointTarget(c.enemy, meshes, CamLoc, Forward, Player);
+                        if (wp.hasWeakpoints && !wp.anyVisible) continue;
+                        BestTarget = c.enemy;
+                        AimPos     = wp.pos;
+                        break;
+                    }
+                    if (!BestTarget) return;
+
+                    // Redirect the shot: overwrite Direction in-place.
+                    // Origin is the barrel/muzzle position from the Parms buffer.
+                    auto* p = reinterpret_cast<Params::WeaponFireComponent_Fire*>(Parms);
+                    FVector Dir = AimPos - p->Origin;
+                    const float Dist = std::sqrt(Dir.X*Dir.X + Dir.Y*Dir.Y + Dir.Z*Dir.Z);
+                    if (Dist < 1.f) return;
+                    Dir.X /= Dist; Dir.Y /= Dist; Dir.Z /= Dist;
+                    p->Direction.X = Dir.X;
+                    p->Direction.Y = Dir.Y;
+                    p->Direction.Z = Dir.Z;
+                },
+                ClassMatchMode::ExactOrSubclass,
+                ExecutionTiming::Before,
+                ExecutionMode::CallOriginal);
+        } else {
+            GameHooks::RemoveHook(State::SilentAimHandle);
+            State::SilentAimHandle = 0;
+        }
+        spdlog::info("[silent aim] {}", State::SilentAimEnabled ? "ON" : "OFF");
+    }
+
+    void InfiniteAmmo() {
+        Commands::ToggleInfiniteAmmo();
+    }
+    void RegisterKeybinds() {
+        using enum Key;
+        using enum Trigger;
+        using enum Focus;
+
+        KeyBindings::RegisterGameThread(
+            Key::F4,
+            Mod::None, 
+            Binds::Crash,
+            BindingOptions{
+                Press,
+                Game,
+                true
+            }
+        );
+
+        KeyBindings::RegisterGameThread(
+            MouseLeft,
+            Mod::None,
+            Binds::EnableAimbot,
+            BindingOptions{ Press, Game, false }
+        );
+
+        KeyBindings::RegisterGameThread(
+            MouseLeft,
+            Mod::None,
+            Binds::DisableAimbot,
+            BindingOptions{ Release, Game, false }
+        );
+
+        KeyBindings::RegisterGameThread(
+            I,
+            Mod::Ctrl,
+            Binds::InfiniteAmmo,
+            BindingOptions
+            {
+                Press,
+                Game,
+                true
+            }
+        );
+
+        KeyBindings::RegisterGameThread(
+            Key::R,
+            Mod::Ctrl,
+            Binds::ToggleRecoilControl,
+            BindingOptions
+            {
+                Press,
+                Game,
+                false
+            }
+        );
+
+        KeyBindings::RegisterGameThread(
+            Key::S,
+            Mod::Ctrl,
+            Binds::ToggleSilentAim,
+            BindingOptions
+            {
+                Press,
+                Game,
+                false
+            }
+        );
+    }
+
+}
+
 // =========================================================================
 // Public interface
 // =========================================================================
@@ -2245,6 +3007,7 @@ void RegisterCommands(CommandHandler& handler)
     // Enemies
     handler.Register("dumpdescriptors", Commands::DumpDescriptors, "Enemies", R"(Dump all ED_* descriptor controls to C:\Dumper-7\DescriptorDump.json)");
     handler.Register("fearall", Commands::FearAll, "Enemies", R"(Instantly fear all enemies (requires Coil Gun equipped))");
+    handler.Register("wpinfo", Commands::WPInfo, "Enemies", R"(Dump weakpoint physics bodies for the nearest enemy)");
     handler.Register("spawndump", Commands::SpawnAndDump, "Enemies", R"(Dump float/bool/int props for all enemy descriptors x biomes: spawndump [delay_ms])");
     handler.Register("spawnenemies", Commands::SpawnEnemies, "Enemies", R"(Spawn enemies: spawnenemies <descriptor> <count> <x> <y> <z>)");
     handler.Register("spawnmatdump", Commands::SpawnAndDumpMaterials, "Enemies", R"(Dump material names for all enemy descriptors x biomes: spawnmatdump [delay_ms])");
@@ -2263,6 +3026,8 @@ void RegisterCommands(CommandHandler& handler)
     handler.Register("infiniteammo", Commands::ToggleInfiniteAmmo, "Player", R"(Toggle infinite ammo for local player)");
     handler.Register("readname", Commands::ReadName, "Player", R"(Read the name of the local player)");
     handler.Register("rename", Commands::Rename, "Player", R"(Rename the local player: rename <new_name>)");
+    handler.Register("recoil", [](const CommandContext&) { Binds::ToggleRecoilControl(); }, "Player", R"(Toggle recoil compensation (cancels expected RecoilPitch per shot via OnWeaponFired))");
+    handler.Register("silentaim", [](const CommandContext&) { Binds::ToggleSilentAim(); }, "Player", R"(Toggle silent aim (redirects Fire direction to nearest weakpoint, no view rotation) [Ctrl+S])");
 
     // System
     handler.Register("beginplay", Commands::BeginPlay, "System", R"(Toggle BeginPlay spawn watcher)");
@@ -2295,6 +3060,10 @@ void RegisterCommands(CommandHandler& handler)
     handler.Register("unset", Commands::CmdUnset, "Variables", R"(Delete a variable: unset <n>)");
     handler.Register("vars", Commands::CmdVars, "Variables", R"(List all variables)");
 
+    // Keybindings
+    KeyBindings::RegisterCommands(handler);
+    Binds::RegisterKeybinds();
+    
 }
 
 void SendCommandList(const CommandContext& ctx, const CommandHandler& handler)
@@ -2320,9 +3089,9 @@ void SendCommandList(const CommandContext& ctx, const CommandHandler& handler)
 
 void InitDefaultCallbacks()
 {
-    Commands::LogChat(State::dummyCtx);
-    Commands::Twerk(State::dummyCtx);
-    Commands::BeginPlay(State::dummyCtx);
+    Commands::LogChat();
+    Commands::Twerk();
+    Commands::BeginPlay();
     RegisterBuiltinBindings();
     JsonHook::Setup();
 

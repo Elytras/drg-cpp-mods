@@ -23,7 +23,7 @@
 #include <unordered_set>
 #include <iostream>
 
-#ifdef TESTING
+#if TESTING
 #include "../DrgMods/SDK/SDK/CoreUObject_classes.hpp"
 #include "../DrgMods/SDK/UnrealContainers.hpp"
 #else
@@ -48,36 +48,38 @@
 //   Suppressed – "unload" was issued; watcher stays hands-off until "load"
 // ─────────────────────────────────────────────────────────────────────────────
 
-static std::atomic<bool>           g_Running{ true };
-static std::atomic<bool>           g_Dumper7Loaded{ false };
-static std::atomic<InjectionState> g_InjState{ InjectionState::Watching };
-static HANDLE                      g_hProcess = NULL;
-static std::mutex                  g_InjectionMutex;
+std::atomic<bool>           g_Running{ true };
+std::atomic<bool>           g_Dumper7Loaded{ false };
+std::atomic<InjectionState> g_InjState{ InjectionState::Watching };
+HANDLE                      g_hProcess = NULL;
+std::mutex                  g_InjectionMutex;
 
-static DWORD                       kWatchPollMs = 1000;
+DWORD                       kWatchPollMs = 1000;
 
 // Shared memory handles
-static HANDLE g_hLogEvent      = NULL;
-static HANDLE g_hCmdEvent      = NULL;
-static HANDLE g_hShutdownEvent = NULL;
-static HANDLE g_hRespEvent     = NULL;
-static HANDLE g_hLogMapping    = NULL;
-static HANDLE g_hCmdMapping    = NULL;
-static HANDLE g_hRespMapping   = NULL;
+HANDLE g_hLogEvent      = NULL;
+HANDLE g_hCmdEvent      = NULL;
+HANDLE g_hShutdownEvent = NULL;
+HANDLE g_hRespEvent     = NULL;
+HANDLE g_hLogMapping    = NULL;
+HANDLE g_hCmdMapping    = NULL;
+HANDLE g_hRespMapping   = NULL;
+HANDLE g_hMetaMapping   = NULL;
 
-static LogBuffer*      g_pLogBuffer  = nullptr;
-static CommandBuffer*  g_pCmdBuffer  = nullptr;
-static ResponseBuffer* g_pRespBuffer = nullptr;
+LogBuffer*      g_pLogBuffer  = nullptr;
+CommandBuffer*  g_pCmdBuffer  = nullptr;
+ResponseBuffer* g_pRespBuffer = nullptr;
+MetaBuffer*     g_pMetaBuffer = nullptr;
 
 // DLL paths
-static std::wstring g_SourceDllPath;
-static std::wstring g_CopyDllPath;
-static FILETIME     g_LastInjectedTime{};
+std::wstring g_SourceDllPath;
+std::wstring g_CopyDllPath;
+FILETIME     g_LastInjectedTime{};
 
 // CLI state
-static SplitConsole*              g_pSplit = nullptr;
-static std::vector<KnownFunction> g_KnownFunctions;
-static std::vector<KnownCommand>  g_KnownCommands;
+SplitConsole*              g_pSplit = nullptr;
+std::vector<KnownFunction> g_KnownFunctions;
+std::vector<KnownCommand>  g_KnownCommands;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Command dispatch
@@ -205,7 +207,7 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 struct FNetworkGUID {
     uint32_t Value;
 };
-
+#if Testing
 class UPackageMap : public SDK::UObject {
     bool					    bSuppressLogs;
 
@@ -219,6 +221,7 @@ class UPackageMap : public SDK::UObject {
 class FLinkerInstancingContext {
     UC::TMap<SDK::FName, SDK::FName> Mapping;
 };
+#endif
 // ─────────────────────────────────────────────────────────────────────────────
 //  Entry point
 // ─────────────────────────────────────────────────────────────────────────────

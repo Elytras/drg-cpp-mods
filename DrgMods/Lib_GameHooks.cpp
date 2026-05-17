@@ -478,3 +478,19 @@ bool SetHookExecutionMode (CallbackHandle h, ExecutionMode m)   { DBG_ASSERT(h >
 bool SetHookExecutionTiming(CallbackHandle h, ExecutionTiming t) { DBG_ASSERT(h > 0, "Invalid handle"); return ProcessEventHook::Get().SetExecutionTiming(h, t); }
 
 } // namespace GameHooks
+
+void EnqueueOnce(std::function<void()> fn)
+{
+    GameHooks::ProcessEventHook::Get().Enqueue(std::move(fn));
+}
+
+void EnqueueWhile(std::function<bool()> fn)
+{
+    auto& hook = GameHooks::ProcessEventHook::Get();
+    auto task = std::make_shared<std::function<void()>>();
+    *task = [fn = std::move(fn), task, &hook]() mutable
+        {
+            if (fn()) hook.Enqueue(*task);
+        };
+    hook.Enqueue(*task);
+}

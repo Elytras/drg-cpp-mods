@@ -1,7 +1,7 @@
 ﻿#pragma once
 // Commands.h — Command registration and lifecycle functions for ModManager.
 
-#include "Library.h"
+#include "Lib_CommandHandler.h"
 
 // Register all game commands into the handler — call once in ModManager constructor
 void RegisterCommands(CommandHandler& handler);

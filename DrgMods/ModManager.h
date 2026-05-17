@@ -2,7 +2,7 @@
 #include <string>
 #include <thread>
 #include <atomic>
-#include "Library.h"
+#include "Lib_CommandHandler.h"
 
 class ModManager {
     std::thread modThread;

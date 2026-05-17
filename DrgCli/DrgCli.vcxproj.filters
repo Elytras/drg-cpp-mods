@@ -18,6 +18,15 @@
     <ClCompile Include="DrgCli.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Completion.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Injector.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SplitConsole.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="WinInput.h">

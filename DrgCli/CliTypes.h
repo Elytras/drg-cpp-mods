@@ -61,10 +61,12 @@ extern HANDLE g_hRespEvent;
 extern HANDLE g_hLogMapping;
 extern HANDLE g_hCmdMapping;
 extern HANDLE g_hRespMapping;
+extern HANDLE g_hMetaMapping;
 
 extern LogBuffer*      g_pLogBuffer;
 extern CommandBuffer*  g_pCmdBuffer;
 extern ResponseBuffer* g_pRespBuffer;
+extern MetaBuffer*     g_pMetaBuffer;
 
 extern std::wstring g_SourceDllPath;
 extern std::wstring g_CopyDllPath;
