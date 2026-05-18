@@ -239,6 +239,18 @@ namespace Helpers {
         return result;
     }
 
+    // Largest sphere/capsule radius from the body's aggregate geometry.
+    // Fallback 15 UU (~15 cm) for bodies with no sphere or sphyl shapes.
+    static float GetBodyRadius(USkeletalBodySetup* Body)
+    {
+        float r = 0.f;
+        for (int32 i = 0; i < Body->AggGeom.SphereElems.Num(); ++i)
+            r = std::max(r, Body->AggGeom.SphereElems[i].Radius);
+        for (int32 i = 0; i < Body->AggGeom.SphylElems.Num(); ++i)
+            r = std::max(r, Body->AggGeom.SphylElems[i].Radius);
+        return r > 0.f ? r * 0.75f : 15.f;
+    }
+
     // Returns true if the weakpoint physics body identified by BoneName is visible from CamLoc.
     // Uses physics-body trace (bTraceComplex=false) so FHitResult::BoneName is populated,
     // allowing a direct name match instead of a fragile distance threshold.
@@ -396,21 +408,18 @@ namespace State
     bool infiniteAmmoEnabled = false;
     std::unordered_map<UObject*, int> OldShotCost;
 
-    struct RecoilState {
-    bool    RecoilEnabled      = false;
-    bool    RCSInitialized     = false;
-    float   RCSDesiredPitch    = 0.f;
-    float   RCSPrevCtrlPitch   = 0.f;
-    float   RCSDesiredYaw      = 0.f;
-    float   RCSPrevCtrlYaw     = 0.f;
-    };
-    static struct RecoilState RState;
+    bool   RecoilEnabled    = false;
+    bool   RCSInitialized   = false;
+    float  RCSDesiredPitch  = 0.f;
+    float  RCSPrevCtrlPitch = 0.f;
+    float  RCSDesiredYaw    = 0.f;
+    float  RCSPrevCtrlYaw   = 0.f;
 
-
-    bool          SilentAimEnabled   = false;
-    CallbackHandle SilentAimHandle   = 0;
-    bool          AimbotEnabled      = false;
-    bool          AimbotHasTarget    = false;
+    bool           SilentAimEnabled   = false;
+    CallbackHandle SilentAimHandle    = 0;
+    bool           AimbotEnabled      = false;
+    bool           AimbotHasTarget    = false;
+    CallbackHandle AimbotHandle       = 0;
 
     struct ScannedFunction
     {
@@ -2590,20 +2599,34 @@ namespace Binds {
                 auto WpState = Helpers::GetBreakableWpState(Enemy, Mesh, Body->BoneName, FSDMat);
                 if (WpState.isBreakable && WpState.isDestroyed) continue;
 
-                const FVector WPos = Mesh->GetSocketLocation(Body->BoneName);
+                const FVector Center = Mesh->GetSocketLocation(Body->BoneName);
+                const float   R      = Helpers::GetBodyRadius(Body);
 
-                FVector Dir = WPos - CamLoc;
+                // Multipoint: try center then ±R on each world axis.
+                // First candidate visible from CamLoc wins as the aim position.
+                static const std::array<FVector, 7> kOffsets = {{
+                    {0,0,0}, {1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}
+                }};
+                FVector VisPos  = {};
+                bool    bVisible = false;
+                for (const auto& Off : kOffsets)
+                {
+                    FVector Candidate = { Center.X + Off.X*R, Center.Y + Off.Y*R, Center.Z + Off.Z*R };
+                    if (Helpers::IsWeakpointVisible(LocalPlayer, Enemy, CamLoc, Candidate, Body->BoneName))
+                        { VisPos = Candidate; bVisible = true; break; }
+                }
+                if (!bVisible) continue;
+
+                FVector Dir = VisPos - CamLoc;
                 const float Dist = std::sqrt(Dir.X*Dir.X + Dir.Y*Dir.Y + Dir.Z*Dir.Z);
                 if (Dist < 1.f) continue;
                 Dir.X /= Dist; Dir.Y /= Dist; Dir.Z /= Dist;
-
-                if (!Helpers::IsWeakpointVisible(LocalPlayer, Enemy, CamLoc, WPos, Body->BoneName)) continue;
 
                 const float Dot  = Forward.X*Dir.X + Forward.Y*Dir.Y + Forward.Z*Dir.Z;
                 const float Mult = FSDMat->DamageMultiplier;
 
                 if (Mult > BestMult || (Mult >= BestMult && Dot > BestDot))
-                    { BestMult = Mult; BestDot = Dot; BestPos = WPos; result.anyVisible = true; }
+                    { BestMult = Mult; BestDot = Dot; BestPos = VisPos; result.anyVisible = true; }
             }
         }
 
@@ -2723,107 +2746,117 @@ namespace Binds {
     void EnableAimbot() {
         if (State::AimbotEnabled) return;
         State::AimbotEnabled = true;
-        EnqueueWhile([]() -> bool {
-            if (!State::AimbotEnabled) return false;
-            Aimbot();
-            return true;
-        });
+        State::AimbotHandle = GameHooks::OnProcessEventByNameAndClass(
+            "ReceiveTick", APlayerCameraManager::StaticClass(),
+            [](UObject* Obj, UFunction*, void*) {
+                using namespace ObjectCast;
+                APlayerCharacter* Player = GetLocalPlayer();
+                if (!IsValidOf<APlayerCharacter>(Player)) return;
+                AFSDPlayerController* Ctrl = Cast<AFSDPlayerController>(Player->Controller);
+                if (!IsValidOf<AFSDPlayerController>(Ctrl)) return;
+                if (static_cast<APlayerCameraManager*>(Obj) != Ctrl->PlayerCameraManager) return;
+                Aimbot();
+            },
+            GameHooks::ClassMatchMode::ExactOrSubclass,
+            GameHooks::ExecutionTiming::Before,
+            GameHooks::ExecutionMode::CallOriginal);
     }
 
     void DisableAimbot() {
         State::AimbotEnabled   = false;
         State::AimbotHasTarget = false;
+        GameHooks::RemoveHook(State::AimbotHandle);
+        State::AimbotHandle = 0;
     }
 
     void ToggleRecoilControl() {
-        State::RecoilState& RState = State::RState;
-        RState.RecoilEnabled  = !RState.RecoilEnabled;
-        RState.RCSInitialized = false;
+        State::RecoilEnabled  = !State::RecoilEnabled;
+        State::RCSInitialized = false;
 
-        if (RState.RecoilEnabled) {
+        if (State::RecoilEnabled) {
             struct RCSConfig { float Factor = 1.0f; };
             static RCSConfig RCSConfig;
 
-            // UE4 pitch is in [0,360): looking up ~350, horizontal ~0, down ~90.
-            // Normalize to [-180,180] so arithmetic and clamps work correctly.
-            auto normP = [](float p) -> float {
-                p = std::fmod(p, 360.f);
-                if (p > 180.f)  p -= 360.f;
-                if (p < -180.f) p += 360.f;
-                return p;
+            // UE4 pitch/yaw live in [0,360): normalize to [-180,180] so
+            // arithmetic and clamps stay geometrically correct.
+            auto normP = [](float a) -> float {
+                a = std::fmod(a, 360.f);
+                if (a > 180.f)  a -= 360.f;
+                if (a < -180.f) a += 360.f;
+                return a;
             };
 
             EnqueueWhile([normP]() -> bool {
-                State::RecoilState& RState = State::RState;
-                if (!RState.RecoilEnabled) return false;
+                if (!State::RecoilEnabled) return false;
 
                 using namespace ObjectCast;
                 APlayerCharacter* Player = GetLocalPlayer();
                 if (!IsValidOf<APlayerCharacter>(Player)) return true;
-                if (!GetComponent<UPlayerHealthComponent>(Player)->IsAlive()) return true;
+
                 AFSDPlayerController* Ctrl = Cast<AFSDPlayerController>(Player->Controller);
                 if (!IsValidOf<AFSDPlayerController>(Ctrl)) return true;
 
                 APlayerCameraManager* CamMgr = Ctrl->PlayerCameraManager;
                 if (!CamMgr) return true;
 
-                const FRotator ctrl = Ctrl->GetControlRotation();
-                const FRotator cam  = CamMgr->GetCameraRotation();
-                const float ctrlPitch = normP(ctrl.Pitch);
-                const float camPitch  = normP(cam.Pitch);
-                const float ctrlYaw   = normP(ctrl.Yaw);
-                const float camYaw    = normP(cam.Yaw);
+                const FRotator ctrlRot = Ctrl->GetControlRotation();
+                const FRotator camRot  = CamMgr->GetCameraRotation();
+                const float ctrlPitch  = normP(ctrlRot.Pitch);
+                const float camPitch   = normP(camRot.Pitch);
+                const float ctrlYaw    = normP(ctrlRot.Yaw);
+                const float camYaw     = normP(camRot.Yaw);
 
-                // EnqueueWhile fires on every ProcessEvent — many times per rendered
-                // frame. The camera updates once per frame. Gate on camPitch actually
-                // changing so we run exactly one correction per camera frame, not N.
+                // EnqueueWhile fires on every ProcessEvent — many times per
+                // rendered frame. Camera updates once per frame. Gate on
+                // cam values changing so we apply exactly one correction
+                // per camera frame, not N (which would compound to ±90).
                 static float lastCamPitch = 1e9f;
+                static float lastCamYaw   = 1e9f;
 
-                if (!RState.RCSInitialized) {
+                if (!State::RCSInitialized) {
                     lastCamPitch            = camPitch;
-                    RState.RCSDesiredPitch  = ctrlPitch;
-                    RState.RCSPrevCtrlPitch = ctrlPitch;
-                    RState.RCSDesiredYaw    = ctrlYaw;
-                    RState.RCSPrevCtrlYaw   = ctrlYaw;
-                    RState.RCSInitialized   = true;
+                    lastCamYaw              = camYaw;
+                    State::RCSDesiredPitch  = ctrlPitch;
+                    State::RCSPrevCtrlPitch = ctrlPitch;
+                    State::RCSDesiredYaw    = ctrlYaw;
+                    State::RCSPrevCtrlYaw   = ctrlYaw;
+                    State::RCSInitialized   = true;
                     return true;
                 }
-                if (camPitch == lastCamPitch) return true;
+                if (camPitch == lastCamPitch && camYaw == lastCamYaw) return true;
                 lastCamPitch = camPitch;
+                lastCamYaw   = camYaw;
 
-                // While aimbot is steering, sync our baseline to its output and stand
-                // down. When it loses the target, RCS resumes from the right state and
-                // immediately cancels whatever recoil the spring modifier has built up.
-                if (State::AimbotHasTarget) {
-                    RState.RCSDesiredPitch  = ctrlPitch;
-                    RState.RCSPrevCtrlPitch = ctrlPitch;
-                    RState.RCSDesiredYaw    = ctrlYaw;
-                    RState.RCSPrevCtrlYaw   = ctrlYaw;
-                    return true;
-                }
+                // ── Pitch ──────────────────────────────────────────────
+                // Fold in mouse input (ctrl change we didn't write).
+                State::RCSDesiredPitch += normP(ctrlPitch - State::RCSPrevCtrlPitch);
+                State::RCSDesiredPitch  = std::clamp(State::RCSDesiredPitch, -90.f, 90.f);
 
-                // Fold in actual mouse input (the ctrl change we didn't write).
-                RState.RCSDesiredPitch += normP(ctrlPitch - RState.RCSPrevCtrlPitch);
-                RState.RCSDesiredPitch = std::clamp(RState.RCSDesiredPitch, -90.f, 90.f);
-                RState.RCSDesiredYaw   += normP(ctrlYaw - RState.RCSPrevCtrlYaw);
-
-                // Cancel camera modifier offset for both axes.
+                const float pitchOffset = camPitch - ctrlPitch;
                 const float newPitch = std::clamp(
-                    RState.RCSDesiredPitch - (camPitch - ctrlPitch) * RCSConfig.Factor,
+                    State::RCSDesiredPitch - pitchOffset * RCSConfig.Factor,
                     -90.f, 90.f);
-                const float newYaw = RState.RCSDesiredYaw - (camYaw - ctrlYaw) * RCSConfig.Factor;
 
-                FRotator rot = ctrl;
+                // ── Yaw ────────────────────────────────────────────────
+                // Same pattern, but no [-90,90] clamp — yaw wraps full circle.
+                // Normalize desired/offset to handle the 0/360 seam.
+                State::RCSDesiredYaw += normP(ctrlYaw - State::RCSPrevCtrlYaw);
+                State::RCSDesiredYaw  = normP(State::RCSDesiredYaw);
+
+                const float yawOffset = normP(camYaw - ctrlYaw);
+                const float newYaw    = normP(State::RCSDesiredYaw - yawOffset * RCSConfig.Factor);
+
+                FRotator rot = ctrlRot;
                 rot.Pitch = newPitch;
                 rot.Yaw   = newYaw;
                 Ctrl->SetControlRotation(rot);
-                RState.RCSPrevCtrlPitch = newPitch;
-                RState.RCSPrevCtrlYaw   = newYaw;
+                State::RCSPrevCtrlPitch = newPitch;
+                State::RCSPrevCtrlYaw   = newYaw;
 
                 return true;
             });
         }
-        spdlog::info("[recoil] {}", RState.RecoilEnabled ? "ON" : "OFF");
+        spdlog::info("[recoil] {}", State::RecoilEnabled ? "ON" : "OFF");
     }
 
     void ToggleSilentAim() {
