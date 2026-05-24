@@ -21,9 +21,9 @@
 
 using namespace SDK;  // file-local; no math types used in this TU
 
-// �����������������������������������������������������������������������������
+// ─────────────────────────────────────────────────────────────────────────────
 // Internal State & Raw UE Structures
-// �����������������������������������������������������������������������������
+// ─────────────────────────────────────────────────────────────────────────────
 
 namespace JSONType {
     using T = SDK::EJSONType;
@@ -459,7 +459,7 @@ namespace JsonHook {
             static const FName ObjectProperty = FName(L"ObjectProperty");
             if (prop->ClassPrivate->Name == ObjectProperty) {
                 UObject* obj = *reinterpret_cast<UObject**>(valuePtr);
-                if (obj) { 
+                if (obj) {
                     __assume(obj);
                     PropertyInspector::Dump(obj);
                 }
@@ -470,7 +470,7 @@ namespace JsonHook {
 
             return valuePtr;
         }
-        case 0x17: 
+        case 0x17:
         {
             info("Object: {}", frame->Object->GetName());
             return reinterpret_cast<uint8_t*>(&frame->Object);
@@ -512,59 +512,59 @@ namespace JsonHook {
         SDK::UJSONValue_C** retSlot = nullptr;
 
         if (frame->Node == g_Fn) {
-            
+
             info("Node == g_Fn");
-            
+
             auto* p = reinterpret_cast<SDK::Params::JSON_C_FromString*>(frame->Locals);
-            
+
             pInput = &p->Input; outer = p->Outer_0; pSuccess = &p->success;
-            
+
             if (!pReturn) pReturn = (&p->Return);
         }
-        else 
+        else
         {
-        
+
             FProperty* Out;
-            
+
             pInput = reinterpret_cast<UC::FString*>(StepOne(frame, Out));
-            
+
             uint8* raw1 = StepOne(frame, Out);
             outer = raw1 ? *reinterpret_cast<UObject**>(raw1) : nullptr;
-            
+
             StepOne(frame, Out); // WorldContext
-            
+
             pSuccess = reinterpret_cast<bool*>(StepOne(frame, Out));
             retSlot = reinterpret_cast<SDK::UJSONValue_C**>(StepOne(frame, Out));
-            
+
             if (!pReturn) pReturn = retSlot;
-            
+
             if (*frame->Code == 0x16) ++frame->Code;
         }
 
-        auto WriteResult = [&](SDK::UJSONValue_C* val, bool ok) 
+        auto WriteResult = [&](SDK::UJSONValue_C* val, bool ok)
             {
             if (pSuccess) *pSuccess = ok;
             if (pReturn)  *pReturn = val;
             if (retSlot && retSlot != pReturn) *retSlot = val;
             };
 
-        if (!pInput || pInput->Num() <= 1) 
+        if (!pInput || pInput->Num() <= 1)
         {
             WriteResult(nullptr, false);
             return;
         }
-        
+
         struct LastOuterInfo {
             int32 IndexPrivate;
             FName Name;
         };
-        
+
         static FString LastString{};
         static UJSONValue_C* LastJson{};
         static LastOuterInfo Info{};
-        
+
         JsonImpl::Parser parser(pInput->CStr(), pInput->Num() - 1, outer);
-        
+
         if (!outer || !Info.IndexPrivate || Info.IndexPrivate != outer->Index || Info.Name != outer->Name || LastString != *pInput || !LastJson)
         {
             {
@@ -576,9 +576,9 @@ namespace JsonHook {
                 else info("Reparsing becuase string is different. Len Old {}, Len New {}",LastString.Num(),pInput->Num());
             }
             LastJson = parser.Parse();
-            
+
             Info = { outer->Index, outer->Name };
-            if (LastString.GetInnerPtr() != nullptr ) 
+            if (LastString.GetInnerPtr() != nullptr )
             {
                 UnrealAllocator::Get()->Free(LastString.GetInnerPtr());
             }
@@ -668,4 +668,3 @@ namespace JsonHook {
             debug("[JsonHook] GObjects sweep: no extra copies found");
     }
 }
-

@@ -1,5 +1,5 @@
 #pragma once
-// Lib_EasyHook.h � MinHook wrapper.
+// Lib_EasyHook.h — MinHook wrapper.
 
 #include <stdexcept>
 #include <unordered_map>

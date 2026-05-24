@@ -2,11 +2,14 @@
 
 using namespace SDK;  // file-local; no math types used in this TU
 
-// ClassFlags at 0x00CC (before CastFlags at 0x00D0)
+// UClass layout in real UE source:   EClassFlags ClassFlags;  EClassCastFlags ClassCastFlags;
+// So ClassFlags lives 4 bytes BEFORE CastFlags. This relation is stable across UE versions
+// (UE4.27: CastFlags @ 0xD0 -> ClassFlags @ 0xCC ; UE5.6: CastFlags @ 0xD8 -> ClassFlags @ 0xD4).
+// Computing the offset from &CastFlags avoids per-version hardcoding.
 EClassFlags GetClassFlags(const UClass* Class)
 {
-    return *reinterpret_cast<const EClassFlags*>(
-        reinterpret_cast<const uintptr_t>(Class) + 0x00CC);
+    const uintptr_t castFlagsAddr = reinterpret_cast<uintptr_t>(&Class->CastFlags);
+    return *reinterpret_cast<const EClassFlags*>(castFlagsAddr - sizeof(EClassFlags));
 }
 
 bool HasClassFlag(const UClass* Class, EClassFlags Flag)

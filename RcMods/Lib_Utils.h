@@ -1,5 +1,5 @@
 #pragma once
-// Lib_Utils.h — SubclassCache, safe parsers, general helpers, player access.
+// Lib_Utils.h — SubclassCache, safe parsers, general helpers, player access (RogueCore).
 #include <string>
 #include <cstdint>
 #include <concepts>
@@ -13,7 +13,7 @@
 #include "Lib_Forward.h"
 #include "Lib_ObjectCast.h"
 #include "Lib_VTableInfo.h"
-
+#include "../SharedLib/StringLib.h"
 // =========================================================================
 // Concepts
 // =========================================================================
@@ -29,9 +29,6 @@ concept DerivedUObject =
 
 template<typename T>
 concept IsAActor = std::is_base_of_v<SDK::AActor, T>;
-
-template<typename T>
-concept IsAItem = std::is_base_of_v<SDK::AItem, T>;
 
 template<typename T>
 concept IsUComponent = std::is_base_of_v<SDK::UActorComponent, T>;
@@ -110,8 +107,6 @@ void        SleepNow       (uint64_t ms);
 uint64_t    GetTimeMs      ();
 void        Exec           (std::string cmd);
 bool        NearlyEqual    (double a, double b, double epsilon = 1e-9);
-bool        IsOnSpacerig   ();
-inline bool IsOnSpaceRig() { return IsOnSpacerig(); }
 
 // =========================================================================
 // Templates
@@ -185,48 +180,10 @@ TComponentClass* AttachComponent(SDK::AActor* Actor, SDK::TSubclassOf<TComponent
 {
     if (!IsValid(Actor) || !IsValidClass(ComponentClass)) return nullptr;
     if (!ComponentClass->IsSubclassOf(SDK::UActorComponent::StaticClass())) return nullptr;
-    // NOTE: FTransform() refers to our wrapper ::FTransform (matches SDK::FTransform layout).
     return Actor->AddComponentByClass(ComponentClass, false, SDK::FTransform(), false);
 }
 
 template<typename T>
-    requires IsAItem<T>
-T* GetItem(SDK::APlayerCharacter* Target, SDK::EItemCategory Category)
-{
-    if (Category == SDK::EItemCategory::EItemCategory_MAX) return nullptr;
-    if (!IsValidOf<SDK::APlayerCharacter>(Target)) return nullptr;
-    if (!Target->InventoryComponent) return nullptr;
-    SDK::AItem* Item = Target->InventoryComponent->GetItem(Category);
-    if (!IsValidOf<SDK::AItem>(Item)) return nullptr;
-    return ObjectCast::Cast<T>(Item);
-}
-
-template<typename T> T* GetPrimaryWeapon  (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::PrimaryWeapon); }
-template<typename T> T* GetSecondaryWeapon(SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::SecondaryWeapon); }
-template<typename T> T* GetTraversalTool  (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::TraversalTool); }
-template<typename T> T* GetClassTool      (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::ClassTool); }
-template<typename T> T* GetGrenade        (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::Grenade); }
-template<typename T> T* GetFlare          (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::Flare); }
-template<typename T> T* GetMiningTool     (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::MiningTool); }
-template<typename T> T* GetArmor          (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::Armor); }
-
-template<typename T = SDK::AActor>
-    requires IsAActor<T>
-bool SpawnActor(SDK::TSubclassOf<T> ActorClass, const SDK::FTransform& SpawnTransform, T*& OutActor)
-{
-    OutActor = nullptr;
-    if (!ActorClass || !IsValidClass(ActorClass) || !MathLib::ClassIsChildOf(ActorClass, SDK::AActor::StaticClass()))
-        return false;
-    // NOTE: SpawnTransform is our wrapper ::FTransform; implicit-converts to SDK::FTransform.
-    SDK::AActor* TempActor = SDK::UGameplayStatics::BeginDeferredActorSpawnFromClass(
-        GetWorld(), ActorClass, SpawnTransform,
-        SDK::ESpawnActorCollisionHandlingMethod::AlwaysSpawn, nullptr);
-    if (!TempActor) return false;
-    OutActor = ObjectCast::Cast<T>(SDK::UGameplayStatics::FinishSpawningActor(TempActor, SpawnTransform));
-    return OutActor != nullptr;
-}
-
-template<typename T >
     requires IsUComponent<T>
 T* GetComponent(SDK::AActor* Actor) {
     if (!Actor) return nullptr;
@@ -246,19 +203,16 @@ SDK::TArray<SDK::AActor*> GetAllActorsOfClass()
 // Player helpers
 // =========================================================================
 
-SDK::AFSDPlayerController* GetLocalController();
-SDK::APlayerCharacter*     GetLocalPlayerCharacterBlocking(uint64_t MaxWaitMs);
-SDK::APlayerCharacter*     GetLocalPlayer();
-SDK::AFSDPlayerState*      GetLocalPlayerState();
+SDK::APlayerController* GetLocalController();
+SDK::APlayerCharacter*       GetLocalPlayer();
 
 // =========================================================================
 // Misc non-template helpers
 // =========================================================================
 
-std::vector<SDK::AFSDPawn*> GetAliveNonFriendlies();
-std::string                ObjToStr    (const SDK::UObject* Obj);
-std::string            parse_quoted(std::string_view input);
-void*                  FindPattern (const wchar_t* moduleName, std::string_view pattern);
+std::string ObjToStr    (const SDK::UObject* Obj);
+std::string parse_quoted(std::string_view input);
+void*       FindPattern (const wchar_t* moduleName, std::string_view pattern);
 
 // =========================================================================
 // Numeric ranges

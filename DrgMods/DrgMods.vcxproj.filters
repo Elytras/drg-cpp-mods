@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -16,9 +16,6 @@
     <Filter Include="Header Files\LibraryHeaders">
       <UniqueIdentifier>{c48dbfeb-5476-4ed2-bb62-9d793b4004ec}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\Shared">
-      <UniqueIdentifier>{00903fd4-1eef-4593-b71b-3e1ac320e869}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Header Files\SDK Headers">
       <UniqueIdentifier>{90334252-5f8e-49be-8a89-211d614376a3}</UniqueIdentifier>
     </Filter>
@@ -33,6 +30,9 @@
     </Filter>
     <Filter Include="Source Files\LibraryImplementations">
       <UniqueIdentifier>{7df424a2-dfd7-46a6-a839-a20667c615ad}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="External">
+      <UniqueIdentifier>{7a24b1e8-9100-4dc9-8194-a8f664c7e7b3}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -63,91 +63,64 @@
     <ClCompile Include="Commands.cpp">
       <Filter>Source Files\DLL Impl</Filter>
     </ClCompile>
-    <ClCompile Include="Lib_Json.cpp">
-      <Filter>Source Files\LibraryImplementations</Filter>
-    </ClCompile>
-    <ClCompile Include="Lib_EasyHook.cpp">
-      <Filter>Source Files\LibraryImplementations</Filter>
-    </ClCompile>
-    <ClCompile Include="Lib_VarSystem.cpp">
-      <Filter>Source Files\LibraryImplementations</Filter>
-    </ClCompile>
-    <ClCompile Include="Lib_PropertyAccess.cpp">
-      <Filter>Source Files\LibraryImplementations</Filter>
-    </ClCompile>
-    <ClCompile Include="Lib_ObjectCast.cpp">
-      <Filter>Source Files\LibraryImplementations</Filter>
-    </ClCompile>
-    <ClCompile Include="Lib_CommandHandler.cpp">
-      <Filter>Source Files\LibraryImplementations</Filter>
-    </ClCompile>
-    <ClCompile Include="Lib_Print.cpp">
-      <Filter>Source Files\LibraryImplementations</Filter>
-    </ClCompile>
     <ClCompile Include="Lib_Utils.cpp">
-      <Filter>Source Files\LibraryImplementations</Filter>
-    </ClCompile>
-    <ClCompile Include="Lib_PropertyInspector.cpp">
-      <Filter>Source Files\LibraryImplementations</Filter>
-    </ClCompile>
-    <ClCompile Include="Lib_GameHooks.cpp">
-      <Filter>Source Files\LibraryImplementations</Filter>
-    </ClCompile>
-    <ClCompile Include="Lib_ObjectFactory.cpp">
-      <Filter>Source Files\LibraryImplementations</Filter>
-    </ClCompile>
-    <ClCompile Include="Lib_KeyBindings.cpp">
       <Filter>Source Files\LibraryImplementations</Filter>
     </ClCompile>
     <ClCompile Include="Aim.cpp">
       <Filter>Source Files\DLL Impl</Filter>
     </ClCompile>
-    <ClCompile Include="Lib_Math.cpp">
-      <Filter>Source Files\LibraryImplementations</Filter>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_CommandHandler.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_EasyHook.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_GameHooks.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Json.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_KeyBindings.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Math.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectCast.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectFactory.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Print.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyAccess.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyInspector.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_VarSystem.cpp">
+      <Filter>External</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Lib_Forward.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
-    <ClInclude Include="Lib_ObjectCast.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Lib_PropertyAccess.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Lib_Print.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
     <ClInclude Include="Lib_Utils.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
-    <ClInclude Include="Lib_EasyHook.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Lib_GameHooks.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Lib_VarSystem.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Lib_CommandHandler.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Lib_PropertyInspector.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
     <ClInclude Include="Common.h">
-      <Filter>Header Files\Shared</Filter>
-    </ClInclude>
-    <ClInclude Include="StringLib.h">
-      <Filter>Header Files\Shared</Filter>
+      <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
     <ClInclude Include="SDK\SDK\FSD_classes.hpp">
       <Filter>Header Files\SDK Headers</Filter>
     </ClInclude>
     <ClInclude Include="Library.h">
-      <Filter>Header Files\Shared</Filter>
+      <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
     <ClInclude Include="ModManager.h">
       <Filter>Header Files\DLL Headers</Filter>
@@ -158,32 +131,14 @@
     <ClInclude Include="Lib_VTableInfo.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
-    <ClInclude Include="Lib_VTableHook.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
-    <ClInclude Include="UnrealCoreTypes.h">
-      <Filter>Header Files\Shared</Filter>
-    </ClInclude>
     <ClInclude Include="SDK\UnrealContainers.hpp">
       <Filter>Header Files\SDK Headers</Filter>
     </ClInclude>
     <ClInclude Include="SDK\SDK\Basic.hpp">
       <Filter>Header Files\SDK Headers</Filter>
     </ClInclude>
-    <ClInclude Include="Lib_ObjectFactory.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Lib_Json.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
-    <ClInclude Include="Lib_KeyBindings.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
     <ClInclude Include="Aim.h">
       <Filter>Header Files\DLL Headers</Filter>
-    </ClInclude>
-    <ClInclude Include="Lib_Math.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

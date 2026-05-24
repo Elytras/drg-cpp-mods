@@ -51,6 +51,7 @@ constexpr bool DeleteOnTwerk = false;
 constexpr bool VoidTwerkPE = false;
 constexpr bool KillOnTwerk = true;
 
+using namespace SDK;
 using namespace SDK::Params;
 using namespace ObjectCast;
 using namespace GameHooks;
@@ -103,7 +104,7 @@ inline nlohmann::json ExtractNumericPropertiesAsJson(uintptr_t Base, SDK::UClass
             bool numeric = false;
             std::string typePrefix;
 
-            FieldCast::Visit(field, [&](auto* p)
+            SDK::FieldCast::Visit(field, [&](auto* p)
                 {
                     using T = std::remove_pointer_t<decltype(p)>;
                     if (std::is_same_v<T, SDK::FFloatProperty>) { numeric = true; typePrefix = "Float"; }
@@ -318,7 +319,7 @@ namespace TickSystem
     {
         return SetTickableFunction_AsIntervalMs(
             std::move(fn),
-            MakeIntervalProviderFromFrequency(std::forward<SDK::TFrequencyRate>(frequencyRate)));
+            MakeIntervalProviderFromFrequency(std::forward<TFrequencyRate>(frequencyRate)));
     }
 
     void ClearTickableFunction(CallbackHandle handle)
@@ -731,7 +732,7 @@ namespace Scan
         size_t totalParamChars = 0;
         for (auto* field : SDK::FFieldRange(Func->ChildProperties))
         {
-            if (!FieldCast::IsA<SDK::FProperty>(field)) continue;
+            if (!SDK::FieldCast::IsA<SDK::FProperty>(field)) continue;
             auto* Prop = static_cast<SDK::FProperty*>(field);
             auto  pflags = static_cast<SDK::EPropertyFlags>(Prop->PropertyFlags);
             if (pflags & SDK::EPropertyFlags::ReturnParm) continue;
@@ -926,7 +927,7 @@ namespace Callbacks
 
     void ProxyModHook(SDK::UObject*, SDK::UFunction*, void*)
     {
-        SDK::UClass* ProxyMod = BasicFilesImpleUtils::FindClassByName("ProxyMod_C", false);
+        SDK::UClass* ProxyMod = SDK::BasicFilesImpleUtils::FindClassByName("ProxyMod_C", false);
         if (!ProxyMod || !Kismet::IsValidClass(ProxyMod)) { error("[ProxyMod] Class not found."); return; }
         SDK::UFunction* InitFunc = ProxyMod->GetFunction("ProxyMod_C", "Init");
         if (!InitFunc || !Kismet::IsValid(InitFunc)) { error("[ProxyMod] Function 'Init' missing."); return; }
@@ -1272,7 +1273,7 @@ namespace Commands
     {
         if (State::ProxyModCallback == 0)
         {
-            SDK::UClass* ProxyMod = BasicFilesImpleUtils::FindClassByName("ProxyMod_C", false);
+            SDK::UClass* ProxyMod = SDK::BasicFilesImpleUtils::FindClassByName("ProxyMod_C", false);
             if (!ProxyMod || !Kismet::IsValidClass(ProxyMod))
             {
                 error("[cmd:ignoreproxy] Failed to find class 'ProxyMod_C'."); return;
@@ -1560,7 +1561,7 @@ namespace Commands
         std::vector<SDK::FProperty*> parmProps;
         for (SDK::FField* field : SDK::FFieldRange(Func->ChildProperties))
         {
-            if (!FieldCast::IsA<SDK::FProperty>(field)) continue;
+            if (!SDK::FieldCast::IsA<SDK::FProperty>(field)) continue;
             SDK::FProperty* Prop = static_cast<SDK::FProperty*>(field);
             SDK::EPropertyFlags  pf = static_cast<SDK::EPropertyFlags>(Prop->PropertyFlags);
             if (!(pf & SDK::EPropertyFlags::Parm))    continue;
@@ -1580,7 +1581,7 @@ namespace Commands
             uintptr_t base = reinterpret_cast<uintptr_t>(parmsBuf.data());
             if (expanded.object)
             {
-                FieldCast::Visit(parmProps[i], [&]<typename T>(T * p)
+                SDK::FieldCast::Visit(parmProps[i], [&]<typename T>(T * p)
                 {
                     if constexpr (std::is_same_v<T, SDK::FObjectProperty> ||
                         std::is_same_v<T, SDK::FObjectPropertyBase> ||
@@ -1619,13 +1620,14 @@ namespace Commands
         Owner->ProcessEvent(Func, parmsSize > 0 ? parmsBuf.data() : nullptr);
         Func->FunctionFlags = savedFlags;
         for (SDK::FProperty* Prop : parmProps)
-            FieldCast::Visit(Prop, [&]<typename T>(T * p)
+            SDK::FieldCast::Visit(Prop, [&]<typename T>(T * p)
         {
+            using namespace SDK;
             uintptr_t base = reinterpret_cast<uintptr_t>(parmsBuf.data());
             if constexpr (std::is_same_v<T, SDK::FStrProperty>)
-                GetPropertyPtr<SDK::FString>(base, p->Offset)->~SDK::FString();
+                GetPropertyPtr<FString>(base, p->Offset)->~FString();
             else if constexpr (std::is_same_v<T, SDK::FNameProperty>)
-                GetPropertyPtr<SDK::FName>(base, p->Offset)->~SDK::FName();
+                GetPropertyPtr<FName>(base, p->Offset)->~FName();
         });
         info("[cmd:call] Called '{}' on '{}'.", funcName, Owner->GetName());
     }
@@ -2003,7 +2005,7 @@ namespace Commands
                     return true;
                 }
 
-                SDKFTransform SpawnTransform{};
+                SDK::FTransform SpawnTransform{};
                 SpawnTransform.Translation = SpawnLoc;
                 SDK::APawn* Pawn = nullptr;
                 SpawnActor<SDK::APawn>(current->cls, SpawnTransform, Pawn);
@@ -2108,7 +2110,7 @@ namespace Commands
                 }
 
                 // ── Spawn next enemy ──────────────────────────────────────
-                static SDKFTransform SpawnTransform{};
+                static SDK::FTransform SpawnTransform{};
                 SpawnTransform.Translation = SpawnLoc;
 
                 SDK::APawn* Pawn = nullptr;
@@ -2130,8 +2132,8 @@ namespace Commands
                 for (SDK::FField* field : SDK::FFieldRange(Cls->ChildProperties))
                 {
                     if (field->Name != needle) continue;
-                    if (auto* ep = FieldCast::Cast<SDK::FEnumProperty>(field)) return ep->Enum;
-                    if (auto* bp = FieldCast::Cast<SDK::FByteProperty>(field))  return bp->Enum;
+                    if (auto* ep = SDK::FieldCast::Cast<SDK::FEnumProperty>(field)) return ep->Enum;
+                    if (auto* bp = SDK::FieldCast::Cast<SDK::FByteProperty>(field))  return bp->Enum;
                 }
                 return nullptr;
             };

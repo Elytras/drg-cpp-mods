@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // Lib_VTableHook.h — Simplified per-slot vtable hook with a central registry.
 //
 // Design:
@@ -307,7 +307,12 @@ namespace VTH
         template<int32_t Slot, typename Sig>
         SlotHook<Slot, Sig>& Hook()
         {
-            VH_ASSERT(SlotHook<Slot, Sig>::Get().IsInstalled(),
+            // The extra parens around the condition are required: without them the
+            // preprocessor splits the `SlotHook<Slot, Sig>::Get().IsInstalled()`
+            // expression on the comma between `Slot` and `Sig` (it doesn't know
+            // about C++ template angle brackets), turning the 2-arg macro call
+            // into a 3-arg call — MSVC warns C4002 about that.
+            VH_ASSERT((SlotHook<Slot, Sig>::Get().IsInstalled()),
                 "Hook() called before Install() for this slot");
             return SlotHook<Slot, Sig>::Get();
         }

@@ -18,6 +18,7 @@
 
 extern HANDLE g_hRespEvent;
 
+using namespace SDK;
 using namespace ObjectCast;
 using namespace GameHooks;
 
@@ -993,14 +994,14 @@ namespace AimAssist
         using enum Trigger;
         using enum Focus;
 
-        KeyBindings::RegisterGameThread(MouseLeft, Mod::None,
-            AimbotPressed, BindingOptions{ Press,   Game, false });
-        KeyBindings::RegisterGameThread(MouseLeft, Mod::None,
-            AimbotReleased, BindingOptions{ Release, Game, false });
+        //KeyBindings::RegisterGameThread(MouseLeft, Mod::None,
+        //    AimbotPressed, BindingOptions{ Press,   Game, false });
+        //KeyBindings::RegisterGameThread(MouseLeft, Mod::None,
+        //    AimbotReleased, BindingOptions{ Release, Game, false });
 
         KeyBindings::RegisterGameThread(Key::R, Mod::Ctrl,
             ToggleRecoilControl, BindingOptions{ Press, Game, false });
-        KeyBindings::RegisterGameThread(Key::S, Mod::Ctrl,
-            ToggleSilentAim, BindingOptions{ Press, Game, false });
+        //KeyBindings::RegisterGameThread(Key::S, Mod::Ctrl,
+        //    ToggleSilentAim, BindingOptions{ Press, Game, false });
     }
 } // namespace AimAssist

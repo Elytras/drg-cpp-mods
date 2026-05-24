@@ -30,7 +30,7 @@
 #endif
 
 #include "../DrgMods/Common.h"
-#include "../DrgMods/StringLib.h"
+#include "../SharedLib/StringLib.h"
 
 #include "SplitConsole.h"
 #include "WinInput.h"

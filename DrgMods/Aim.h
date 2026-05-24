@@ -27,8 +27,8 @@ namespace AimAssist
     // IgnoreBaseClasses:   IsChildOfByName subclass match → skipped, unless
     //                      the enemy is elite or boss (those override ignore).
 
-    extern std::vector<FName> IgnoreBaseClasses;
-    extern std::vector<FName> ForceIncludeClasses;
+    extern std::vector<SDK::FName> IgnoreBaseClasses;
+    extern std::vector<SDK::FName> ForceIncludeClasses;
 
     // ── Runtime state (read-only externally) ─────────────────────────────────
 

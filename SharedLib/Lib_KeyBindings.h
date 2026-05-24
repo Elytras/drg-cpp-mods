@@ -171,7 +171,7 @@ namespace KeyBindings
     // already-registered binding with the same focus scope.
     BindingHandle Register
     (
-        Key key, 
+        Key key,
         Mod mods,
         std::function<void()> callback,
         BindingOptions opts = {}
@@ -180,9 +180,9 @@ namespace KeyBindings
     // Register a binding to be executed on game thread
     BindingHandle RegisterGameThread
     (
-        Key key, 
-        Mod mods, 
-        std::function<void()> callback, 
+        Key key,
+        Mod mods,
+        std::function<void()> callback,
         BindingOptions opts = {}
     );
 

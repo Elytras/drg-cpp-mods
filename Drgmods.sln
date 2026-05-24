@@ -1,4 +1,3 @@
-
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.14.36603.0
@@ -6,9 +5,21 @@ MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DrgCli", "DrgCli\DrgCli.vcxproj", "{29226E80-3235-487E-8BAB-FE494F04B8C1}"
 	ProjectSection(ProjectDependencies) = postProject
 		{16C10240-C1AA-4163-9571-F3E4C9D7CBEC} = {16C10240-C1AA-4163-9571-F3E4C9D7CBEC}
+		{26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE} = {26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE}
+		{8CF01F85-88A3-41FF-8438-805E6519ACFE} = {8CF01F85-88A3-41FF-8438-805E6519ACFE}
 	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DrgMods", "DrgMods\DrgMods.vcxproj", "{16C10240-C1AA-4163-9571-F3E4C9D7CBEC}"
+	ProjectSection(ProjectDependencies) = postProject
+		{26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE} = {26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RcMods", "RcMods\RcMods.vcxproj", "{8CF01F85-88A3-41FF-8438-805E6519ACFE}"
+	ProjectSection(ProjectDependencies) = postProject
+		{26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE} = {26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SharedLib", "SharedLib\SharedLib.vcxproj", "{26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -34,6 +45,22 @@ Global
 		{16C10240-C1AA-4163-9571-F3E4C9D7CBEC}.Release|x64.Build.0 = Release|x64
 		{16C10240-C1AA-4163-9571-F3E4C9D7CBEC}.Release|x86.ActiveCfg = Release|Win32
 		{16C10240-C1AA-4163-9571-F3E4C9D7CBEC}.Release|x86.Build.0 = Release|Win32
+		{8CF01F85-88A3-41FF-8438-805E6519ACFE}.Debug|x64.ActiveCfg = Debug|x64
+		{8CF01F85-88A3-41FF-8438-805E6519ACFE}.Debug|x64.Build.0 = Debug|x64
+		{8CF01F85-88A3-41FF-8438-805E6519ACFE}.Debug|x86.ActiveCfg = Debug|Win32
+		{8CF01F85-88A3-41FF-8438-805E6519ACFE}.Debug|x86.Build.0 = Debug|Win32
+		{8CF01F85-88A3-41FF-8438-805E6519ACFE}.Release|x64.ActiveCfg = Release|x64
+		{8CF01F85-88A3-41FF-8438-805E6519ACFE}.Release|x64.Build.0 = Release|x64
+		{8CF01F85-88A3-41FF-8438-805E6519ACFE}.Release|x86.ActiveCfg = Release|Win32
+		{8CF01F85-88A3-41FF-8438-805E6519ACFE}.Release|x86.Build.0 = Release|Win32
+		{26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE}.Debug|x64.ActiveCfg = Debug|x64
+		{26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE}.Debug|x64.Build.0 = Debug|x64
+		{26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE}.Debug|x86.ActiveCfg = Debug|Win32
+		{26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE}.Debug|x86.Build.0 = Debug|Win32
+		{26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE}.Release|x64.ActiveCfg = Release|x64
+		{26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE}.Release|x64.Build.0 = Release|x64
+		{26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE}.Release|x86.ActiveCfg = Release|Win32
+		{26C55AC3-8FB3-44AF-B75C-4E1F4BDA3FCE}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

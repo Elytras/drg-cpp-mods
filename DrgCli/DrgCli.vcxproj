@@ -132,7 +132,9 @@
       <StringPooling>true</StringPooling>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
-      <EnableVectorLength>VectorLength512</EnableVectorLength>
+      <!-- EnableVectorLength (compiler flag /vlen) requires MSVC 14.40+ (VS 2022 17.10).
+           Current toolset 14.38 (17.8) compiles it but its LTCG linker rejects it as
+           'unrecognized flag in p2'. Re-enable after upgrading Build Tools. -->
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
@@ -143,7 +145,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
     <ProjectReference>
-      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
     </ProjectReference>
   </ItemDefinitionGroup>
   <ItemGroup>

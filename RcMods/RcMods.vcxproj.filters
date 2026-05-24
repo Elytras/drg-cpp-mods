@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -13,5 +13,114 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Header Files\LibraryHeaders">
+      <UniqueIdentifier>{a3d5f9c0-1b1a-4e9d-9c0a-1234567890ab}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\SDK Headers">
+      <UniqueIdentifier>{b6a6a3b7-2c2b-4f1e-bb1c-abcdef012345}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\DLL Headers">
+      <UniqueIdentifier>{c7b7b4c8-3d3c-4f2f-cc2d-fedcba543210}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\DLL Impl">
+      <UniqueIdentifier>{d8c8c5d9-4e4d-4030-dd3e-9876543210ab}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\SDK Impl">
+      <UniqueIdentifier>{e9d9d6ea-5f5e-4141-ee4f-ba9876543210}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\LibraryImplementations">
+      <UniqueIdentifier>{fae9e7fb-6f6f-4252-ff50-cb0987654321}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="External">
+      <UniqueIdentifier>{5f6199e7-d942-4a23-bbd9-e9cc7d855c45}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Main.cpp">
+      <Filter>Source Files\DLL Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="ModManager.cpp">
+      <Filter>Source Files\DLL Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="Commands.cpp">
+      <Filter>Source Files\DLL Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="Lib_Utils.cpp">
+      <Filter>Source Files\LibraryImplementations</Filter>
+    </ClCompile>
+    <ClCompile Include="SDK\SDK\Basic.cpp">
+      <Filter>Source Files\SDK Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="SDK\SDK\CoreUObject_functions.cpp">
+      <Filter>Source Files\SDK Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="SDK\SDK\Engine_functions.cpp">
+      <Filter>Source Files\SDK Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_CommandHandler.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_EasyHook.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_GameHooks.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_KeyBindings.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Math.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectCast.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Print.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyAccess.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyInspector.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_VarSystem.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="SDK\SDK\RogueCore_functions.cpp">
+      <Filter>Source Files\SDK Impl</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Common.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Library.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_Forward.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_Utils.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_VTableInfo.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Commands.h">
+      <Filter>Header Files\DLL Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="ModManager.h">
+      <Filter>Header Files\DLL Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="SDK\SDK\Basic.hpp">
+      <Filter>Header Files\SDK Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="SDK\UnrealContainers.hpp">
+      <Filter>Header Files\SDK Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="SDK\SDK\RogueCore_classes.hpp">
+      <Filter>Header Files\SDK Headers</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

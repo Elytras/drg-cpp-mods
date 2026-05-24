@@ -1,5 +1,5 @@
 #pragma once
-// Lib_PropertyAccess.h � Property memory access helpers and GetTypeName.
+// Lib_PropertyAccess.h — Property memory access helpers and GetTypeName.
 
 #include "Lib_Forward.h"
 

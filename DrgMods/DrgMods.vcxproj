@@ -117,7 +117,7 @@
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)*;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)DrgMods;$(SolutionDir)SharedLib;$(ProjectDir)*;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
@@ -136,11 +136,13 @@
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir)*;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)DrgMods;$(SolutionDir)SharedLib;$(ProjectDir)*;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <StringPooling>true</StringPooling>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
-      <EnableVectorLength>VectorLength512</EnableVectorLength>
+      <!-- EnableVectorLength (compiler flag /vlen) requires MSVC 14.40+ (VS 2022 17.10).
+           Toolset 14.38 (17.8) compiles it but its LTCG linker rejects it as
+           'unrecognized flag in p2'. Re-enable after upgrading Build Tools. -->
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <OmitFramePointers>true</OmitFramePointers>
@@ -158,25 +160,36 @@
   <ItemGroup>
     <ClCompile Include="Commands.cpp" />
     <ClCompile Include="Aim.cpp" />
-    <ClCompile Include="Lib_Math.cpp" />
-    <ClCompile Include="Lib_CommandHandler.cpp" />
-    <ClCompile Include="Lib_EasyHook.cpp" />
-    <ClCompile Include="Lib_GameHooks.cpp" />
-    <ClCompile Include="Lib_Json.cpp" />
-    <ClCompile Include="Lib_KeyBindings.cpp" />
-    <ClCompile Include="Lib_ObjectFactory.cpp" />
-    <ClCompile Include="Lib_ObjectCast.cpp" />
-    <ClCompile Include="Lib_Print.cpp" />
-    <ClCompile Include="Lib_PropertyAccess.cpp" />
-    <ClCompile Include="Lib_PropertyInspector.cpp" />
     <ClCompile Include="Lib_Utils.cpp" />
-    <ClCompile Include="Lib_VarSystem.cpp" />
     <ClCompile Include="Main.cpp">
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <ClCompile Include="ModManager.cpp">
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
+    <!--
+      SharedLib .cpp files compiled INTO DrgMods.dll.
+
+      SharedLib itself is a Utility project (produces no .lib) because the
+      .cpp files transitively #include game-specific SDK headers (Common.h,
+      Lib_Forward.h, the generated SDK) — they must be compiled against
+      DrgMods's headers here, and separately against RcMods's headers in
+      RcMods. Removing these entries breaks the link with "unresolved
+      external symbol" errors for everything in SharedLib (Lib_GameHooks,
+      Lib_CommandHandler, Lib_VarSystem, etc).
+    -->
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_CommandHandler.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_EasyHook.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_GameHooks.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Json.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_KeyBindings.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Math.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectCast.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectFactory.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Print.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyAccess.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyInspector.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_VarSystem.cpp" />
     <ClCompile Include="SDK\SDK\AssetRegistry_functions.cpp" />
     <ClCompile Include="SDK\SDK\Basic.cpp">
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpplatest</LanguageStandard>
@@ -190,29 +203,14 @@
     <ClInclude Include="Commands.h" />
     <ClInclude Include="Common.h" />
     <ClInclude Include="Aim.h" />
-    <ClInclude Include="Lib_Math.h" />
-    <ClInclude Include="Lib_CommandHandler.h" />
-    <ClInclude Include="Lib_EasyHook.h" />
-    <ClInclude Include="Lib_GameHooks.h" />
-    <ClInclude Include="Lib_Json.h" />
-    <ClInclude Include="Lib_KeyBindings.h" />
-    <ClInclude Include="Lib_ObjectFactory.h" />
-    <ClInclude Include="Lib_PropertyInspector.h" />
-    <ClInclude Include="Lib_Utils.h" />
-    <ClInclude Include="Lib_Print.h" />
-    <ClInclude Include="Lib_PropertyAccess.h" />
-    <ClInclude Include="Lib_ObjectCast.h" />
     <ClInclude Include="Lib_Forward.h" />
     <ClInclude Include="Library.h" />
-    <ClInclude Include="Lib_VarSystem.h" />
-    <ClInclude Include="Lib_VTableHook.h" />
+    <ClInclude Include="Lib_Utils.h" />
     <ClInclude Include="Lib_VTableInfo.h" />
     <ClInclude Include="ModManager.h" />
     <ClInclude Include="SDK\SDK\Basic.hpp" />
     <ClInclude Include="SDK\SDK\FSD_classes.hpp" />
     <ClInclude Include="SDK\UnrealContainers.hpp" />
-    <ClInclude Include="StringLib.h" />
-    <ClInclude Include="UnrealCoreTypes.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

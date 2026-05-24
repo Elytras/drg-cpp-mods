@@ -631,7 +631,7 @@ namespace KeyBindings
                     line += " (" + std::to_string(b.opts.heldMs) + "ms)";
                 if (b.opts.suppress)
                     line += "  suppress";
-                info(line);
+                info("{}", line);
             }
         }, "keybindings", "bindings  — list all registered keybindings");
 
@@ -647,7 +647,7 @@ namespace KeyBindings
             }
             std::string result = "[KeyBindings] probe: " + std::to_string(ok) + " keys OK";
             if (fail) result += ", " + std::to_string(fail) + " MISMATCHED";
-            info(result);
+            info("{}", result);
         }, "keybindings", "bindings_probe  — verify Key enum values match VK_* table");
     }
 }

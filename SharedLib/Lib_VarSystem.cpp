@@ -1,4 +1,4 @@
-﻿#include "Lib_VarSystem.h"
+#include "Lib_VarSystem.h"
 #include "Lib_Utils.h"
 #include "Lib_CommandHandler.h"
 #include "Lib_GameHooks.h"
@@ -7,6 +7,14 @@
 #include <cstdlib>
 #include <ctime>
 
+inline const UC::TArray<SDK::APlayerCharacter*>GetAllPlayers()
+{
+#ifdef RogueCore
+    return ActorLib::GetActivePlayerCharacters(GetWorld());
+#else
+    return ActorLib::GetAllPlayerCharacters(GetWorld());
+#endif
+}
 namespace VarSystem
 {
     using namespace SDK;  // re-declare here so .cpp can use SDK types unqualified
@@ -81,7 +89,7 @@ namespace VarSystem
             });
 
         RegisterBinding("randomplayer", []() {
-            auto Players = ActorLib::GetAllPlayerCharacters(nullptr);
+            auto Players = GetAllPlayers();
             std::vector<APlayerCharacter*> validPlayers;
             for (auto p : Players)
                 if (p && p != GetLocalPlayer())
@@ -145,7 +153,7 @@ namespace VarSystem
             try
             {
                 size_t pos;
-                std::stof(raw, &pos);
+                (void)std::stof(raw, &pos);
                 if (pos == raw.size())
                     return { VarType::Float, raw };
             }

@@ -1,9 +1,13 @@
-﻿#pragma once
+#pragma once
 // Lib_CommandHandler.h — CommandContext, MutableContext, CommandHandler.
 #include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
+// Plain includes — each consumer's AdditionalIncludeDirectories resolves
+// these to the right game's headers (DrgMods/ for DrgMods builds, RcMods/
+// for RcMods builds). Hardcoding "../DrgMods/" here breaks RcMods because
+// it pulls in both games' Common.h / SDK in the same translation unit.
 #include "Lib_Forward.h"
 #include "Common.h"
 

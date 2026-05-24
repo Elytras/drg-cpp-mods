@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // Lib_VarSystem.h — Session-scoped variable storage + function bindings.
 
 #include <functional>
