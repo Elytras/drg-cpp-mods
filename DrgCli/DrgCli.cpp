@@ -1,9 +1,15 @@
-// DrgCli.cpp — Combined CLI + injector host.
+// DrgCli.cpp — Combined CLI + injector host (DRG and RC).
 //   • Creates all shared memory (log, cmd, response) and manages DLL lifecycle.
-//   • Watches for the target process and auto-injects DrgMods.dll.
+//   • Watches for the target process and auto-injects the matching mod DLL.
 //   • Runs a readline REPL with tab-completion, ghost hints, and AC pane.
 //
-// Replaces the former separate DrgInjector (ConsoleHost) and DrgCli executables.
+// Game selection at startup:
+//   cli.exe          → auto-detect (falls back to DRG if neither runs)
+//   cli.exe drg      → target FSD-Win64-Shipping.exe + DrgMods.dll
+//   cli.exe rc       → target RogueCore-Win64-Shipping.exe + RcMods.dll
+//
+// All game-specific strings live in Profile.h/.cpp; this file reads them via
+// the global `g_Profile` and never names a game directly.
 
 
 #define _CRT_SECURE_NO_WARNINGS
@@ -23,13 +29,8 @@
 #include <unordered_set>
 #include <iostream>
 
-#if TESTING
-#include "../DrgMods/SDK/SDK/CoreUObject_classes.hpp"
-#include "../DrgMods/SDK/UnrealContainers.hpp"
-#else
-#endif
-
-#include "../DrgMods/Common.h"
+#include "../SharedLib/IpcProtocol.h"
+#include "Profile.h"
 #include "../SharedLib/StringLib.h"
 
 #include "SplitConsole.h"
@@ -311,26 +312,38 @@ class FLinkerInstancingContext {
 //  Entry point
 // ─────────────────────────────────────────────────────────────────────────────
 
-int main()
+int main(int argc, char** argv)
 {
     system("chcp 65001 > nul");
+
+    // ── Profile selection ──────────────────────────────────────────────────
+    // First arg picks the game: "drg" or "rc". No arg → auto-detect by
+    // scanning running processes; falls back to DRG if neither runs.
+    const Profile* requested = nullptr;
+    if (argc >= 2)
+    {
+        std::wstring wide = StringLib::ToWide(argv[1]);
+        requested = ResolveProfile(wide.c_str());
+        if (!requested)
+        {
+            std::cerr << "[CLI] Unknown profile '" << argv[1]
+                      << "'. Use 'drg' or 'rc'. Aborting.\n";
+            return 2;
+        }
+    }
+    InitProfile(requested);
 
     // ── Split console ──────────────────────────────────────────────────────
     SplitConsole split;
     g_pSplit = &split;
 
     auto Print = [&](const std::string& s) { split.PrintCmd(s); };
-    Print("--- DRG Mod CLI ---  Tab: complete  Right: accept hint  Up/Down: history");
-#if TESTING 
-    Print(
-        std::to_string(sizeof(UC::FString)) + " " +
-        std::to_string(offsetof(UC::FString, Data)) + " " +
-        std::to_string(offsetof(UC::FString, NumElements)) + " " +
-        std::to_string(offsetof(UC::FString, MaxElements)) + " " +
-        std::to_string(sizeof(UPackageMap)) + " " + 
-        std::to_string(sizeof(UPackageMap) - sizeof(SDK::UObject)) + " " +
-        std::to_string(sizeof(FLinkerInstancingContext)));
-#endif
+    {
+        std::string banner = "--- ";
+        banner += (g_Profile->id == GameId::RC) ? "RC" : "DRG";
+        banner += " Mod CLI ---  Tab: complete  Right: accept hint  Up/Down: history";
+        Print(banner);
+    }
     // ── Shared memory ──────────────────────────────────────────────────────
     if (!InitSharedMemory())
     {
@@ -345,7 +358,7 @@ int main()
     std::thread watchThread(ProcessWatcherThread);
     std::thread readyThread(DllReadyThread);
 
-    Log("Ready. Watching for " + std::string(TARGET_PROCESS_NARROW) + "...");
+    Log("Ready. Watching for " + std::string(g_Profile->targetProcessNarrow) + "...");
 
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
 

@@ -2831,7 +2831,6 @@ void InitDefaultCallbacks()
     Commands::LogChat();
     Commands::Twerk();
     Commands::BeginPlay();
-    RegisterBuiltinBindings();
     JsonHook::Setup();
 
     TickSystem::SetTickableFunction_AsIntervalMs(Tickables::DeletePitjaws, 5000L);

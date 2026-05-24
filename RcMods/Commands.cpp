@@ -30,7 +30,7 @@ void ResetCallbackHandles()
 
 void InitDefaultCallbacks()
 {
-    // Register default callbacks here.
+    VarSystem::RegisterBuiltinBindings();
 }
 
 // =========================================================================
@@ -39,6 +39,16 @@ void InitDefaultCallbacks()
 
 void RegisterCommands(CommandHandler& handler)
 {
+    using namespace VarSystem;
+
+    handler.Register("prop",  PropertyInspector::DispatchCommand, "Inspection",
+        R"(prop <cdo|obj> <n> <dump|get|set|list> [prop] [value] [fuzzy] [class <name>])");
+
+    handler.Register("get",   Cmd_Get,   "Variables", R"(Get a variable: get <n>)");
+    handler.Register("set",   Cmd_Set,   "Variables", R"(Set a variable: set <n> <value>)");
+    handler.Register("unset", Cmd_Unset, "Variables", R"(Delete a variable: unset <n>)");
+    handler.Register("vars",  Cmd_Vars,  "Variables", R"(List all variables)");
+
     KeyBindings::RegisterCommands(handler);
 }
 

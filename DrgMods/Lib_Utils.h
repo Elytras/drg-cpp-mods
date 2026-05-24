@@ -185,7 +185,6 @@ TComponentClass* AttachComponent(SDK::AActor* Actor, SDK::TSubclassOf<TComponent
 {
     if (!IsValid(Actor) || !IsValidClass(ComponentClass)) return nullptr;
     if (!ComponentClass->IsSubclassOf(SDK::UActorComponent::StaticClass())) return nullptr;
-    // NOTE: FTransform() refers to our wrapper ::FTransform (matches SDK::FTransform layout).
     return Actor->AddComponentByClass(ComponentClass, false, SDK::FTransform(), false);
 }
 
@@ -217,7 +216,6 @@ bool SpawnActor(SDK::TSubclassOf<T> ActorClass, const SDK::FTransform& SpawnTran
     OutActor = nullptr;
     if (!ActorClass || !IsValidClass(ActorClass) || !MathLib::ClassIsChildOf(ActorClass, SDK::AActor::StaticClass()))
         return false;
-    // NOTE: SpawnTransform is our wrapper ::FTransform; implicit-converts to SDK::FTransform.
     SDK::AActor* TempActor = SDK::UGameplayStatics::BeginDeferredActorSpawnFromClass(
         GetWorld(), ActorClass, SpawnTransform,
         SDK::ESpawnActorCollisionHandlingMethod::AlwaysSpawn, nullptr);

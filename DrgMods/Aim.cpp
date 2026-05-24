@@ -86,7 +86,6 @@ namespace AimAssist
 
             // Components created at runtime aren't on the CDO — spawn a throwaway
             // projectile far off-grid and read its damage component.
-            // Direct-field access � use SDK::FTransform (our ::FTransform wrapper has accessors only).
             SDK::FTransform Transform{};
             Transform.Translation = SDK::FVector{ 9999999, 9999999, 9999999 };
 
@@ -994,14 +993,14 @@ namespace AimAssist
         using enum Trigger;
         using enum Focus;
 
-        //KeyBindings::RegisterGameThread(MouseLeft, Mod::None,
-        //    AimbotPressed, BindingOptions{ Press,   Game, false });
-        //KeyBindings::RegisterGameThread(MouseLeft, Mod::None,
-        //    AimbotReleased, BindingOptions{ Release, Game, false });
+        KeyBindings::RegisterGameThread(MouseLeft, Mod::None,
+            AimbotPressed, BindingOptions{ Press,   Game, false });
+        KeyBindings::RegisterGameThread(MouseLeft, Mod::None,
+            AimbotReleased, BindingOptions{ Release, Game, false });
 
         KeyBindings::RegisterGameThread(Key::R, Mod::Ctrl,
             ToggleRecoilControl, BindingOptions{ Press, Game, false });
-        //KeyBindings::RegisterGameThread(Key::S, Mod::Ctrl,
-        //    ToggleSilentAim, BindingOptions{ Press, Game, false });
+        KeyBindings::RegisterGameThread(Key::S, Mod::Ctrl,
+            ToggleSilentAim, BindingOptions{ Press, Game, false });
     }
 } // namespace AimAssist

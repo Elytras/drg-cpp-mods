@@ -14,9 +14,10 @@
 #include <thread>
 #include <iostream>
 
-#include "../DrgMods/Common.h"
+#include "../SharedLib/IpcProtocol.h"
 #include "CliTypes.h"
 #include "Injector.h"
+#include "Profile.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Process helpers
@@ -97,7 +98,7 @@ bool ResolveDllPaths()
 #endif
 
     wchar_t relBuf[MAX_PATH];
-    std::wstring relPath = std::wstring(L"..\\x64\\") + kConfig + L"\\" + DLL_FILENAME;
+    std::wstring relPath = std::wstring(L"..\\x64\\") + kConfig + L"\\" + g_Profile->dllFilename;
     GetFullPathNameW(relPath.c_str(), MAX_PATH, relBuf, nullptr);
     std::wstring firstCandidate = relBuf;
 
@@ -107,7 +108,7 @@ bool ResolveDllPaths()
     }
     else
     {
-        std::wstring sideCandidate = (exeDir / DLL_FILENAME).wstring();
+        std::wstring sideCandidate = (exeDir / g_Profile->dllFilename).wstring();
         if (GetFileAttributesW(sideCandidate.c_str()) != INVALID_FILE_ATTRIBUTES)
         {
             g_SourceDllPath = sideCandidate;
@@ -121,7 +122,7 @@ bool ResolveDllPaths()
     }
 
     g_CopyDllPath = (exeDir /
-        (std::filesystem::path(DLL_FILENAME).stem().wstring() + L"_copy.dll")).wstring();
+        (std::filesystem::path(g_Profile->dllFilename).stem().wstring() + L"_copy.dll")).wstring();
     return true;
 }
 
@@ -197,10 +198,10 @@ void AttachDebugger(DWORD pid, DWORD timeoutMs)
 
 bool InitSharedMemory()
 {
-    g_hLogEvent = CreateEventW(NULL, FALSE, FALSE, EVENT_LOG_READY);
-    g_hCmdEvent = CreateEventW(NULL, FALSE, FALSE, EVENT_CMD_READY);
-    g_hShutdownEvent = CreateEventW(NULL, TRUE, FALSE, EVENT_SHUTDOWN);
-    g_hDllReadyEvent = CreateEventW(NULL, TRUE, FALSE, EVENT_DLL_READY); // manual reset
+    g_hLogEvent = CreateEventW(NULL, FALSE, FALSE, g_Profile->eventLogReady);
+    g_hCmdEvent = CreateEventW(NULL, FALSE, FALSE, g_Profile->eventCmdReady);
+    g_hShutdownEvent = CreateEventW(NULL, TRUE, FALSE, g_Profile->eventShutdown);
+    g_hDllReadyEvent = CreateEventW(NULL, TRUE, FALSE, g_Profile->eventDllReady); // manual reset
 
     if (!g_hLogEvent || !g_hCmdEvent || !g_hShutdownEvent || !g_hDllReadyEvent)
     {
@@ -209,7 +210,7 @@ bool InitSharedMemory()
     }
 
     g_hLogMapping = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
-        0, sizeof(LogBuffer), SHMEM_LOGS);
+        0, sizeof(LogBuffer), g_Profile->shmemLogs);
     if (!g_hLogMapping) { Log("Failed to create log mapping"); return false; }
     bool logNew = (GetLastError() != ERROR_ALREADY_EXISTS);
     g_pLogBuffer = static_cast<LogBuffer*>(MapViewOfFile(g_hLogMapping, FILE_MAP_ALL_ACCESS, 0, 0, 0));
@@ -217,17 +218,17 @@ bool InitSharedMemory()
     if (logNew) new (g_pLogBuffer) LogBuffer();
 
     g_hCmdMapping = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
-        0, sizeof(CommandBuffer), SHMEM_CMD);
+        0, sizeof(CommandBuffer), g_Profile->shmemCmd);
     if (!g_hCmdMapping) { Log("Failed to create command mapping"); return false; }
     bool cmdNew = (GetLastError() != ERROR_ALREADY_EXISTS);
     g_pCmdBuffer = static_cast<CommandBuffer*>(MapViewOfFile(g_hCmdMapping, FILE_MAP_ALL_ACCESS, 0, 0, 0));
     if (!g_pCmdBuffer) { Log("Failed to map command buffer"); return false; }
     if (cmdNew) new (g_pCmdBuffer) CommandBuffer();
 
-    g_hRespEvent = CreateEventW(NULL, TRUE, FALSE, EVENT_RESP_READY);
+    g_hRespEvent = CreateEventW(NULL, TRUE, FALSE, g_Profile->eventRespReady);
     if (!g_hRespEvent) { Log("Failed to create response event"); return false; }
     g_hRespMapping = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
-        0, sizeof(ResponseBuffer), SHMEM_RESPONSE);
+        0, sizeof(ResponseBuffer), g_Profile->shmemResponse);
     if (!g_hRespMapping) { Log("Failed to create response mapping"); return false; }
     bool respNew = (GetLastError() != ERROR_ALREADY_EXISTS);
     g_pRespBuffer = static_cast<ResponseBuffer*>(MapViewOfFile(g_hRespMapping, FILE_MAP_ALL_ACCESS, 0, 0, 0));
@@ -235,7 +236,7 @@ bool InitSharedMemory()
     if (respNew) new (g_pRespBuffer) ResponseBuffer();
 
     g_hMetaMapping = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
-        0, sizeof(MetaBuffer), SHMEM_META);
+        0, sizeof(MetaBuffer), g_Profile->shmemMeta);
     if (g_hMetaMapping)
     {
         bool metaNew = (GetLastError() != ERROR_ALREADY_EXISTS);
@@ -293,7 +294,7 @@ bool InjectDLL()
     if (DllActive()) return true;
     if (!ResolveDllPaths()) return false;
 
-    DWORD pid = GetProcId(TARGET_PROCESS);
+    DWORD pid = GetProcId(g_Profile->targetProcess);
     if (pid)
     {
         std::wstring copyFilename = std::filesystem::path(g_CopyDllPath).filename().wstring();
@@ -320,7 +321,7 @@ bool InjectDLL()
 
     if (g_Dumper7Loaded.load())
     {
-        DWORD pidCheck = GetProcId(TARGET_PROCESS);
+        DWORD pidCheck = GetProcId(g_Profile->targetProcess);
         if (pidCheck)
         {
             std::wstring dumperName = std::filesystem::path(kDumper7Path).filename().wstring();
@@ -351,7 +352,7 @@ bool InjectDLL()
     if (GetFileAttributesExW(g_SourceDllPath.c_str(), GetFileExInfoStandard, &info))
         g_LastInjectedTime = info.ftLastWriteTime;
 
-    pid = GetProcId(TARGET_PROCESS);
+    pid = GetProcId(g_Profile->targetProcess);
     if (!pid) { Log("Target process not found."); return false; }
 
 #ifdef _DEBUG
@@ -424,7 +425,7 @@ void UnloadDLL(bool suppress)
         Log("UnloadDLL: signaling shutdown...");
         SetEvent(g_hShutdownEvent);
 
-        HANDLE hDone = OpenEventW(SYNCHRONIZE, FALSE, EVENT_SHUTDOWN_DONE);
+        HANDLE hDone = OpenEventW(SYNCHRONIZE, FALSE, g_Profile->eventShutdownDone);
         if (hDone)
         {
             DWORD w = WaitForSingleObject(hDone, 5000);
@@ -442,7 +443,7 @@ void UnloadDLL(bool suppress)
         ResetEvent(g_hShutdownEvent);
     }
 
-    DWORD pid = GetProcId(TARGET_PROCESS);
+    DWORD pid = GetProcId(g_Profile->targetProcess);
     if (!pid)
     {
         Log("UnloadDLL: could not find PID.");
@@ -516,7 +517,7 @@ bool LoadDumper7()
 {
     std::lock_guard<std::mutex> lock(g_InjectionMutex);
 
-    DWORD pid = GetProcId(TARGET_PROCESS);
+    DWORD pid = GetProcId(g_Profile->targetProcess);
     if (!pid) { Log("Dumper7: target process not found."); return false; }
 
     std::wstring dumperName = std::filesystem::path(kDumper7Path).filename().wstring();
@@ -675,7 +676,7 @@ void ProcessWatcherThread()
             continue;
         }
 
-        DWORD pid = GetProcId(TARGET_PROCESS);
+        DWORD pid = GetProcId(g_Profile->targetProcess);
         if (!pid) continue;
 
         Log("ProcessWatcher: target process found (PID " + std::to_string(pid) + "), injecting...");

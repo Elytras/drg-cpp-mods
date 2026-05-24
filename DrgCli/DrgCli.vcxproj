@@ -152,12 +152,14 @@
     <ClCompile Include="Completion.cpp" />
     <ClCompile Include="DrgCli.cpp" />
     <ClCompile Include="Injector.cpp" />
+    <ClCompile Include="Profile.cpp" />
     <ClCompile Include="SplitConsole.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CliTypes.h" />
     <ClInclude Include="Completion.h" />
     <ClInclude Include="Injector.h" />
+    <ClInclude Include="Profile.h" />
     <ClInclude Include="SplitConsole.h" />
     <ClInclude Include="WinInput.h" />
   </ItemGroup>

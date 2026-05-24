@@ -9,7 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "../DrgMods/Common.h"
+#include "../SharedLib/IpcProtocol.h"
+#include "Profile.h"
 #include "SplitConsole.h"
 #include "WinInput.h"
 
