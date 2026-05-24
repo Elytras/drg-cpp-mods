@@ -58,10 +58,15 @@ extern HANDLE g_hLogEvent;
 extern HANDLE g_hCmdEvent;
 extern HANDLE g_hShutdownEvent;
 extern HANDLE g_hRespEvent;
+extern HANDLE g_hDllReadyEvent;
 extern HANDLE g_hLogMapping;
 extern HANDLE g_hCmdMapping;
 extern HANDLE g_hRespMapping;
 extern HANDLE g_hMetaMapping;
+
+// Serializes CLI-side send+wait cycles to the DLL so the REPL and
+// auto-listcmds thread don't clobber each other's responses.
+extern std::mutex g_DllCommMutex;
 
 extern LogBuffer*      g_pLogBuffer;
 extern CommandBuffer*  g_pCmdBuffer;

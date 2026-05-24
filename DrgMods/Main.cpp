@@ -25,6 +25,7 @@ HANDLE g_hLogEvent = NULL;
 HANDLE g_hCmdEvent = NULL;
 HANDLE g_hShutdownEvent = NULL;
 HANDLE g_hRespEvent = NULL;
+HANDLE g_hDllReadyEvent = NULL;
 
 // Mappings
 HANDLE g_hLogMapping  = NULL;
@@ -107,6 +108,7 @@ bool InitSharedMemory()
     g_hLogEvent = OpenEventW(EVENT_ALL_ACCESS, FALSE, EVENT_LOG_READY);
     g_hCmdEvent = OpenEventW(EVENT_ALL_ACCESS, FALSE, EVENT_CMD_READY);
     g_hShutdownEvent = OpenEventW(EVENT_ALL_ACCESS, FALSE, EVENT_SHUTDOWN);
+    g_hDllReadyEvent = OpenEventW(EVENT_MODIFY_STATE, FALSE, EVENT_DLL_READY);
 
     if (!g_hLogEvent || !g_hCmdEvent || !g_hShutdownEvent)
         return false;
@@ -128,6 +130,11 @@ bool InitSharedMemory()
         g_pRespBuffer = static_cast<ResponseBuffer*>(
             MapViewOfFile(g_hRespMapping, FILE_MAP_ALL_ACCESS, 0, 0, 0));
         g_hRespEvent = OpenEventW(EVENT_MODIFY_STATE, FALSE, EVENT_RESP_READY);
+        // Clear any stale ready flag left over from a previous DLL session.
+        // SendResponse blocks on ready=true, so without this any leftover from
+        // before our load would deadlock every command's response.
+        if (g_pRespBuffer)
+            g_pRespBuffer->ready.store(false, std::memory_order_release);
     }
 
     // Meta buffer — optional; carries CLI HWND for focus-aware keybindings
@@ -153,6 +160,7 @@ void CleanupSharedMemory()
     if (g_hCmdEvent)      CloseHandle(g_hCmdEvent);
     if (g_hShutdownEvent) CloseHandle(g_hShutdownEvent);
     if (g_hRespEvent)     CloseHandle(g_hRespEvent);
+    if (g_hDllReadyEvent) CloseHandle(g_hDllReadyEvent);
 
     g_pLogBuffer  = nullptr;
     g_pCmdBuffer  = nullptr;
@@ -167,6 +175,7 @@ void CleanupSharedMemory()
     g_hCmdEvent      = NULL;
     g_hShutdownEvent = NULL;
     g_hRespEvent     = NULL;
+    g_hDllReadyEvent = NULL;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

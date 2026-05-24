@@ -99,6 +99,12 @@
     <ClCompile Include="Lib_KeyBindings.cpp">
       <Filter>Source Files\LibraryImplementations</Filter>
     </ClCompile>
+    <ClCompile Include="Aim.cpp">
+      <Filter>Source Files\DLL Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="Lib_Math.cpp">
+      <Filter>Source Files\LibraryImplementations</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Lib_Forward.h">
@@ -171,6 +177,12 @@
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
     <ClInclude Include="Lib_KeyBindings.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="Aim.h">
+      <Filter>Header Files\DLL Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="Lib_Math.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
   </ItemGroup>

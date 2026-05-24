@@ -4,7 +4,11 @@
 #if USEOWNIMPL
 #include "UnrealCoreTypes.h"
 #endif
-using namespace l;
+
+// File-local SDK pollution: this TU does not use math wrappers (FVector etc.),
+// so unqualified SDK type lookup here is unambiguous.
+using namespace SDK;
+
 static inline const constexpr bool UseThreads = false;
 namespace Internal
 {
@@ -157,6 +161,13 @@ void ModManager::LoadModsGameThread()
     }
     info("[ModManager] Initialization complete.");
     info("----------------------------------------");
+
+    // Signal the CLI that the DLL is ready to receive commands. The CLI's
+    // ready-handler thread then sends `listcmds` to populate autocomplete —
+    // we can't push the list ourselves because the CLI's REPL only consumes
+    // responses tied to its own outgoing seq numbers.
+    extern HANDLE g_hDllReadyEvent;
+    if (g_hDllReadyEvent) SetEvent(g_hDllReadyEvent);
 }
 
 void ModManager::UnloadMods()

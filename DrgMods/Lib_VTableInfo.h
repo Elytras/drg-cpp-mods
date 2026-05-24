@@ -20,6 +20,7 @@ namespace REN
 }
 namespace VTableLayout
 {
+    using namespace SDK;
     using namespace UC;
     // ─────────────────────────────────────────────────────────────────────────
     //  Function signature types
@@ -312,9 +313,8 @@ namespace VTableLayout
 // ─────────────────────────────────────────────────────────────────────────────
 namespace UObjectVCalls
 {
+    using namespace SDK;
     using namespace UC;
-    using SDK::UObject;
-    using SDK::FName;
     using UC::FString;
 
     namespace Detail

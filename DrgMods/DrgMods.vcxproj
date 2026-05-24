@@ -157,6 +157,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Commands.cpp" />
+    <ClCompile Include="Aim.cpp" />
+    <ClCompile Include="Lib_Math.cpp" />
     <ClCompile Include="Lib_CommandHandler.cpp" />
     <ClCompile Include="Lib_EasyHook.cpp" />
     <ClCompile Include="Lib_GameHooks.cpp" />
@@ -187,6 +189,8 @@
   <ItemGroup>
     <ClInclude Include="Commands.h" />
     <ClInclude Include="Common.h" />
+    <ClInclude Include="Aim.h" />
+    <ClInclude Include="Lib_Math.h" />
     <ClInclude Include="Lib_CommandHandler.h" />
     <ClInclude Include="Lib_EasyHook.h" />
     <ClInclude Include="Lib_GameHooks.h" />

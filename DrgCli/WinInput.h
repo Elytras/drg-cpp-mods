@@ -272,9 +272,30 @@ public:
                 continue;
             }
 
-            if (vk == VK_BACK || ch == 0x08)
+            if (vk == VK_BACK || ch == 0x08 || ch == 0x7F)
             {
-                if (m_cursor > 0)
+                bool ctrl = (ke.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
+                // ch == 0x7F is the DEL char that Windows consoles emit for
+                // Ctrl+Backspace even when Ctrl isn't reported in dwControlKeyState.
+                if (ctrl || ch == 0x7F)
+                {
+                    // Word-erase. Matches Ctrl+Left's boundary logic:
+                    //   1) skip whitespace going left
+                    //   2) skip non-whitespace going left
+                    // Effect: inside a word → removes left half of that word.
+                    //         at start of word / in whitespace → removes the
+                    //         previous word plus the whitespace before it.
+                    int c = m_cursor;
+                    while (c > 0 && m_buf[c - 1] == ' ') --c;
+                    while (c > 0 && m_buf[c - 1] != ' ') --c;
+                    if (c != m_cursor)
+                    {
+                        m_buf.erase(c, m_cursor - c);
+                        m_cursor = c;
+                        Redraw(prompt);
+                    }
+                }
+                else if (m_cursor > 0)
                 {
                     m_buf.erase(m_cursor - 1, 1);
                     --m_cursor;

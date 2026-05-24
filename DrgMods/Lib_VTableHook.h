@@ -48,6 +48,8 @@
 
 namespace VTH
 {
+    using namespace SDK;
+
     // =========================================================================
     //  Shared types
     // =========================================================================
@@ -434,8 +436,9 @@ namespace VTH
 // =============================================================================
 #ifdef VTH_EXAMPLES
 
-void Examples(UObject* engine)
+void Examples(SDK::UObject* engine)
 {
+    using namespace SDK;
     using namespace VTableLayout;
     auto& reg = VTH::VTableHookRegistry::Get();
 

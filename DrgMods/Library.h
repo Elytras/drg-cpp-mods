@@ -66,3 +66,4 @@
 #include "Lib_PropertyInspector.h"  // PropertyInspector namespace
 #include "Lib_Json.h"               // JsonHook::Setup, JsonImpl::Parser, JSONType constants
 #include "Lib_KeyBindings.h"        // Key, Mod, Trigger, Focus, KeyBindings:: API
+#include "Lib_Math.h"               // FVector/FRotator/FLinearColor wrappers, Math:: utilities

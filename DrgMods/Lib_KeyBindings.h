@@ -1,6 +1,5 @@
 #pragma once
 // Lib_KeyBindings.h — Game/CLI/system-wide keybinding registration.
-// No windows.h dependency; include freely in mod code.
 
 #include <cstdint>
 #include <functional>
@@ -8,7 +7,6 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Key codes
-//  Values match Windows VK_* constants exactly; no windows.h needed by callers.
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum class Key : uint16_t
@@ -164,19 +162,29 @@ using BindingHandle = size_t;
 //  KeyBindings API
 // ─────────────────────────────────────────────────────────────────────────────
 
-class CommandHandler;  // forward declaration — no header pull-in needed
+class CommandHandler;
 
 namespace KeyBindings
 {
     // Register a binding. Returns a non-zero handle on success.
     // Logs an error and returns 0 if (key, mods, focus) conflicts with an
     // already-registered binding with the same focus scope.
-    BindingHandle Register(Key key, Mod mods,
-                           std::function<void()> callback,
-                           BindingOptions opts = {});
+    BindingHandle Register
+    (
+        Key key, 
+        Mod mods,
+        std::function<void()> callback,
+        BindingOptions opts = {}
+    );
 
     // Register a binding to be executed on game thread
-    BindingHandle RegisterGameThread(Key key, Mod mods, std::function<void()> callback, BindingOptions opts);
+    BindingHandle RegisterGameThread
+    (
+        Key key, 
+        Mod mods, 
+        std::function<void()> callback, 
+        BindingOptions opts = {}
+    );
 
     void Unregister(BindingHandle handle);
 

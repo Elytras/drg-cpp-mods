@@ -2,6 +2,7 @@
 
 namespace GameHooks
 {
+using namespace SDK;  // file-local: this TU has no math types, no leak risk
 
 // ── Static data member definitions ──────────────────────────────────────────
 
@@ -112,7 +113,7 @@ bool ProcessEventHook::RunBeforePass(const CallbackList& list, const size_t* idx
     }
 
     if (skipFired && callOriginalRan > 0)
-        spdlog::warn("[GameHooks] SkipOriginal suppressed the original for {} CallOriginal callback(s) on the same event (function: '{}')",
+        warn("[GameHooks] SkipOriginal suppressed the original for {} CallOriginal callback(s) on the same event (function: '{}')",
             callOriginalRan,
             Function && !Function->Name.IsNone() ? Function->Name.ToString() : "<unknown>");
 

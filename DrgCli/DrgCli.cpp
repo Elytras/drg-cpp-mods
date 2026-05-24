@@ -61,10 +61,13 @@ HANDLE g_hLogEvent      = NULL;
 HANDLE g_hCmdEvent      = NULL;
 HANDLE g_hShutdownEvent = NULL;
 HANDLE g_hRespEvent     = NULL;
+HANDLE g_hDllReadyEvent = NULL;
 HANDLE g_hLogMapping    = NULL;
 HANDLE g_hCmdMapping    = NULL;
 HANDLE g_hRespMapping   = NULL;
 HANDLE g_hMetaMapping   = NULL;
+
+std::mutex g_DllCommMutex;
 
 LogBuffer*      g_pLogBuffer  = nullptr;
 CommandBuffer*  g_pCmdBuffer  = nullptr;
@@ -130,6 +133,14 @@ static uint32_t DispatchCommand(const std::string& cmd)
     }
     while (g_pCmdBuffer->hasCommand.load(std::memory_order_acquire))
         Sleep(10);
+    // Drop any stale, unread response (e.g. from a previous timed-out wait).
+    // Without this, the DLL's SendResponse will block waiting for ready=false
+    // and never write our response.
+    if (g_pRespBuffer && g_pRespBuffer->ready.load(std::memory_order_acquire))
+    {
+        g_pRespBuffer->ready.store(false, std::memory_order_release);
+        if (g_hRespEvent) ResetEvent(g_hRespEvent);
+    }
     uint32_t seq = g_pCmdBuffer->seq.fetch_add(1, std::memory_order_relaxed) + 1;
     strncpy_s(g_pCmdBuffer->command, cmd.c_str(), sizeof(g_pCmdBuffer->command) - 1);
     g_pCmdBuffer->hasCommand.store(true, std::memory_order_release);
@@ -185,6 +196,80 @@ static PendingOutput ConsumeResponse(ResponseBuffer* pResp, HANDLE hRespEvent)
     pResp->ready.store(false, std::memory_order_release);
     ResetEvent(hRespEvent);
     return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Auto-listcmds — fires whenever the DLL signals DRG_DllReady.
+//
+//  The DLL can't push a CommandsResponse on its own because the REPL only
+//  consumes responses whose seq matches an outgoing request. So instead we
+//  wait for a "DLL ready" signal and send `listcmds` from the CLI side; the
+//  response then arrives with our own seq and goes through the normal
+//  consumption path (which populates g_KnownCommands).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Discard any stale response sitting unread in the buffer. Must be called
+// while holding g_DllCommMutex. Without this, the DLL's SendResponse blocks
+// waiting for ready=false (because some previous response was never consumed)
+// and silently times out — making all subsequent commands look hung.
+static void ClearStaleResponse()
+{
+    if (!g_pRespBuffer) return;
+    if (g_pRespBuffer->ready.load(std::memory_order_acquire))
+    {
+        g_pRespBuffer->ready.store(false, std::memory_order_release);
+        if (g_hRespEvent) ResetEvent(g_hRespEvent);
+    }
+}
+
+static void AutoSendListCmds()
+{
+    if (!g_pCmdBuffer || !g_pRespBuffer || !g_hCmdEvent || !g_hRespEvent) return;
+
+    std::lock_guard<std::mutex> lock(g_DllCommMutex);
+
+    // Wait for the cmd slot to be free, then publish "listcmds".
+    while (g_pCmdBuffer->hasCommand.load(std::memory_order_acquire))
+        Sleep(10);
+    ClearStaleResponse();
+    const uint32_t mySeq = g_pCmdBuffer->seq.fetch_add(1, std::memory_order_relaxed) + 1;
+    strncpy_s(g_pCmdBuffer->command, "listcmds", sizeof(g_pCmdBuffer->command) - 1);
+    g_pCmdBuffer->hasCommand.store(true, std::memory_order_release);
+    SetEvent(g_hCmdEvent);
+
+    // Drain the matching response. Same pattern as the REPL's wait loop.
+    constexpr DWORD kTimeoutMs = 5000;
+    const DWORD64 deadline = GetTickCount64() + kTimeoutMs;
+    while (GetTickCount64() < deadline)
+    {
+        if (g_pRespBuffer->ready.load(std::memory_order_acquire) &&
+            g_pRespBuffer->seq.load(std::memory_order_acquire) == mySeq)
+        {
+            (void)ConsumeResponse(g_pRespBuffer, g_hRespEvent);
+            Log("Auto-loaded " + std::to_string(g_KnownCommands.size()) + " commands.");
+            return;
+        }
+        const DWORD64 remaining = deadline - GetTickCount64();
+        WaitForSingleObject(g_hRespEvent, static_cast<DWORD>(remaining < 50 ? remaining : 50));
+    }
+    Log("Auto-listcmds: no response within " + std::to_string(kTimeoutMs) + "ms");
+}
+
+// Persistent thread that watches DRG_DllReady. Each load (initial + hot-reload)
+// signals the event; we wake up, reset it, and pull the fresh command list.
+static void DllReadyThread()
+{
+    if (!g_hDllReadyEvent) return;
+    while (g_Running.load(std::memory_order_relaxed))
+    {
+        const DWORD r = WaitForSingleObject(g_hDllReadyEvent, 500);
+        if (r == WAIT_OBJECT_0)
+        {
+            ResetEvent(g_hDllReadyEvent);
+            AutoSendListCmds();
+        }
+        // WAIT_TIMEOUT: loop back to re-check g_Running.
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -258,6 +343,7 @@ int main()
     std::thread logThread(DllLogThread, g_pLogBuffer, g_hLogEvent);
     std::thread hotThread(HotReloadThread);
     std::thread watchThread(ProcessWatcherThread);
+    std::thread readyThread(DllReadyThread);
 
     Log("Ready. Watching for " + std::string(TARGET_PROCESS_NARROW) + "...");
 
@@ -322,12 +408,17 @@ int main()
             break;
         }
 
+        // Serialize the entire send+wait cycle vs the auto-listcmds thread so
+        // their responses can't overwrite each other in the shared resp buffer.
+        std::unique_lock<std::mutex> commLock(g_DllCommMutex);
+
         uint32_t mySeq = DispatchCommand(line);
 
-        if (mySeq == 0) continue; // built-in or "DLL not loaded" — handled internally
+        if (mySeq == 0) { commLock.unlock(); continue; } // built-in — handled internally
 
         if (!g_pRespBuffer || !g_hRespEvent)
         {
+            commLock.unlock();
             Print("Sent (no response buffer).");
             continue;
         }
@@ -351,6 +442,8 @@ int main()
             WaitForSingleObject(g_hRespEvent, static_cast<DWORD>(remaining < 50 ? remaining : 50));
         }
 
+        commLock.unlock();
+
         if (!gotResponse)
             split.PrintCmd("(no response within " + std::to_string(kTimeoutMs) + "ms)");
         else if (!pending.text.empty())
@@ -361,9 +454,11 @@ int main()
     g_Running.store(false);
     if (g_hLogEvent) SetEvent(g_hLogEvent);
 
+    if (g_hDllReadyEvent) SetEvent(g_hDllReadyEvent); // wake DllReadyThread so it can exit
     logThread.join();
     hotThread.join();
     watchThread.join();
+    readyThread.join();
 
     CleanupSharedMemory();
     return 0;

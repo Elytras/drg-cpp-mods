@@ -17,11 +17,11 @@ namespace ObjectFactory
                 if (candidate[0] != 0xCC && candidate[0] != 0x00)
                 {
                     fn = reinterpret_cast<FStaticConstructObjectFn>(candidate);
-                    spdlog::debug("[ObjectFactory] StaticConstructObject_Internal: RVA hit @ {:p}",
+                    debug("[ObjectFactory] StaticConstructObject_Internal: RVA hit @ {:p}",
                         reinterpret_cast<void*>(fn));
                     return fn;
                 }
-                spdlog::warn("[ObjectFactory] StaticConstructObject_Internal: RVA looks invalid (0x{:02X}), falling back to call-site scan",
+                warn("[ObjectFactory] StaticConstructObject_Internal: RVA looks invalid (0x{:02X}), falling back to call-site scan",
                     candidate[0]);
             }
         }
@@ -34,12 +34,12 @@ namespace ObjectFactory
         {
             int32_t rel = *reinterpret_cast<int32_t*>(callSite + 1);
             fn = reinterpret_cast<FStaticConstructObjectFn>(callSite + 5 + rel);
-            spdlog::debug("[ObjectFactory] StaticConstructObject_Internal: call-site scan hit @ {:p}",
+            debug("[ObjectFactory] StaticConstructObject_Internal: call-site scan hit @ {:p}",
                 reinterpret_cast<void*>(fn));
             return fn;
         }
 
-        spdlog::error("[ObjectFactory] StaticConstructObject_Internal: both RVA and call-site scan failed");
+        error("[ObjectFactory] StaticConstructObject_Internal: both RVA and call-site scan failed");
         return fn;
     }
 } // namespace ObjectFactory

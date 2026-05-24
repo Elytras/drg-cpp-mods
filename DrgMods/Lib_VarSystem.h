@@ -17,16 +17,16 @@ namespace VarSystem
 
     struct Var
     {
-        VarType     type = VarType::String;
-        std::string token;
-        UObject* object = nullptr;
+        VarType          type = VarType::String;
+        std::string      token;
+        SDK::UObject*    object = nullptr;
     };
 
     struct ExpandResult
     {
-        std::string token;
-        UObject* object = nullptr;
-        bool        isValid = true;
+        std::string      token;
+        SDK::UObject*    object = nullptr;
+        bool             isValid = true;
     };
 
     extern std::unordered_map<std::string, Var> g_Vars;
@@ -39,7 +39,7 @@ namespace VarSystem
     void RegisterBinding(const std::string& name, BindingFn fn);
 
     // Helper converters
-    ExpandResult BindObject(UObject* obj);
+    ExpandResult BindObject(SDK::UObject* obj);
     ExpandResult BindToken(const std::string& token);
 
     // Registration and parsing

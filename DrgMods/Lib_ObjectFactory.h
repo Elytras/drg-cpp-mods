@@ -34,11 +34,11 @@ enum EInternalObjectFlags : uint32_t
 
 struct FFrame
 {
-    uint8_t  Pad00[0x10]; // vtptr + boolean fields
-    void*    Node;        // 0x10 — UFunction* being executed
-    UObject* Object;      // 0x18 — context UObject*
-    uint8_t* Code;        // 0x20 — current bytecode pointer
-    uint8_t* Locals;      // 0x28 — parameter / locals buffer
+    uint8_t       Pad00[0x10]; // vtptr + boolean fields
+    void*         Node;        // 0x10 — UFunction* being executed
+    SDK::UObject* Object;      // 0x18 — context UObject*
+    uint8_t*      Code;        // 0x20 — current bytecode pointer
+    uint8_t*      Locals;      // 0x28 — parameter / locals buffer
 };
 static_assert(offsetof(FFrame, Node)   == 0x10);
 static_assert(offsetof(FFrame, Object) == 0x18);
@@ -52,16 +52,16 @@ static_assert(offsetof(FFrame, Locals) == 0x28);
 
 struct FStaticConstructObjectParameters
 {
-    class UClass const* Class;
-    class UObject* Outer;
-    class FName Name;
-    enum EObjectFlags SetFlags;
-    enum EInternalObjectFlags InternalSetFlags;
-    bool bCopyTransientsFromClassDefaults;
-    bool bAssumeTemplateIsArchetype;
-    class UObject* Template;
+    SDK::UClass const*            Class;
+    SDK::UObject*                 Outer;
+    SDK::FName                    Name;
+    SDK::EObjectFlags             SetFlags;
+    enum EInternalObjectFlags     InternalSetFlags;
+    bool                          bCopyTransientsFromClassDefaults;
+    bool                          bAssumeTemplateIsArchetype;
+    SDK::UObject*                 Template;
     class FObjectInstancingGraph* InstanceGraph;
-    class UPackage* ExternalPackage;
+    SDK::UPackage*                ExternalPackage;
 };
 
 static_assert(offsetof(FStaticConstructObjectParameters, Name) == 0x10);
@@ -77,6 +77,8 @@ static_assert(offsetof(FStaticConstructObjectParameters, Template) == 0x28);
 
 namespace ObjectFactory
 {
+    using namespace SDK;
+
     using FStaticConstructObjectFn = UObject * (*)(FStaticConstructObjectParameters*);
 
     // RVA confirmed from FSD-Win64-Shipping.exe disassembly (NewObject<UEngine> call site @ 140859422).

@@ -112,7 +112,7 @@ bool CommandHandler::Dispatch(const std::string& msg, uint32_t seq) const
 
     auto it = commands_.find(parts[0]);
     if (it == commands_.end()) [[unlikely]] {
-        spdlog::warn("[CommandHandler] Unknown command: '{}'. Type 'help' for a list.", parts[0]);
+        warn("[CommandHandler] Unknown command: '{}'. Type 'help' for a list.", parts[0]);
         SendResponse(seq, "not ok");
         return false;
     }
@@ -141,22 +141,22 @@ void CommandHandler::PrintHelp(const std::string& filter) const
 {
     if (!filter.empty()) {
         auto it = commands_.find(filter);
-        if (it == commands_.end()) { spdlog::warn("[help] Unknown command: '{}'", filter); return; }
+        if (it == commands_.end()) { warn("[help] Unknown command: '{}'", filter); return; }
         const auto& e = it->second;
-        spdlog::info("[help] [{}] {}: {}", e.category, it->first,
+        info("[help] [{}] {}: {}", e.category, it->first,
             e.description.empty() ? "(no description)" : e.description);
         return;
     }
-    spdlog::info("[help] Available commands ({}):", commands_.size());
+    info("[help] Available commands ({}):", commands_.size());
     std::map<std::string, std::vector<std::pair<std::string, const CommandEntry*>>> byCategory;
     for (const auto& [name, entry] : commands_)
         byCategory[entry.category].emplace_back(name, &entry);
     for (auto& [cat, entries] : byCategory) {
         std::sort(entries.begin(), entries.end(),
             [](const auto& a, const auto& b) { return a.first < b.first; });
-        spdlog::info("[help] -- {} --", cat.empty() ? "Uncategorized" : cat);
+        info("[help] -- {} --", cat.empty() ? "Uncategorized" : cat);
         for (const auto& [name, entry] : entries)
-            spdlog::info("[help]   {:20} {}", name,
+            info("[help]   {:20} {}", name,
                 entry->description.empty() ? "(no description)" : entry->description);
     }
 }

@@ -3,6 +3,8 @@
 #include <chrono>
 #include <thread>
 
+using namespace SDK;  // file-local; no math types used in this TU
+
 // =========================================================================
 // Lib_Forward.h forward-decl implementations
 // =========================================================================
@@ -111,7 +113,7 @@ AFSDPlayerState* GetLocalPlayerState()
 APlayerCharacter* GetLocalPlayerCharacterBlocking(uint64_t MaxWaitMs)
 {
     UWorld* World = GetWorld();
-    if (!IsValid(World)) return spdlog::warn("GetLocalPlayerCharacterBlocking: Invalid World"), nullptr;
+    if (!IsValid(World)) return warn("GetLocalPlayerCharacterBlocking: Invalid World"), nullptr;
     const uint64_t start = GetTimeMs();
     APlayerCharacter* Player = nullptr;
     while ((GetTimeMs() - start) < MaxWaitMs)

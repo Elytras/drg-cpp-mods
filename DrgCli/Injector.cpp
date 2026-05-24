@@ -200,8 +200,9 @@ bool InitSharedMemory()
     g_hLogEvent = CreateEventW(NULL, FALSE, FALSE, EVENT_LOG_READY);
     g_hCmdEvent = CreateEventW(NULL, FALSE, FALSE, EVENT_CMD_READY);
     g_hShutdownEvent = CreateEventW(NULL, TRUE, FALSE, EVENT_SHUTDOWN);
+    g_hDllReadyEvent = CreateEventW(NULL, TRUE, FALSE, EVENT_DLL_READY); // manual reset
 
-    if (!g_hLogEvent || !g_hCmdEvent || !g_hShutdownEvent)
+    if (!g_hLogEvent || !g_hCmdEvent || !g_hShutdownEvent || !g_hDllReadyEvent)
     {
         Log("Failed to create events (err " + std::to_string(GetLastError()) + ")");
         return false;
@@ -264,6 +265,7 @@ void CleanupSharedMemory()
     if (g_hCmdEvent)      CloseHandle(g_hCmdEvent);
     if (g_hShutdownEvent) CloseHandle(g_hShutdownEvent);
     if (g_hRespEvent)     CloseHandle(g_hRespEvent);
+    if (g_hDllReadyEvent) CloseHandle(g_hDllReadyEvent);
 
     g_pLogBuffer  = nullptr;
     g_pCmdBuffer  = nullptr;
@@ -278,6 +280,7 @@ void CleanupSharedMemory()
     g_hCmdEvent      = NULL;
     g_hShutdownEvent = NULL;
     g_hRespEvent     = NULL;
+    g_hDllReadyEvent = NULL;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

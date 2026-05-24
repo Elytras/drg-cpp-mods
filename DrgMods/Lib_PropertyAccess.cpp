@@ -1,5 +1,7 @@
 #include "Lib_PropertyAccess.h"
 
+using namespace SDK;  // file-local; no math types used in this TU
+
 bool ReadBool(UObject* Object, FBoolProperty* Prop)
 {
     if (Prop->FieldMask == 0xFF)

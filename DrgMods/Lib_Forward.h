@@ -19,15 +19,20 @@ struct std::hash<SDK::FName>
 #include "SDK/SDK/CoreUObject_Classes.hpp"
 #include <spdlog/spdlog.h>
 
-using namespace SDK;
-using namespace spdlog;
-namespace Utils = InSDKUtils;
-namespace l = spdlog;
+template<typename... Args> inline void trace   (spdlog::format_string_t<Args...> fmt, Args&&... args) { spdlog::trace   (fmt, std::forward<Args>(args)...); }
+template<typename... Args> inline void debug   (spdlog::format_string_t<Args...> fmt, Args&&... args) { spdlog::debug   (fmt, std::forward<Args>(args)...); }
+template<typename... Args> inline void info    (spdlog::format_string_t<Args...> fmt, Args&&... args) { spdlog::info    (fmt, std::forward<Args>(args)...); }
+template<typename... Args> inline void warn    (spdlog::format_string_t<Args...> fmt, Args&&... args) { spdlog::warn    (fmt, std::forward<Args>(args)...); }
+template<typename... Args> inline void error   (spdlog::format_string_t<Args...> fmt, Args&&... args) { spdlog::error   (fmt, std::forward<Args>(args)...); }
+template<typename... Args> inline void critical(spdlog::format_string_t<Args...> fmt, Args&&... args) { spdlog::critical(fmt, std::forward<Args>(args)...); }
 
-using Kismet   = UKismetSystemLibrary;
-using GameLib  = UGameFunctionLibrary;
-using ActorLib = UActorFunctionLibrary;
-using MathLib  = UKismetMathLibrary;
+namespace Utils = SDK::InSDKUtils;
+namespace Game  = SDK;
+
+using Kismet   = SDK::UKismetSystemLibrary;
+using GameLib  = SDK::UGameFunctionLibrary;
+using ActorLib = SDK::UActorFunctionLibrary;
+using MathLib  = SDK::UKismetMathLibrary;
 
 using uint64    = unsigned long long;
 using int64     = signed long long;
@@ -40,6 +45,6 @@ using uint8     = unsigned char;
 using wchar     = wchar_t;
 
 
-bool    IsValid(const UObject* Object);
-bool    IsValidClass(const UClass* Class);
-UWorld* GetWorld();
+bool         IsValid(const SDK::UObject* Object);
+bool         IsValidClass(const SDK::UClass* Class);
+SDK::UWorld* GetWorld();

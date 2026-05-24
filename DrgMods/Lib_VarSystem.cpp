@@ -9,6 +9,7 @@
 
 namespace VarSystem
 {
+    using namespace SDK;  // re-declare here so .cpp can use SDK types unqualified
     // =========================================================================
     // Global Storage Definitions
     // =========================================================================
@@ -165,19 +166,19 @@ namespace VarSystem
             auto it = g_Bindings.find(name);
             if (it == g_Bindings.end())
             {
-                spdlog::warn("[var] fn:'{}' not registered", name);
+                warn("[var] fn:'{}' not registered", name);
                 return { "", nullptr, false };
             }
             ExpandResult r = it->second();
             if (!r.isValid)
             {
-                spdlog::warn("[var] fn:'{}' returned invalid", name);
+                warn("[var] fn:'{}' returned invalid", name);
                 return { "", nullptr, false };
             }
             if (r.object)
-                spdlog::info("[var] fn:'{}' → [object] '{}'", name, r.object->GetName());
+                info("[var] fn:'{}' → [object] '{}'", name, r.object->GetName());
             else
-                spdlog::info("[var] fn:'{}' → '{}'", name, r.token);
+                info("[var] fn:'{}' → '{}'", name, r.token);
             return r;
         }
 
@@ -188,7 +189,7 @@ namespace VarSystem
             auto it = g_Vars.find(name);
             if (it == g_Vars.end())
             {
-                spdlog::warn("[var] '{}' not defined", name);
+                warn("[var] '{}' not defined", name);
                 return { "", nullptr, false };
             }
             const Var& v = it->second;
@@ -196,11 +197,11 @@ namespace VarSystem
             {
                 if (!v.object || !Kismet::IsValid(v.object))
                 {
-                    spdlog::warn("[var] '{}' points to destroyed object — clearing", name);
+                    warn("[var] '{}' points to destroyed object — clearing", name);
                     g_Vars.erase(it);
                     return { "", nullptr, false };
                 }
-                spdlog::info("[var] '{}' → object '{}'", name, v.object->GetName());
+                info("[var] '{}' → object '{}'", name, v.object->GetName());
                 return { "", v.object, true };
             }
             return { v.token, nullptr, true };
@@ -214,23 +215,23 @@ namespace VarSystem
         switch (v.type)
         {
         case VarType::Vector:
-            spdlog::info("[var] {} = vec:{} (vector)", name, v.token);
+            info("[var] {} = vec:{} (vector)", name, v.token);
             break;
         case VarType::Rotator:
-            spdlog::info("[var] {} = rot:{} (rotator)", name, v.token);
+            info("[var] {} = rot:{} (rotator)", name, v.token);
             break;
         case VarType::Name:
-            spdlog::info("[var] {} = name:{} (fname)", name, v.token);
+            info("[var] {} = name:{} (fname)", name, v.token);
             break;
         case VarType::Object:
             if (v.object && Kismet::IsValid(v.object))
-                spdlog::info("[var] {} = [object] {} ({})", name, v.object->GetName(),
+                info("[var] {} = [object] {} ({})", name, v.object->GetName(),
                     v.object->Class ? v.object->Class->GetName() : "?");
             else
-                spdlog::info("[var] {} = [object] <stale/null>", name);
+                info("[var] {} = [object] <stale/null>", name);
             break;
         default:
-            spdlog::info("[var] {} = {} ({})", name, v.token, TypeName(v.type));
+            info("[var] {} = {} ({})", name, v.token, TypeName(v.type));
             break;
         }
     }
@@ -239,7 +240,7 @@ namespace VarSystem
     {
         if (ctx.ArgCount() < 3)
         {
-            spdlog::warn("[var] Usage: set <n> <value>");
+            warn("[var] Usage: set <n> <value>");
             return;
         }
         const std::string& name = ctx.Arg(1);
@@ -256,14 +257,14 @@ namespace VarSystem
     {
         if (ctx.ArgCount() < 2)
         {
-            spdlog::warn("[var] Usage: get <n>");
+            warn("[var] Usage: get <n>");
             return;
         }
         const std::string& name = ctx.Arg(1);
         auto it = g_Vars.find(name);
         if (it == g_Vars.end())
         {
-            spdlog::warn("[var] '{}' not defined", name);
+            warn("[var] '{}' not defined", name);
             return;
         }
         Print(name, it->second);
@@ -273,42 +274,42 @@ namespace VarSystem
     {
         if (ctx.ArgCount() < 2)
         {
-            spdlog::warn("[var] Usage: unset <n>");
+            warn("[var] Usage: unset <n>");
             return;
         }
         const std::string& name = ctx.Arg(1);
         if (g_Vars.erase(name))
-            spdlog::info("[var] '{}' unset", name);
+            info("[var] '{}' unset", name);
         else
-            spdlog::warn("[var] '{}' was not defined", name);
+            warn("[var] '{}' was not defined", name);
     }
 
     void Cmd_Vars(const CommandContext&)
     {
         if (g_Vars.empty() && g_Bindings.empty())
         {
-            spdlog::info("[var] No variables defined.");
+            info("[var] No variables defined.");
             return;
         }
         if (!g_Vars.empty())
         {
-            spdlog::info("[var] {} variable(s):", g_Vars.size());
+            info("[var] {} variable(s):", g_Vars.size());
             for (const auto& [n, v] : g_Vars)
                 Print(n, v);
         }
         if (!g_Bindings.empty())
         {
-            spdlog::info("[var] {} binding(s) (fn:<n>):", g_Bindings.size());
+            info("[var] {} binding(s) (fn:<n>):", g_Bindings.size());
             for (const auto& [n, fn] : g_Bindings)
             {
                 ExpandResult r = fn();
                 if (!r.isValid)
-                    spdlog::info("[var]   fn:{} = <invalid>", n);
+                    info("[var]   fn:{} = <invalid>", n);
                 else if (r.object)
-                    spdlog::info("[var]   fn:{} = [object] {} ({})", n,
+                    info("[var]   fn:{} = [object] {} ({})", n,
                         r.object->GetName(), r.object->Class ? r.object->Class->GetName() : "?");
                 else
-                    spdlog::info("[var]   fn:{} = {}", n, r.token);
+                    info("[var]   fn:{} = {}", n, r.token);
             }
         }
     }

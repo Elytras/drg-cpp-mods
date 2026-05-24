@@ -44,6 +44,7 @@ constexpr const wchar_t* EVENT_CMD_READY = L"Local\\DRG_CmdReady";
 constexpr const wchar_t* EVENT_RESP_READY = L"Local\\DRG_ResponseReady";
 constexpr const wchar_t* EVENT_SHUTDOWN = L"Local\\DRG_Shutdown";
 constexpr const wchar_t* EVENT_SHUTDOWN_DONE = L"Local\\DRG_ShutdownDone";
+constexpr const wchar_t* EVENT_DLL_READY = L"Local\\DRG_DllReady";
 
 //-----------------------------------------------------------------------------
 // Output Locations

@@ -3,11 +3,14 @@
 #include "ModManager.h"
 #include "Library.h"
 #include "Common.h"
+#include "Aim.h"
 #include "Lib_Utils.h"
+
 
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <optional>
 #include <random>
 #include <fstream>
 #include <filesystem>
@@ -48,7 +51,6 @@ constexpr bool DeleteOnTwerk = false;
 constexpr bool VoidTwerkPE = false;
 constexpr bool KillOnTwerk = true;
 
-using namespace l;
 using namespace SDK::Params;
 using namespace ObjectCast;
 using namespace GameHooks;
@@ -61,12 +63,12 @@ using ctx = CommandContext;
 
 namespace Weapons
 {
-    std::vector<SDK::AAmmoDrivenWeapon*> GetAllAmmoWeapons(APlayerCharacter* LocalPlayer);
+    std::vector<SDK::AAmmoDrivenWeapon*> GetAllAmmoWeapons(SDK::APlayerCharacter* LocalPlayer);
     std::vector<SDK::AAmmoDrivenWeapon*> GetTrackedAmmoWeapons();
-    void LokiSphereExplosions(AWPN_LockOnRifle_C* Loki, float R, int N);
-    void UpgradeLoki(AWPN_LockOnRifle_C* Loki);
-    void NukeEnemiesWithECR(AWPN_LockOnRifle_C* Loki);
-    void ECRTrail(AWPN_LockOnRifle_C* Loki, size_t Count);
+    void LokiSphereExplosions(SDK::AWPN_LockOnRifle_C* Loki, float R, int N);
+    void UpgradeLoki(SDK::AWPN_LockOnRifle_C* Loki);
+    void NukeEnemiesWithECR(SDK::AWPN_LockOnRifle_C* Loki);
+    void ECRTrail(SDK::AWPN_LockOnRifle_C* Loki, size_t Count);
 }
 // =========================================================================
 // Helpers
@@ -85,18 +87,18 @@ static std::ofstream OpenOutput(const std::string& path)
     return std::ofstream(path);
 }
 
-inline nlohmann::json ExtractNumericPropertiesAsJson(uintptr_t Base, UClass* StopAt, const std::string& prefix = "")
+inline nlohmann::json ExtractNumericPropertiesAsJson(uintptr_t Base, SDK::UClass* StopAt, const std::string& prefix = "")
 {
     nlohmann::json result = nlohmann::json::object();
     if (!Base) return result;
 
-    const auto chain = BuildClassChain(reinterpret_cast<UObject*>(Base)->Class, StopAt);
-    for (UStruct* level : chain)
+    const auto chain = BuildClassChain(reinterpret_cast<SDK::UObject*>(Base)->Class, StopAt);
+    for (SDK::UStruct* level : chain)
     {
-        UClass* cls = ObjectCast::Cast<UClass>(level);
+        SDK::UClass* cls = ObjectCast::Cast<SDK::UClass>(level);
         if (!cls) continue;
 
-        for (FField* field : FFieldRange(cls->ChildProperties))
+        for (SDK::FField* field : SDK::FFieldRange(cls->ChildProperties))
         {
             bool numeric = false;
             std::string typePrefix;
@@ -104,16 +106,16 @@ inline nlohmann::json ExtractNumericPropertiesAsJson(uintptr_t Base, UClass* Sto
             FieldCast::Visit(field, [&](auto* p)
                 {
                     using T = std::remove_pointer_t<decltype(p)>;
-                    if (std::is_same_v<T, FFloatProperty>) { numeric = true; typePrefix = "Float"; }
-                    else if (std::is_same_v<T, FDoubleProperty>) { numeric = true; typePrefix = "Float"; }
-                    else if (std::is_same_v<T, FBoolProperty>) { numeric = true; typePrefix = "Bool"; }
-                    else if (std::is_same_v<T, FIntProperty>) { numeric = true; typePrefix = "Int"; }
-                    else if (std::is_same_v<T, FInt8Property>) { numeric = true; typePrefix = "Int"; }
-                    else if (std::is_same_v<T, FInt16Property>) { numeric = true; typePrefix = "Int"; }
-                    else if (std::is_same_v<T, FInt64Property>) { numeric = true; typePrefix = "Int"; }
-                    else if (std::is_same_v<T, FUInt16Property>) { numeric = true; typePrefix = "Int"; }
-                    else if (std::is_same_v<T, FUInt32Property>) { numeric = true; typePrefix = "Int"; }
-                    else if (std::is_same_v<T, FUInt64Property>) { numeric = true; typePrefix = "Int"; }
+                    if (std::is_same_v<T, SDK::FFloatProperty>) { numeric = true; typePrefix = "Float"; }
+                    else if (std::is_same_v<T, SDK::FDoubleProperty>) { numeric = true; typePrefix = "Float"; }
+                    else if (std::is_same_v<T, SDK::FBoolProperty>) { numeric = true; typePrefix = "Bool"; }
+                    else if (std::is_same_v<T, SDK::FIntProperty>) { numeric = true; typePrefix = "Int"; }
+                    else if (std::is_same_v<T, SDK::FInt8Property>) { numeric = true; typePrefix = "Int"; }
+                    else if (std::is_same_v<T, SDK::FInt16Property>) { numeric = true; typePrefix = "Int"; }
+                    else if (std::is_same_v<T, SDK::FInt64Property>) { numeric = true; typePrefix = "Int"; }
+                    else if (std::is_same_v<T, SDK::FUInt16Property>) { numeric = true; typePrefix = "Int"; }
+                    else if (std::is_same_v<T, SDK::FUInt32Property>) { numeric = true; typePrefix = "Int"; }
+                    else if (std::is_same_v<T, SDK::FUInt64Property>) { numeric = true; typePrefix = "Int"; }
                 });
 
             if (!numeric) continue;
@@ -128,21 +130,21 @@ inline nlohmann::json ExtractNumericPropertiesAsJson(uintptr_t Base, UClass* Sto
 }
 
 static inline const bool CanChangeWorld() {
-    return IsValidOf<APlayerCharacter>(GetLocalPlayer());
+    return IsValidOf<SDK::APlayerCharacter>(GetLocalPlayer());
 }
 
 namespace Enum {
-    constexpr int8 EnemyHealthIndex(EEnemyHealthScaling Scale)
+    constexpr int8 EnemyHealthIndex(SDK::EEnemyHealthScaling Scale)
     {
         switch (Scale)
         {
-        case EEnemyHealthScaling::SmallEnemy:      return 0;
-        case EEnemyHealthScaling::LargeEnemy:      return 1;
-        case EEnemyHealthScaling::ExtraLargeEnemy: return 2;
-        case EEnemyHealthScaling::ExtraLargeEnemyB:return 3;
-        case EEnemyHealthScaling::ExtraLargeEnemyC:return 4;
-        case EEnemyHealthScaling::ExtraLargeEnemyD:return 5;
-        case EEnemyHealthScaling::NoScaling:       return 6;
+        case SDK::EEnemyHealthScaling::SmallEnemy:      return 0;
+        case SDK::EEnemyHealthScaling::LargeEnemy:      return 1;
+        case SDK::EEnemyHealthScaling::ExtraLargeEnemy: return 2;
+        case SDK::EEnemyHealthScaling::ExtraLargeEnemyB:return 3;
+        case SDK::EEnemyHealthScaling::ExtraLargeEnemyC:return 4;
+        case SDK::EEnemyHealthScaling::ExtraLargeEnemyD:return 5;
+        case SDK::EEnemyHealthScaling::NoScaling:       return 6;
         default: return -1; // error
         }
     }
@@ -150,236 +152,14 @@ namespace Enum {
 
 namespace Helpers {
 
-    struct FDamageInfo
-    {
-        float Damage = 0.f;
-        float RadialDamage = 0.f;
+    const std::array<float, static_cast<int>(SDK::EEnemyHealthScaling::EEnemyHealthScaling_MAX)> GetCurrentEnemyHealthScalings() {
+        std::array<float, static_cast<int>(SDK::EEnemyHealthScaling::EEnemyHealthScaling_MAX)> Scalings{};
 
-        bool IsValid() const
-        {
-            return Damage > 0.001f || RadialDamage > 0.01f;
-        }
-    };
-
-    static bool ExtractDamageInfo(
-        UDamageComponent* DamageComponent,
-        FDamageInfo& OutInfo)
-    {
-        if (!DamageComponent)
-            return false;
-
-        OutInfo.Damage = DamageComponent->Damage;
-        OutInfo.RadialDamage = DamageComponent->RadialDamage;
-
-        return true;
-    }
-
-    static bool GetDamageInfoFromProjectileClass(
-        UClass* ProjectileClass,
-        FDamageInfo& OutInfo)
-    {
-        if (!ProjectileClass)
-            return false;
-
-        AProjectileBase* ProjectileCDO =
-            Cast<AProjectileBase>(ProjectileClass->ClassDefaultObject);
-
-        if (!ProjectileCDO)
-            return false;
-
-        // Try CDO first
-        if (ExtractDamageInfo(
-            Cast<UDamageComponent>(
-                ProjectileCDO->GetComponentByClass(
-                    UDamageComponent::StaticClass())),
-            OutInfo))
-        {
-            return true;
-        }
-
-        // Runtime-created components fallback
-        FTransform Transform{};
-        Transform.Translation = FVector{ 9999999,9999999,9999999 };
-
-        AProjectileBase* SpawnedProjectile = nullptr;
-
-        if (!SpawnActor<AProjectileBase>(
-            ProjectileClass,
-            Transform,
-            SpawnedProjectile))
-        {
-            return false;
-        }
-
-        bool bResult = ExtractDamageInfo(
-            Cast<UDamageComponent>(
-                SpawnedProjectile->GetComponentByClass(
-                    UDamageComponent::StaticClass())),
-            OutInfo);
-
-        SpawnedProjectile->K2_DestroyActor();
-
-        return bResult;
-    }
-    // GetMesh() on AEnemyPawn is a BlueprintImplementableEvent with no C++ body — always null.
-    // Use K2_GetComponentsByClass for AEnemyPawn; direct field for ADeepPathfinderCharacter.
-    static std::vector<USkeletalMeshComponent*> GetEnemyMeshes(AFSDPawn* Enemy)
-    {
-        using namespace ObjectCast;
-
-        if (auto* dp = Cast<AEnemyDeepPathfinderCharacter>(Enemy))
-            return dp->Mesh ? std::vector<USkeletalMeshComponent*>{ dp->Mesh }
-                            : std::vector<USkeletalMeshComponent*>{};
-
-        std::vector<USkeletalMeshComponent*> result;
-        auto comps = Enemy->K2_GetComponentsByClass(USkeletalMeshComponent::StaticClass());
-        for (int32 i = 0; i < comps.Num(); ++i)
-            if (auto* smc = Cast<USkeletalMeshComponent>(comps[i]))
-                result.push_back(smc);
-        return result;
-    }
-
-    // Largest sphere/capsule radius from the body's aggregate geometry.
-    // Fallback 15 UU (~15 cm) for bodies with no sphere or sphyl shapes.
-    static float GetBodyRadius(USkeletalBodySetup* Body)
-    {
-        float r = 0.f;
-        for (int32 i = 0; i < Body->AggGeom.SphereElems.Num(); ++i)
-            r = std::max(r, Body->AggGeom.SphereElems[i].Radius);
-        for (int32 i = 0; i < Body->AggGeom.SphylElems.Num(); ++i)
-            r = std::max(r, Body->AggGeom.SphylElems[i].Radius);
-        return r > 0.f ? r * 0.75f : 15.f;
-    }
-
-    // Returns true if the weakpoint physics body identified by BoneName is visible from CamLoc.
-    // Uses physics-body trace (bTraceComplex=false) so FHitResult::BoneName is populated,
-    // allowing a direct name match instead of a fragile distance threshold.
-    static bool IsWeakpointVisible(APlayerCharacter* LocalPlayer, AFSDPawn* Enemy,
-                                   const FVector& CamLoc, const FVector& WPos, FName BoneName)
-    {
-        TArray<AActor*> NoIgnore;
-        FHitResult Hit;
-        const bool bHit = UKismetSystemLibrary::LineTraceSingle(
-            LocalPlayer, CamLoc, WPos,
-            ETraceTypeQuery::TraceTypeQuery1, false,  // false = physics bodies, populates BoneName
-            NoIgnore, EDrawDebugTrace::None,
-            &Hit, true,                               // bIgnoreSelf — skips LocalPlayer pawn
-            FLinearColor{}, FLinearColor{}, 0.f);
-
-        if (!bHit) return true;                                           // clear path
-        if (Hit.Actor.Get() != static_cast<AActor*>(Enemy)) return false; // terrain or other actor
-        return Hit.BoneName == BoneName;                                  // hit THIS weakpoint body
-    }
-
-    // ── Breakable weakpoint / armor state ────────────────────────────────────────────────
-
-    struct BreakableWpState
-    {
-        bool  isBreakable = false;
-        float health      = -1.f;   // -1 = no per-bone health (SimpleArmor or unmatched)
-        bool  isDestroyed = false;
-    };
-
-    // UE4 4.27 TMap AllocationFlags: inline uint32[4] starts at map_base+0x10.
-    // Returns whether slot i contains a live element.
-    static bool TMapSlotValid(const void* m, int32 i)
-    {
-        if (i < 0 || i >= 128) return false;
-        const auto* f = reinterpret_cast<const uint32*>(static_cast<const uint8*>(m) + 0x10);
-        return (f[i >> 5] >> (i & 31)) & 1u;
-    }
-
-    // Given a weakpoint physics body (bone + material) on a specific mesh component,
-    // finds the UBaseArmorDamageComponent that manages it and returns its health/broken state.
-    // Returns isBreakable=false if no armor component matches (non-breakable weakpoint).
-    //
-    // TMap<FName(8), Value(0x18)> element stride: sizeof(TSetElement<TPair<K,V>>) = 40
-    //   slot+0x00: FName key (8 bytes)
-    //   slot+0x08: Value (24 bytes)
-    //   slot+0x20: HashNextId (4 bytes)
-    //   slot+0x24: HashIndex (4 bytes)
-    static BreakableWpState GetBreakableWpState(
-        AFSDPawn* Enemy, USkeletalMeshComponent* Mesh,
-        FName BoneName, UFSDPhysicalMaterial* PhysMat)
-    {
-        using namespace ObjectCast;
-        BreakableWpState r;
-
-        auto comps = Enemy->K2_GetComponentsByClass(UBaseArmorDamageComponent::StaticClass());
-        for (int32 ci = 0; ci < comps.Num(); ++ci)
-        {
-            auto* base = Cast<UBaseArmorDamageComponent>(comps[ci]);
-            if (!base || base->Mesh != Mesh) continue;
-
-            bool manages = false;
-            for (int32 mi = 0; mi < base->ArmorPhysMats.Num(); ++mi)
-                if (base->ArmorPhysMats[mi] == PhysMat) { manages = true; break; }
-            if (!manages) continue;
-
-            r.isBreakable = true;
-
-            if (auto* hc = Cast<UArmorHealthDamageComponent>(base))
-            {
-                const void*  mp     = &hc->PhysBoneToArmor;
-                const int32  nSlots = *reinterpret_cast<const int32*>(static_cast<const uint8*>(mp) + 0x08);
-                const uint8* buf    = *reinterpret_cast<uint8* const*>(mp);
-                if (!buf) break;
-
-                for (int32 i = 0; i < nSlots; ++i)
-                {
-                    if (!TMapSlotValid(mp, i)) continue;
-                    const uint8*            slot  = buf + i * 40;
-                    const FArmorHealthItem* item  = reinterpret_cast<const FArmorHealthItem*>(slot + 8);
-                    const bool              byMask = (hc->ArmorDamageInfo.ArmorIndexMask >> item->MaterialIndex) & 1;
-
-                    for (int32 bi = 0; bi < item->ArmorBones.Num(); ++bi)
-                    {
-                        const FArmorHealthSubItem& sub = item->ArmorBones[bi];
-                        bool match = (sub.BoneName == BoneName);
-                        if (!match)
-                            for (int32 ai = 0; !match && ai < sub.AdditionalBones.Num(); ++ai)
-                                if (sub.AdditionalBones[ai] == BoneName) match = true;
-                        if (!match) continue;
-                        r.health      = sub.Health;
-                        r.isDestroyed = byMask || sub.Health <= 0.f;
-                        return r;
-                    }
-                }
-            }
-            else if (auto* sc = Cast<USimpleArmorDamageComponent>(base))
-            {
-                const void*  mp     = &sc->PhysBoneToArmor;
-                const int32  nSlots = *reinterpret_cast<const int32*>(static_cast<const uint8*>(mp) + 0x08);
-                const uint8* buf    = *reinterpret_cast<uint8* const*>(mp);
-                if (!buf) break;
-
-                for (int32 i = 0; i < nSlots; ++i)
-                {
-                    if (!TMapSlotValid(mp, i)) continue;
-                    const uint8*                    slot = buf + i * 40;
-                    const FDestructableBodypartItem* item = reinterpret_cast<const FDestructableBodypartItem*>(slot + 8);
-
-                    for (int32 bi = 0; bi < item->ArmorBones.Num(); ++bi)
-                    {
-                        if (item->ArmorBones[bi] != BoneName) continue;
-                        r.isDestroyed = (sc->ArmorDamageInfo.ArmorIndexMask >> item->MaterialIndex) & 1;
-                        return r;
-                    }
-                }
-            }
-            break; // found managing component
-        }
-        return r;
-    }
-
-    const std::array<float, static_cast<int>(EEnemyHealthScaling::EEnemyHealthScaling_MAX)> GetCurrentEnemyHealthScalings() {
-        std::array<float, static_cast<int>(EEnemyHealthScaling::EEnemyHealthScaling_MAX)> Scalings{};
-
-        UDifficultySetting* Difficulty = CastChecked<AFSDGameState>(UGameplayStatics::GetGameState(GetWorld()))->GetCurrentDifficultySetting();
+        SDK::UDifficultySetting* Difficulty = CastChecked<SDK::AFSDGameState>(SDK::UGameplayStatics::GetGameState(GetWorld()))->GetCurrentDifficultySetting();
         int32 Idx = GameLib::GetNumPlayers(GetWorld(), false) >= 4 ? 3 : GameLib::GetNumPlayers(GetWorld(), false);
 
         using namespace Enum;
-        using enum EEnemyHealthScaling;
+        using enum SDK::EEnemyHealthScaling;
 
         Scalings[EnemyHealthIndex(SmallEnemy)] = Difficulty->SmallEnemyDamageResistance[Idx];
         Scalings[EnemyHealthIndex(LargeEnemy)] = Difficulty->EnemyDamageResistance[Idx];
@@ -406,25 +186,12 @@ namespace State
     CallbackHandle BeginPlayCallback = 0;
 
     bool infiniteAmmoEnabled = false;
-    std::unordered_map<UObject*, int> OldShotCost;
-
-    bool   RecoilEnabled    = false;
-    bool   RCSInitialized   = false;
-    float  RCSDesiredPitch  = 0.f;
-    float  RCSPrevCtrlPitch = 0.f;
-    float  RCSDesiredYaw    = 0.f;
-    float  RCSPrevCtrlYaw   = 0.f;
-
-    bool           SilentAimEnabled   = false;
-    CallbackHandle SilentAimHandle    = 0;
-    bool           AimbotEnabled      = false;
-    bool           AimbotHasTarget    = false;
-    CallbackHandle AimbotHandle       = 0;
+    std::unordered_map<SDK::UObject*, int> OldShotCost;
 
     struct ScannedFunction
     {
-        UFunction* Func = nullptr;
-        UObject* Owner = nullptr;
+        SDK::UFunction* Func = nullptr;
+        SDK::UObject* Owner = nullptr;
         std::string FunctionName;
         std::string OwnerName;
         std::string OwnerClassName;
@@ -551,7 +318,7 @@ namespace TickSystem
     {
         return SetTickableFunction_AsIntervalMs(
             std::move(fn),
-            MakeIntervalProviderFromFrequency(std::forward<TFrequencyRate>(frequencyRate)));
+            MakeIntervalProviderFromFrequency(std::forward<SDK::TFrequencyRate>(frequencyRate)));
     }
 
     void ClearTickableFunction(CallbackHandle handle)
@@ -606,7 +373,7 @@ namespace Twerking
         static FVector lastPosition{};
         auto& s = g_SpawnTwerkTrailState;
 
-        if (!IsValidOf<APlayerCharacter>(player) || !GetWorld()) {
+        if (!IsValidOf<SDK::APlayerCharacter>(player) || !GetWorld()) {
             s.bExisted = false;
             return defaultHz;
         }
@@ -656,7 +423,7 @@ namespace Tickables
     void SpawnTwerk() {
         if (!GetWorld()) return;
         auto* Player = GetLocalPlayer();
-        if (!IsValidOf<APlayerCharacter>(Player)) return;
+        if (!IsValidOf<SDK::APlayerCharacter>(Player)) return;
         if (!IsOnSpacerig()) return;
         Player->Server_CheatDancingCharacterOnSelf(18);
     }
@@ -666,7 +433,7 @@ namespace Tickables
         ++counter;
         auto* Player = GetLocalPlayer();
         if (!Player || !Kismet::IsValid(Player)) return;
-        auto ChatStr = FString(ToWide(std::format("Tick {}", counter)).c_str());
+        auto ChatStr = SDK::FString(ToWide(std::format("Tick {}", counter)).c_str());
         Player->GetPlayerController()->Server_NewMessage(
             Player->GetPlayerState()->GetPlayerName(), ChatStr,
             Player->GetPlayerState()->GetChatSenderType());
@@ -678,56 +445,56 @@ namespace Tickables
 
     void DeletePitjaws() {
         if (!Kismet::IsServer(nullptr)) return;
-        if (!IsValidOf<APlayerCharacter>(GetLocalPlayer())) return;
-        TArray<AActor*> FoundActors;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), APitJaw::StaticClass(), &FoundActors);
-        for (AActor* Actor : FoundActors)
-            if (IsValidOf<APitJaw>(Actor)) Actor->K2_DestroyActor();
+        if (!IsValidOf<SDK::APlayerCharacter>(GetLocalPlayer())) return;
+        SDK::TArray<SDK::AActor*> FoundActors;
+        SDK::UGameplayStatics::GetAllActorsOfClass(GetWorld(), SDK::APitJaw::StaticClass(), &FoundActors);
+        for (SDK::AActor* Actor : FoundActors)
+            if (IsValidOf<SDK::APitJaw>(Actor)) Actor->K2_DestroyActor();
     }
 
     void FearAura() {
-        ACoilGun* CoilGun = GetSecondaryWeapon<ACoilGun>(GetLocalPlayer());
-        if (!IsValidOf<ACoilGun>(CoilGun)) return;
+        SDK::ACoilGun* CoilGun = GetSecondaryWeapon<SDK::ACoilGun>(GetLocalPlayer());
+        if (!IsValidOf<SDK::ACoilGun>(CoilGun)) return;
 
-        TArray<AActor*> FoundActors;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AFSDPawn::StaticClass(), &FoundActors);
+        SDK::TArray<SDK::AActor*> FoundActors;
+        SDK::UGameplayStatics::GetAllActorsOfClass(GetWorld(), SDK::AFSDPawn::StaticClass(), &FoundActors);
         if (FoundActors.Num() == 0) return;
 
         if (Kismet::IsServer(GetWorld()))
         {
-            for (AActor* Actor : FoundActors)
-                if (IsValidOf<AActor>(Actor))
+            for (SDK::AActor* Actor : FoundActors)
+                if (IsValidOf<SDK::AActor>(Actor))
                     CoilGun->Server_FearTarget(Actor);
 
             return;
         }
 
-        std::vector<AFSDPawn*> Pawns;
+        std::vector<SDK::AFSDPawn*> Pawns;
         Pawns.reserve(FoundActors.Num());
 
-        for (AActor* Actor : FoundActors)
-            if (AFSDPawn* Pawn = Cast<AFSDPawn>(Actor))
-                if (Pawn->GetAttitude() != EPawnAttitude::Friendly)
+        for (SDK::AActor* Actor : FoundActors)
+            if (SDK::AFSDPawn* Pawn = Cast<SDK::AFSDPawn>(Actor))
+                if (Pawn->GetAttitude() != SDK::EPawnAttitude::Friendly)
                     Pawns.push_back(Pawn);
 
-        EnqueueThrottled<AFSDPawn*>(std::move(Pawns), std::chrono::milliseconds(16),
-            [CoilGun](AFSDPawn* Target, size_t Index, size_t Total) -> bool
+        EnqueueThrottled<SDK::AFSDPawn*>(std::move(Pawns), std::chrono::milliseconds(16),
+            [CoilGun](SDK::AFSDPawn* Target, size_t Index, size_t Total) -> bool
             {
-                if (IsValidOf<ACoilGun>(CoilGun) && IsValidOf<AFSDPawn>(Target)) CoilGun->Server_FearTarget(Target);
+                if (IsValidOf<SDK::ACoilGun>(CoilGun) && IsValidOf<SDK::AFSDPawn>(Target)) CoilGun->Server_FearTarget(Target);
                 return true;
             });
     }
 
     void CoilResistance() {
-        ACoilGun* CoilGun = GetSecondaryWeapon<ACoilGun>(GetLocalPlayer());
-        if (!IsValidOf<ACoilGun>(CoilGun)) return;
+        SDK::ACoilGun* CoilGun = GetSecondaryWeapon<SDK::ACoilGun>(GetLocalPlayer());
+        if (!IsValidOf<SDK::ACoilGun>(CoilGun)) return;
         CoilGun->Server_ToggleCharingBonuses(true);
     }
 
     void LokiAbuse()
     {
-        AWPN_LockOnRifle_C* Loki = GetPrimaryWeapon<AWPN_LockOnRifle_C>(GetLocalPlayer());
-        if (!IsValidOf<AWPN_LockOnRifle_C>(Loki)) return;
+        SDK::AWPN_LockOnRifle_C* Loki = GetPrimaryWeapon<SDK::AWPN_LockOnRifle_C>(GetLocalPlayer());
+        if (!IsValidOf<SDK::AWPN_LockOnRifle_C>(Loki)) return;
         Weapons::UpgradeLoki(Loki);
         Weapons::NukeEnemiesWithECR(Loki);
         //Weapons::ECRTrail(Loki, 128);
@@ -738,20 +505,20 @@ namespace Tickables
         static const std::vector<std::string> playersToLock = { "29 Phantom" };
         auto Local = GetLocalPlayer();
         if (!GetWorld() && !GetWorld()->GetName().contains("LVL_SpaceRig")) return;
-        if (!IsValidOf<APlayerCharacter>(Local)) return;
-        AReplicatedActor_C* ActualTeleporter = nullptr;
-        TArray<AActor*> Teleporters{};
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AReplicatedActor_C::StaticClass(), &Teleporters);
+        if (!IsValidOf<SDK::APlayerCharacter>(Local)) return;
+        SDK::AReplicatedActor_C* ActualTeleporter = nullptr;
+        SDK::TArray<SDK::AActor*> Teleporters{};
+        SDK::UGameplayStatics::GetAllActorsOfClass(GetWorld(), SDK::AReplicatedActor_C::StaticClass(), &Teleporters);
         for (auto* T : Teleporters)
-            if (IsValidOf<AReplicatedActor_C>(T) && T->GetOwner() == Local)
+            if (IsValidOf<SDK::AReplicatedActor_C>(T) && T->GetOwner() == Local)
             {
-                ActualTeleporter = static_cast<AReplicatedActor_C*>(T); break;
+                ActualTeleporter = static_cast<SDK::AReplicatedActor_C*>(T); break;
             }
-        if (!IsValidOf<AReplicatedActor_C>(ActualTeleporter)) return;
-        TArray<APlayerCharacter*> Players = ActorLib::GetAllPlayerCharacters(nullptr);
-        std::vector<APlayerCharacter*> Targets;
+        if (!IsValidOf<SDK::AReplicatedActor_C>(ActualTeleporter)) return;
+        SDK::TArray<SDK::APlayerCharacter*> Players = ActorLib::GetAllPlayerCharacters(nullptr);
+        std::vector<SDK::APlayerCharacter*> Targets;
         for (auto P : Players) {
-            if (IsValidOf<APlayerCharacter>(P) &&
+            if (IsValidOf<SDK::APlayerCharacter>(P) &&
                 std::find(
                     playersToLock.begin(),
                     playersToLock.end(),
@@ -759,10 +526,10 @@ namespace Tickables
                 Targets.push_back(P);
         }
         if (Targets.empty()) return;
-        EnqueueThrottled<APlayerCharacter*>(Targets, std::chrono::milliseconds(20),
-            [ActualTeleporter](APlayerCharacter* Target, size_t Index, size_t Total) -> bool
+        EnqueueThrottled<SDK::APlayerCharacter*>(Targets, std::chrono::milliseconds(20),
+            [ActualTeleporter](SDK::APlayerCharacter* Target, size_t Index, size_t Total) -> bool
             {
-                if (IsValidOf<APlayerCharacter>(Target) && IsValidOf<AReplicatedActor_C>(ActualTeleporter))
+                if (IsValidOf<SDK::APlayerCharacter>(Target) && IsValidOf<SDK::AReplicatedActor_C>(ActualTeleporter))
                     ActualTeleporter->Server_TeleportPlayer(Target, FVector{});
                 return true;
             });
@@ -774,7 +541,7 @@ namespace Tickables
 // =========================================================================
 namespace Weapons
 {
-    std::vector<SDK::AAmmoDrivenWeapon*> GetAllAmmoWeapons(APlayerCharacter* LocalPlayer)
+    std::vector<SDK::AAmmoDrivenWeapon*> GetAllAmmoWeapons(SDK::APlayerCharacter* LocalPlayer)
     {
         std::vector<SDK::AAmmoDrivenWeapon*> weapons;
         if (!LocalPlayer || !Kismet::IsValid(LocalPlayer->InventoryComponent)) return weapons;
@@ -792,15 +559,15 @@ namespace Weapons
         return weapons;
     }
 
-    void LokiSphereExplosions(AWPN_LockOnRifle_C* Loki, float R, int N)
+    void LokiSphereExplosions(SDK::AWPN_LockOnRifle_C* Loki, float R, int N)
     {
         if (N <= 0 || R <= 0) return;
-        if (!IsValidOf<AWPN_LockOnRifle_C>(Loki)) return;
+        if (!IsValidOf<SDK::AWPN_LockOnRifle_C>(Loki)) return;
         std::vector<FVector> Points;
         Points.reserve(N);
 
         const float PHI = 3.14159265359f * (3.0f - std::sqrt(5.0f)); // golden angle
-        const float Time = UKismetSystemLibrary::GetGameTimeInSeconds(GetWorld());
+        const float Time = SDK::UKismetSystemLibrary::GetGameTimeInSeconds(GetWorld());
         const float RotationSpeed = 1.0f;
         const float TimeOffset = Time * RotationSpeed;
         const FVector PlayerLoc = GetLocalPlayer()->K2_GetActorLocation();
@@ -833,8 +600,8 @@ namespace Weapons
         );
     }
 
-    void UpgradeLoki(AWPN_LockOnRifle_C* Loki) {
-        ASSUME_ASSERT(IsValidOf<AWPN_LockOnRifle_C>(Loki));
+    void UpgradeLoki(SDK::AWPN_LockOnRifle_C* Loki) {
+        ASSUME_ASSERT(IsValidOf<SDK::AWPN_LockOnRifle_C>(Loki));
 
         Loki->Resupply(100);
         Loki->bAlwaysHitTarget = true;
@@ -860,12 +627,12 @@ namespace Weapons
         Loki->RateOfFireLockedOnModifier = 200;
     }
 
-    void NukeEnemiesWithECR(AWPN_LockOnRifle_C* Loki)
+    void NukeEnemiesWithECR(SDK::AWPN_LockOnRifle_C* Loki)
     {
-        ASSUME_ASSERT(IsValidOf<AWPN_LockOnRifle_C>(Loki));
+        ASSUME_ASSERT(IsValidOf<SDK::AWPN_LockOnRifle_C>(Loki));
         float damage = 9999999;
         if (auto AoeActor = Loki->AoeActorClass) {
-            auto comp = Cast<UDamageComponent>(UActorFunctionLibrary::GetComponentFromClass(Loki->AoeActorClass, UDamageComponent::StaticClass()));
+            auto comp = Cast<SDK::UDamageComponent>(SDK::UActorFunctionLibrary::GetComponentFromClass(Loki->AoeActorClass, SDK::UDamageComponent::StaticClass()));
             if (comp) {
                 damage = comp->RadialDamage;
                 //info("{} {}",ObjToStr(comp), comp->RadialDamage);
@@ -878,20 +645,20 @@ namespace Weapons
         auto Enemies = GetAliveNonFriendlies();
         //info("Found {} enemies", Enemies.size());
         // Call EnqueueThrottled with interval, lambda handles each actor
-        EnqueueThrottled<AFSDPawn*>(
+        EnqueueThrottled<SDK::AFSDPawn*>(
             Enemies,
             std::chrono::milliseconds(100), // example throttled interval
-            [Loki, damage, Scalings](AFSDPawn* Enemy, size_t index, size_t total) -> bool
+            [Loki, damage, Scalings](SDK::AFSDPawn* Enemy, size_t index, size_t total) -> bool
             {
-                if (!IsValidOf<AWPN_LockOnRifle_C>(Loki) || !IsChildOfByName(Loki, L"WPN_LockOnRifle_C"))
+                if (!IsValidOf<SDK::AWPN_LockOnRifle_C>(Loki) || !IsChildOfByName(Loki, L"WPN_LockOnRifle_C"))
                 {
                     warn("Loki became invalid mid run");
                     return false;
                 }
 
-                if (!IsValidOf<AFSDPawn>(Enemy) || !IsValidOf<UEnemyHealthComponent>(Enemy->GetHealthComponent())) return true;
+                if (!IsValidOf<SDK::AFSDPawn>(Enemy) || !IsValidOf<SDK::UEnemyHealthComponent>(Enemy->GetHealthComponent())) return true;
 
-                UEnemyHealthComponent* HealthComponent = CastChecked<UEnemyHealthComponent>(Enemy->GetHealthComponent());
+                SDK::UEnemyHealthComponent* HealthComponent = CastChecked<SDK::UEnemyHealthComponent>(Enemy->GetHealthComponent());
                 if (!HealthComponent->IsAlive()) return true;
                 if (NearlyEqual(Enum::EnemyHealthIndex(HealthComponent->EnemyHealthScaling), -1)) return true;
                 float Health = HealthComponent->GetHealth() * Scalings[Enum::EnemyHealthIndex(HealthComponent->EnemyHealthScaling)];
@@ -906,11 +673,11 @@ namespace Weapons
         );
     }
 
-    void ECRTrail(AWPN_LockOnRifle_C* Loki, size_t Count) {
-        if (!IsValidOf<AWPN_LockOnRifle_C>(Loki) || !IsChildOfByName(Loki, L"WPN_LockOnRifle_C"))
+    void ECRTrail(SDK::AWPN_LockOnRifle_C* Loki, size_t Count) {
+        if (!IsValidOf<SDK::AWPN_LockOnRifle_C>(Loki) || !IsChildOfByName(Loki, L"WPN_LockOnRifle_C"))
             return;
 
-        TArray<APlayerCharacter*> Players = UActorFunctionLibrary::GetAllPlayerCharacters(GetWorld());
+        SDK::TArray<SDK::APlayerCharacter*> Players = SDK::UActorFunctionLibrary::GetAllPlayerCharacters(GetWorld());
 
         std::vector<int8> dummy(Count);
 
@@ -918,13 +685,13 @@ namespace Weapons
             dummy,
             std::chrono::milliseconds(100),
             [Loki](int8, size_t index, size_t total) -> bool {
-                if (!IsValidOf<AWPN_LockOnRifle_C>(Loki) || !IsChildOfByName(Loki, L"WPN_LockOnRifle_C"))
+                if (!IsValidOf<SDK::AWPN_LockOnRifle_C>(Loki) || !IsChildOfByName(Loki, L"WPN_LockOnRifle_C"))
                     return false;
 
-                auto Players = UActorFunctionLibrary::GetAllPlayerCharacters(GetWorld());
+                auto Players = SDK::UActorFunctionLibrary::GetAllPlayerCharacters(GetWorld());
 
                 for (auto Player : Players) {
-                    if (!IsValidOf<APlayerCharacter>(Player) || !IsChildOfByName(Player, L"PlayerCharacter"))
+                    if (!IsValidOf<SDK::APlayerCharacter>(Player) || !IsChildOfByName(Player, L"PlayerCharacter"))
                         continue;
 
                     float spacing = 150.0f; // distance between trail points
@@ -947,7 +714,7 @@ namespace Weapons
 // =========================================================================
 namespace Scan
 {
-    std::string BuildExplicitCallName(UObject* Owner, UFunction* Func)
+    std::string BuildExplicitCallName(SDK::UObject* Owner, SDK::UFunction* Func)
     {
         const std::string ownerClass = Owner && Owner->Class ? Owner->Class->GetName() : "?";
         const std::string ownerName = Owner ? Owner->GetName() : "?";
@@ -955,20 +722,20 @@ namespace Scan
         return ownerClass + "::" + ownerName + "::" + funcName;
     }
 
-    std::string BuildFuncSig(UFunction* Func)
+    std::string BuildFuncSig(SDK::UFunction* Func)
     {
         std::string name = Func->GetName();
         struct ParamEntry { std::string text; };
         std::vector<ParamEntry> params;
         params.reserve(8);
         size_t totalParamChars = 0;
-        for (auto* field : FFieldRange(Func->ChildProperties))
+        for (auto* field : SDK::FFieldRange(Func->ChildProperties))
         {
-            if (!FieldCast::IsA<FProperty>(field)) continue;
-            auto* Prop = static_cast<FProperty*>(field);
-            auto  pflags = static_cast<EPropertyFlags>(Prop->PropertyFlags);
-            if (pflags & EPropertyFlags::ReturnParm) continue;
-            if (!(pflags & EPropertyFlags::Parm))    continue;
+            if (!FieldCast::IsA<SDK::FProperty>(field)) continue;
+            auto* Prop = static_cast<SDK::FProperty*>(field);
+            auto  pflags = static_cast<SDK::EPropertyFlags>(Prop->PropertyFlags);
+            if (pflags & SDK::EPropertyFlags::ReturnParm) continue;
+            if (!(pflags & SDK::EPropertyFlags::Parm))    continue;
             auto& e = params.emplace_back();
             e.text = Prop->Name.ToString();
             e.text += ": ";
@@ -997,16 +764,16 @@ namespace Scan
         return r;
     }
 
-    void ScanFunctions(UObject* Obj, std::vector<std::string>& out)
+    void ScanFunctions(SDK::UObject* Obj, std::vector<std::string>& out)
     {
-        for (UClass* cls : UClassHierarchyRange(Obj->Class))
-            for (auto* field : UFieldRange(cls->Children))
+        for (SDK::UClass* cls : UClassHierarchyRange(Obj->Class))
+            for (auto* field : SDK::UFieldRange(cls->Children))
             {
-                if (!field->IsA(UFunction::StaticClass())) continue;
-                auto* Func = static_cast<UFunction*>(field);
-                auto  flags = static_cast<EFunctionFlags>(Func->FunctionFlags);
-                if (!(flags & EFunctionFlags::Net))       continue;
-                if (!(flags & EFunctionFlags::NetServer)) continue;
+                if (!field->IsA(SDK::UFunction::StaticClass())) continue;
+                auto* Func = static_cast<SDK::UFunction*>(field);
+                auto  flags = static_cast<SDK::EFunctionFlags>(Func->FunctionFlags);
+                if (!(flags & SDK::EFunctionFlags::Net))       continue;
+                if (!(flags & SDK::EFunctionFlags::NetServer)) continue;
                 out.push_back(BuildFuncSig(Func));
             }
         std::sort(out.begin(), out.end());
@@ -1015,23 +782,23 @@ namespace Scan
 
     void DoScan()
     {
-        APlayerCharacter* Local = GetLocalPlayer();
+        SDK::APlayerCharacter* Local = GetLocalPlayer();
         if (!Local) { warn("[scan] No local player."); return; }
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), &AllActors);
+        SDK::TArray<SDK::AActor*> AllActors;
+        SDK::UGameplayStatics::GetAllActorsOfClass(GetWorld(), SDK::AActor::StaticClass(), &AllActors);
         State::ScannedFunctions.clear();
         State::ScannedFunctionVariantsByName.clear();
         int inserted = 0;
-        auto TryScanObject = [&](UObject* Obj)
+        auto TryScanObject = [&](SDK::UObject* Obj)
             {
-                for (UClass* cls : UClassHierarchyRange(Obj->Class))
-                    for (auto* field : UFieldRange(cls->Children))
+                for (SDK::UClass* cls : UClassHierarchyRange(Obj->Class))
+                    for (auto* field : SDK::UFieldRange(cls->Children))
                     {
-                        if (!field->IsA(UFunction::StaticClass())) continue;
-                        auto* Func = static_cast<UFunction*>(field);
-                        auto  flags = static_cast<EFunctionFlags>(Func->FunctionFlags);
-                        if (!(flags & EFunctionFlags::Net))       continue;
-                        if (!(flags & EFunctionFlags::NetServer)) continue;
+                        if (!field->IsA(SDK::UFunction::StaticClass())) continue;
+                        auto* Func = static_cast<SDK::UFunction*>(field);
+                        auto  flags = static_cast<SDK::EFunctionFlags>(Func->FunctionFlags);
+                        if (!(flags & SDK::EFunctionFlags::Net))       continue;
+                        if (!(flags & SDK::EFunctionFlags::NetServer)) continue;
                         std::string name = Func->GetName();
                         std::string explicitName = BuildExplicitCallName(Obj, Func);
                         State::ScannedFunctions[explicitName] = {
@@ -1050,11 +817,11 @@ namespace Scan
         {
             if (!Actor || !Kismet::IsValid(Actor)) continue;
             if (!Actor->bReplicates)               continue;
-            if (NoneOf<AActor*>(Actor->GetOwner(), Local, Local->GetOwner(),
+            if (NoneOf<SDK::AActor*>(Actor->GetOwner(), Local, Local->GetOwner(),
                 Local->GetPlayerController(), Local->GetPlayerState())) continue;
             TryScanObject(Actor);
-            TArray<UActorComponent*> Components =
-                Actor->K2_GetComponentsByClass(UActorComponent::StaticClass());
+            SDK::TArray<SDK::UActorComponent*> Components =
+                Actor->K2_GetComponentsByClass(SDK::UActorComponent::StaticClass());
             for (auto* Comp : Components)
                 if (Comp && Kismet::IsValid(Comp)) TryScanObject(Comp);
         }
@@ -1073,11 +840,11 @@ namespace Scan
 // =========================================================================
 namespace Callbacks
 {
-    void LogAllProcessEvents(UObject* Object, UFunction* Function, void*)
+    void LogAllProcessEvents(SDK::UObject* Object, SDK::UFunction* Function, void*)
     {
         if (!Object)
         {
-            trace("[ProcessEvent] UObject=nullptr, Function={}",
+            trace("[ProcessEvent] SDK::UObject=nullptr, Function={}",
                 Function ? Function->GetName() : "nullptr");
             return;
         }
@@ -1089,23 +856,23 @@ namespace Callbacks
         trace("[ProcessEvent] {}::{} -> {}", objectClassName, objectName, functionName);
     }
 
-    void TickListener(UObject* Object, UFunction* Function, void*)
+    void TickListener(SDK::UObject* Object, SDK::UFunction* Function, void*)
     {
-        static UObject* TrackedObject = nullptr;
+        static SDK::UObject* TrackedObject = nullptr;
         if (!TrackedObject || !IsValidRaw(TrackedObject)) TrackedObject = Object;
         if (Object != TrackedObject) return;
         info("Tick: {} -> {}", Object->GetName(), Function ? Function->GetName() : "None");
     }
 
-    void DanceIntercept(UObject* Object, UFunction*, void* Params)
+    void DanceIntercept(SDK::UObject* Object, SDK::UFunction*, void* Params)
     {
         auto* Args = static_cast<SDK::Params::PlayerCharacter_Server_SetIsDancing*>(Params);
 
-        auto HandlePlayer = [&](APlayerCharacter* Local)
+        auto HandlePlayer = [&](SDK::APlayerCharacter* Local)
             {
                 if (Object == Local) return;
                 if (Args->danceMove_0 != 18) return;
-                auto* Player = static_cast<APlayerCharacter*>(Object);
+                auto* Player = static_cast<SDK::APlayerCharacter*>(Object);
 
                 if constexpr (DeleteOnTwerk)
                 {
@@ -1122,7 +889,7 @@ namespace Callbacks
                 {
                     Player->GetPlayerController()->Server_NewMessage(
                         Player->PlayerState->GetPlayerName(),
-                        FString(L"Six Seven"), EChatSenderType::DeluxUser);
+                        SDK::FString(L"Six Seven"), SDK::EChatSenderType::DeluxUser);
                     Args->danceMove_0 = -1;
                     Args->isDancing_0 = false;
                 }
@@ -1132,7 +899,7 @@ namespace Callbacks
         else                      HandlePlayer(GetLocalPlayerCharacterBlocking(5));
     }
 
-    void ServerMessageIntercept(UObject*, UFunction*, void* Params)
+    void ServerMessageIntercept(SDK::UObject*, SDK::UFunction*, void* Params)
     {
         auto& msg = static_cast<SDK::Params::FSDGameState_ClientNewMessage*>(Params)->Msg;
         if (msg.Msg.ToString() == "Six Seven") return;
@@ -1150,20 +917,20 @@ namespace Callbacks
         info("[Chat] {}: {}", msg.Sender.ToString(), msg.Msg.ToString());
     }
 
-    void MessageIntercept(UObject*, UFunction*, void* Params)
+    void MessageIntercept(SDK::UObject*, SDK::UFunction*, void* Params)
     {
         auto* msg = static_cast<SDK::Params::FSDPlayerController_Server_NewMessage*>(Params);
         if (msg->Text.ToString() == "Six Seven") return;
         info("[Chat] {}: {}", msg->Sender.ToString(), msg->Text.ToString());
     }
 
-    void ProxyModHook(UObject*, UFunction*, void*)
+    void ProxyModHook(SDK::UObject*, SDK::UFunction*, void*)
     {
         SDK::UClass* ProxyMod = BasicFilesImpleUtils::FindClassByName("ProxyMod_C", false);
         if (!ProxyMod || !Kismet::IsValidClass(ProxyMod)) { error("[ProxyMod] Class not found."); return; }
         SDK::UFunction* InitFunc = ProxyMod->GetFunction("ProxyMod_C", "Init");
         if (!InitFunc || !Kismet::IsValid(InitFunc)) { error("[ProxyMod] Function 'Init' missing."); return; }
-        auto* ProxyActor = GetActorOfClass<AActor>(ProxyMod);
+        auto* ProxyActor = GetActorOfClass<SDK::AActor>(ProxyMod);
         if (!ProxyActor || !Kismet::IsValid(ProxyActor)) { error("[ProxyMod] No active actor found."); return; }
         info("[ProxyMod] Actor '{}' found - executing Init.", GetDisplayName(ProxyActor));
         ProxyActor->ProcessEvent(InitFunc, nullptr);
@@ -1211,24 +978,24 @@ namespace Commands
     }
 
     //void tpbars(const ctx&){
-    //    if (!IsValidOf<APlayerCharacter>(GetLocalPlayer())) return;
-    //    std::vector<AActor*> Relevant{};
-    //    TArray<AActor*> Barnacles = GetAllActorsOfClass<ABhaBarnacle>();
-    //    TArray<AActor*> Apocas = GetAllActorsOfClass<>
-    //    TArray<AActor*> Teleports = GetAllActorsOfClass<AReplicatedActor_C>();
+    //    if (!IsValidOf<SDK::APlayerCharacter>(GetLocalPlayer())) return;
+    //    std::vector<SDK::AActor*> Relevant{};
+    //    SDK::TArray<SDK::AActor*> Barnacles = GetAllActorsOfClass<SDK::ABhaBarnacle>();
+    //    SDK::TArray<SDK::AActor*> Apocas = GetAllActorsOfClass<>
+    //    SDK::TArray<SDK::AActor*> Teleports = GetAllActorsOfClass<SDK::AReplicatedActor_C>();
     //    for(auto T : Teleports) {
-    //        if(!IsValidOf<AReplicatedActor_C>(T)) continue;
+    //        if(!IsValidOf<SDK::AReplicatedActor_C>(T)) continue;
     //        if(T->GetOwner() != GetLocalPlayer()) continue;
-    //        auto TP = CastChecked<AReplicatedActor_C>(T);
+    //        auto TP = CastChecked<SDK::AReplicatedActor_C>(T);
     //        for(auto A : FoundActors) {
-    //            if(!IsValidOf<ABhaBarnacle>(A)) continue;
+    //            if(!IsValidOf<SDK::ABhaBarnacle>(A)) continue;
     //            TP->Server_TeleportPlayer()
     //
     //        }
     //    }
     //}
     //void Resup(const ctx&) {
-    //    if (!IsValidOf<APlayerCharacter>(GetLocalPlayer())) return;
+    //    if (!IsValidOf<SDK::APlayerCharacter>(GetLocalPlayer())) return;
     //    for (auto i : GetLocalPlayer()->InventoryComponent->GetAllItems()) {
     //        if()
     //    }
@@ -1245,23 +1012,23 @@ namespace Commands
     }
 
     void ScanDamageMeeterMod(const ctx& = State::dummyCtx) {
-        if (!IsValidOf<APlayerCharacter>(GetLocalPlayer())) return;
-        TArray<AActor*> FoundActors = GetAllActorsOfClass<AActor>();
+        if (!IsValidOf<SDK::APlayerCharacter>(GetLocalPlayer())) return;
+        SDK::TArray<SDK::AActor*> FoundActors = GetAllActorsOfClass<SDK::AActor>();
 
-        std::vector<AActor*> Filter;
+        std::vector<SDK::AActor*> Filter;
         Filter.reserve(FoundActors.Num());
 
         for (auto A : FoundActors) {
-            if (!IsValidOf<AActor>(A)) continue;
+            if (!IsValidOf<SDK::AActor>(A)) continue;
             if (!A->bReplicates) continue;
-            if (NoneOf<AActor*>(A->GetOwner(), GetLocalPlayer(), GetLocalPlayer()->GetOwner(),
+            if (NoneOf<SDK::AActor*>(A->GetOwner(), GetLocalPlayer(), GetLocalPlayer()->GetOwner(),
                 GetLocalPlayer()->GetPlayerController(), GetLocalPlayer()->GetPlayerState())) continue;
 
             Filter.push_back(A);
         }
 
-        std::erase_if(Filter, [](AActor* A) {
-            if (!IsValidOf<AActor>(A)) return true;
+        std::erase_if(Filter, [](SDK::AActor* A) {
+            if (!IsValidOf<SDK::AActor>(A)) return true;
             if (!A->Class) return true;
 
             auto ClassName = A->Class->Name.ToString();
@@ -1273,7 +1040,7 @@ namespace Commands
         }
     }
 
-    static void Untwerk(APlayerCharacter* Player)
+    static void Untwerk(SDK::APlayerCharacter* Player)
     {
         if (!Player || !Kismet::IsValid(Player)) return;
         if (Player->StaticClass() != SDK::APlayerCharacter::StaticClass()) return;
@@ -1286,37 +1053,37 @@ namespace Commands
         auto* Local = GetLocalPlayer();
         if (!Local || !Kismet::IsValid(Local)) return info("Aborting crash, no local player");
         if (Kismet::IsServer(Local)) return info("Aborting crash, we are host");
-        Local->Server_SpawnEnemies(UEnemyDescriptor::GetDefaultObj(), 100000);
+        Local->Server_SpawnEnemies(SDK::UEnemyDescriptor::GetDefaultObj(), 100000);
         info("Crash triggered.");
     }
     void Say(const CommandContext& ctx)
     {
-        UFSDGameInstance* Instance = GameLib::GetFSDGameInstance(GetWorld());
-        if (!IsValidOf<UFSDGameInstance>(Instance)) return;
-        AFSDPlayerState* LocalState = Instance->GetLocalFSDPlayerController()->GetFSDPlayerState();
-        if (!IsValidOf<AFSDPlayerState>(LocalState)) return;
+        SDK::UFSDGameInstance* Instance = GameLib::GetFSDGameInstance(GetWorld());
+        if (!IsValidOf<SDK::UFSDGameInstance>(Instance)) return;
+        SDK::AFSDPlayerState* LocalState = Instance->GetLocalFSDPlayerController()->GetFSDPlayerState();
+        if (!IsValidOf<SDK::AFSDPlayerState>(LocalState)) return;
         const std::string& SenderName = ctx.Arg(1);
-        AFSDPlayerState* Sender = nullptr;
-        for (AFSDPlayerState* Player : UGameFunctionLibrary::GetFSDGameState(GetWorld())->GetNetworkSortedPlayerArray()) {
-            if (!IsValidOf<AFSDPlayerState>(Player)) continue;
+        SDK::AFSDPlayerState* Sender = nullptr;
+        for (SDK::AFSDPlayerState* Player : SDK::UGameFunctionLibrary::GetFSDGameState(GetWorld())->GetNetworkSortedPlayerArray()) {
+            if (!IsValidOf<SDK::AFSDPlayerState>(Player)) continue;
             if (Player->GetPlayerName().ToString() == SenderName) {
                 Sender = Player;
                 break;
             }
         }
         // If no player matched, arg 1 is part of the message, not a name
-        const auto msgBegin = IsValidOf<AFSDPlayerState>(Sender)
+        const auto msgBegin = IsValidOf<SDK::AFSDPlayerState>(Sender)
             ? ctx.args.begin() + 2
             : ctx.args.begin() + 1;
 
-        if (!IsValidOf<AFSDPlayerState>(Sender)) Sender = LocalState;
+        if (!IsValidOf<SDK::AFSDPlayerState>(Sender)) Sender = LocalState;
         std::string msg;
 
         for (auto it = msgBegin; it != ctx.args.end(); ++it) { if (it != msgBegin) msg += ' '; msg += *it; }
 
         LocalState->GetPlayerController()->Server_NewMessage(
             Sender->GetPlayerName(),
-            FString(ToWide(msg).c_str()),
+            SDK::FString(ToWide(msg).c_str()),
             Sender->GetChatSenderType()
         );
     }
@@ -1325,108 +1092,25 @@ namespace Commands
     {
         auto* L = GetLocalPlayer();
         if (!L || !Kismet::IsValid(L)) return;
-        auto* WPN = L->InventoryComponent->GetItem(EItemCategory::SecondaryWeapon);
-        if (!WPN || !Kismet::IsValid(WPN) || !WPN->IsA(ACoilGun::StaticClass())) return;
-        auto* CoilGun = CastChecked<ACoilGun>(WPN);
-        FVector_NetQuantize Start{}, End{};
+        auto* WPN = L->InventoryComponent->GetItem(SDK::EItemCategory::SecondaryWeapon);
+        if (!WPN || !Kismet::IsValid(WPN) || !WPN->IsA(SDK::ACoilGun::StaticClass())) return;
+        auto* CoilGun = CastChecked<SDK::ACoilGun>(WPN);
+        SDK::FVector_NetQuantize Start{}, End{};
         Start.X = SafeStof(ctx.Arg(1)); Start.Y = SafeStof(ctx.Arg(2)); Start.Z = SafeStof(ctx.Arg(3));
         End.X = SafeStof(ctx.Arg(4)); End.Y = SafeStof(ctx.Arg(5)); End.Z = SafeStof(ctx.Arg(6));
         CoilGun->Server_HitTerrain(Start, End, SafeStof(ctx.Arg(7)));
     }
 
-    void WPInfo(const CommandContext& = State::dummyCtx)
-    {
-        using namespace ObjectCast;
-
-        if (IsOnSpaceRig()) { spdlog::info("[wpinfo] on space rig"); return; }
-
-        std::vector<AFSDPawn*> Enemies = GetAliveNonFriendlies();
-        if (Enemies.empty()) { spdlog::info("[wpinfo] no enemies"); return; }
-
-        APlayerCharacter* LocalPlayer = GetLocalPlayer();
-        FVector CamLoc = {};
-        if (IsValidOf<APlayerCharacter>(LocalPlayer)) {
-            if (auto* Ctrl = Cast<AFSDPlayerController>(LocalPlayer->Controller))
-                if (auto* CamMgr = Ctrl->PlayerCameraManager)
-                    CamLoc = CamMgr->GetCameraLocation();
-        }
-
-        AFSDPawn* Target = nullptr;
-        float BestDist = FLT_MAX;
-        for (AFSDPawn* E : Enemies) {
-            if (!IsValidOf<AFSDPawn>(E)) continue;
-            FVector D = E->K2_GetActorLocation() - CamLoc;
-            float Dist = D.X*D.X + D.Y*D.Y + D.Z*D.Z;
-            if (Dist < BestDist) { BestDist = Dist; Target = E; }
-        }
-        if (!Target) { spdlog::info("[wpinfo] no valid target"); return; }
-
-        const char* Branch = Cast<AEnemyDeepPathfinderCharacter>(Target) ? "DeepPathfinder"
-                           : Cast<AEnemyPawn>(Target)                  ? "EnemyPawn"
-                           : "unknown";
-        auto Meshes = Helpers::GetEnemyMeshes(Target);
-        spdlog::info("[wpinfo] branch={} meshes={}", Branch, Meshes.size());
-
-        int32 wpCount = 0;
-        for (int32 m = 0; m < (int32)Meshes.size(); ++m)
-        {
-            auto* Mesh = Meshes[m];
-            auto* SkelAsset = Mesh->SkeletalMesh;
-            auto* PhysAsset = SkelAsset ? SkelAsset->PhysicsAsset : nullptr;
-            spdlog::info("[wpinfo] mesh[{}] bones={} skelMesh={} physAsset={} bodies={}",
-                m, Mesh->GetNumBones(),
-                SkelAsset ? "ok" : "NULL", PhysAsset ? "ok" : "NULL",
-                PhysAsset ? PhysAsset->SkeletalBodySetups.Num() : 0);
-            if (!PhysAsset) continue;
-
-            for (int32 i = 0; i < PhysAsset->SkeletalBodySetups.Num(); ++i) {
-                auto* Body = PhysAsset->SkeletalBodySetups[i];
-                if (!Body) continue;
-                auto* FSDMat = Body->PhysMaterial ? Cast<UFSDPhysicalMaterial>(Body->PhysMaterial) : nullptr;
-                if (!FSDMat || !FSDMat->IsWeakPoint) continue;
-
-                ++wpCount;
-                const int32   BoneIdx = Mesh->GetBoneIndex(Body->BoneName);
-                const FVector Pos     = Mesh->GetSocketLocation(Body->BoneName);
-                const bool    bVis    = IsValidOf<APlayerCharacter>(LocalPlayer)
-                    ? Helpers::IsWeakpointVisible(LocalPlayer, Target, CamLoc, Pos, Body->BoneName)
-                    : false;
-                const auto WpState = Helpers::GetBreakableWpState(Target, Mesh, Body->BoneName, FSDMat);
-                if (WpState.isBreakable)
-                {
-                    if (WpState.health >= 0.f)
-                        spdlog::info("[wpinfo]  WP[{}] bone='{}' boneIdx={} mult={:.2f} {} breakable hp={:.1f}{}",
-                            i, Body->BoneName.ToString(), BoneIdx, FSDMat->DamageMultiplier,
-                            bVis ? "VIS" : "OCC", WpState.health,
-                            WpState.isDestroyed ? " DESTROYED" : "");
-                    else
-                        spdlog::info("[wpinfo]  WP[{}] bone='{}' boneIdx={} mult={:.2f} {} breakable{}",
-                            i, Body->BoneName.ToString(), BoneIdx, FSDMat->DamageMultiplier,
-                            bVis ? "VIS" : "OCC",
-                            WpState.isDestroyed ? " DESTROYED" : "");
-                }
-                else
-                {
-                    spdlog::info("[wpinfo]  WP[{}] bone='{}' boneIdx={} mult={:.2f} {} pos=({:.0f},{:.0f},{:.0f})",
-                        i, Body->BoneName.ToString(), BoneIdx, FSDMat->DamageMultiplier,
-                        bVis ? "VIS" : "OCC",
-                        Pos.X, Pos.Y, Pos.Z);
-                }
-            }
-        }
-        spdlog::info("[wpinfo] {} weakpoint(s) total", wpCount);
-    }
-
     void FearAll(const CommandContext& = State::dummyCtx)
     {
-        APlayerCharacter* Player = GetLocalPlayer();
+        SDK::APlayerCharacter* Player = GetLocalPlayer();
         if (!Kismet::IsValid(Player)) return;
 
-        ACoilGun* CoilGun = Cast<ACoilGun>(Player->InventoryComponent->GetItem(EItemCategory::SecondaryWeapon));
+        SDK::ACoilGun* CoilGun = Cast<SDK::ACoilGun>(Player->InventoryComponent->GetItem(SDK::EItemCategory::SecondaryWeapon));
         if (!Kismet::IsValid(CoilGun)) return;
 
-        TArray<AActor*> FoundActors;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AFSDPawn::StaticClass(), &FoundActors);
+        SDK::TArray<SDK::AActor*> FoundActors;
+        SDK::UGameplayStatics::GetAllActorsOfClass(GetWorld(), SDK::AFSDPawn::StaticClass(), &FoundActors);
 
         if (FoundActors.Num() == 0) return;
 
@@ -1434,7 +1118,7 @@ namespace Commands
 
         if (bIsServer)
         {
-            for (AActor* Actor : FoundActors)
+            for (SDK::AActor* Actor : FoundActors)
             {
                 if (Kismet::IsValid(Actor))
                 {
@@ -1445,19 +1129,19 @@ namespace Commands
         else
         {
             // Convert to a clean vector for the throttled queue
-            std::vector<AFSDPawn*> Pawns;
+            std::vector<SDK::AFSDPawn*> Pawns;
             Pawns.reserve(FoundActors.Num());
 
-            for (AActor* Actor : FoundActors)
+            for (SDK::AActor* Actor : FoundActors)
             {
-                if (AFSDPawn* Pawn = Cast<AFSDPawn>(Actor))
+                if (SDK::AFSDPawn* Pawn = Cast<SDK::AFSDPawn>(Actor))
                 {
                     Pawns.push_back(Pawn);
                 }
             }
 
-            EnqueueThrottled<AFSDPawn*>(std::move(Pawns), std::chrono::milliseconds(16),
-                [CoilGun](AFSDPawn* Target, size_t Index, size_t Total) -> bool
+            EnqueueThrottled<SDK::AFSDPawn*>(std::move(Pawns), std::chrono::milliseconds(16),
+                [CoilGun](SDK::AFSDPawn* Target, size_t Index, size_t Total) -> bool
                 {
                     if (Kismet::IsValid(CoilGun) && Kismet::IsValid(Target))
                     {
@@ -1498,7 +1182,7 @@ namespace Commands
         {
             if (Curr == Player || Curr->danceMove != 18) continue;
             Player->GetPlayerController()->Server_NewMessage(
-                Curr->PlayerState->GetPlayerName(), FString(L"Six Seven"),
+                Curr->PlayerState->GetPlayerName(), SDK::FString(L"Six Seven"),
                 Curr->GetPlayerState()->GetChatSenderType());
         }
     }
@@ -1558,15 +1242,15 @@ namespace Commands
     void FindClass(const CommandContext& ctx)
     {
         const std::string needle = ctx.Arg(1);
-        for (int i = 0; i < UObject::GObjects->Num(); ++i)
+        for (int i = 0; i < SDK::UObject::GObjects->Num(); ++i)
         {
-            auto* obj = UObject::GObjects->GetByIndex(i);
-            if (!obj || !obj->IsA(UClass::StaticClass())) continue;
+            auto* obj = SDK::UObject::GObjects->GetByIndex(i);
+            if (!obj || !obj->IsA(SDK::UClass::StaticClass())) continue;
             std::string n = obj->GetName();
             if (PropertyInspector::NameMatches(n, needle, true))
                 info("  [class] {} -> CDO: {}", n,
-                    static_cast<UClass*>(obj)->ClassDefaultObject
-                    ? static_cast<UClass*>(obj)->ClassDefaultObject->GetName() : "null");
+                    static_cast<SDK::UClass*>(obj)->ClassDefaultObject
+                    ? static_cast<SDK::UClass*>(obj)->ClassDefaultObject->GetName() : "null");
         }
     }
 
@@ -1637,7 +1321,7 @@ namespace Commands
         {
             State::BeginPlayCallback = GameHooks::OnProcessEventByNameAndClass(
                 "ReceiveBeginPlay", SDK::AActor::StaticClass(),
-                [](UObject* object, UFunction*, void*)
+                [](SDK::UObject* object, SDK::UFunction*, void*)
                 {
                     if (!object || !object->Class) return;
                     for (const wchar_t* name : { L"Core_C", L"NoVines_C", L"TickManager_C" })
@@ -1662,21 +1346,21 @@ namespace Commands
     {
         int totalClasses = 0, totalFuncs = 0;
         info("[cmd:scanall] Starting global CDO scan...");
-        for (int i = 0; i < UObject::GObjects->Num(); ++i)
+        for (int i = 0; i < SDK::UObject::GObjects->Num(); ++i)
         {
-            UObject* Obj = UObject::GObjects->GetByIndex(i);
-            if (!Obj || !Obj->IsA(UClass::StaticClass())) continue;
-            UClass* Class = static_cast<UClass*>(Obj);
-            UObject* CDO = Class->ClassDefaultObject;
+            SDK::UObject* Obj = SDK::UObject::GObjects->GetByIndex(i);
+            if (!Obj || !Obj->IsA(SDK::UClass::StaticClass())) continue;
+            SDK::UClass* Class = static_cast<SDK::UClass*>(Obj);
+            SDK::UObject* CDO = Class->ClassDefaultObject;
             if (!CDO) continue;
             std::vector<std::string> classFuncs;
-            for (auto* field : UFieldRange(Class->Children))
+            for (auto* field : SDK::UFieldRange(Class->Children))
             {
-                if (!field->IsA(UFunction::StaticClass())) continue;
-                auto* Func = static_cast<UFunction*>(field);
-                auto  flags = static_cast<EFunctionFlags>(Func->FunctionFlags);
-                if (!(flags & EFunctionFlags::Net))       continue;
-                if (!(flags & EFunctionFlags::NetServer)) continue;
+                if (!field->IsA(SDK::UFunction::StaticClass())) continue;
+                auto* Func = static_cast<SDK::UFunction*>(field);
+                auto  flags = static_cast<SDK::EFunctionFlags>(Func->FunctionFlags);
+                if (!(flags & SDK::EFunctionFlags::Net))       continue;
+                if (!(flags & SDK::EFunctionFlags::NetServer)) continue;
                 classFuncs.push_back(Scan::BuildFuncSig(Func));
             }
             if (classFuncs.empty()) continue;
@@ -1697,10 +1381,10 @@ namespace Commands
 
     void ScanReplicated(const CommandContext& ctx)
     {
-        APlayerCharacter* Local = GetLocalPlayer();
+        SDK::APlayerCharacter* Local = GetLocalPlayer();
         if (!Local) { warn("[cmd:scan] No local player."); return; }
-        TArray<AActor*> AllActors;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), &AllActors);
+        SDK::TArray<SDK::AActor*> AllActors;
+        SDK::UGameplayStatics::GetAllActorsOfClass(GetWorld(), SDK::AActor::StaticClass(), &AllActors);
         int totalActors = 0, totalFuncs = 0;
         ScanResponse sr{};
 
@@ -1731,12 +1415,12 @@ namespace Commands
         for (auto* Actor : AllActors)
         {
             if (!Actor || !Kismet::IsValid(Actor) || !Actor->bReplicates) continue;
-            if (NoneOf<AActor*>(Actor->GetOwner(), Local, Local->GetOwner(),
+            if (NoneOf<SDK::AActor*>(Actor->GetOwner(), Local, Local->GetOwner(),
                 Local->GetPlayerController(), Local->GetPlayerState())) continue;
             std::vector<std::string> actorFuncs;
             Scan::ScanFunctions(Actor, actorFuncs);
-            TArray<UActorComponent*> Components =
-                Actor->K2_GetComponentsByClass(UActorComponent::StaticClass());
+            SDK::TArray<SDK::UActorComponent*> Components =
+                Actor->K2_GetComponentsByClass(SDK::UActorComponent::StaticClass());
             std::vector<std::pair<std::string, std::vector<std::string>>> compResults;
             for (auto* Comp : Components)
             {
@@ -1853,11 +1537,11 @@ namespace Commands
                     if (!candidate) return nullptr;
                 }
 
-                if (!IsValidOf<UFunction>(candidate->Func))
+                if (!IsValidOf<SDK::UFunction>(candidate->Func))
                 {
                     const std::string explicitName = candidate->ExplicitName;
                     const std::string functionName = candidate->FunctionName;
-                    warn("[cmd:call] UFunction stale for '{}'; rescanning.", funcName);
+                    warn("[cmd:call] SDK::UFunction stale for '{}'; rescanning.", funcName);
                     Scan::DoScan();
                     candidate = ResolveUniqueVariant(explicitName);
                     if (!candidate)
@@ -1873,14 +1557,14 @@ namespace Commands
 
         auto* Func = target->Func;
         auto* Owner = target->Owner;
-        std::vector<FProperty*> parmProps;
-        for (FField* field : FFieldRange(Func->ChildProperties))
+        std::vector<SDK::FProperty*> parmProps;
+        for (SDK::FField* field : SDK::FFieldRange(Func->ChildProperties))
         {
-            if (!FieldCast::IsA<FProperty>(field)) continue;
-            FProperty* Prop = static_cast<FProperty*>(field);
-            EPropertyFlags  pf = static_cast<EPropertyFlags>(Prop->PropertyFlags);
-            if (!(pf & EPropertyFlags::Parm))    continue;
-            if (pf & EPropertyFlags::ReturnParm) continue;
+            if (!FieldCast::IsA<SDK::FProperty>(field)) continue;
+            SDK::FProperty* Prop = static_cast<SDK::FProperty*>(field);
+            SDK::EPropertyFlags  pf = static_cast<SDK::EPropertyFlags>(Prop->PropertyFlags);
+            if (!(pf & SDK::EPropertyFlags::Parm))    continue;
+            if (pf & SDK::EPropertyFlags::ReturnParm) continue;
             parmProps.push_back(Prop);
         }
         const int32 parmsSize = PropertyInspector::ComputeParmsSize(Func);
@@ -1898,11 +1582,11 @@ namespace Commands
             {
                 FieldCast::Visit(parmProps[i], [&]<typename T>(T * p)
                 {
-                    if constexpr (std::is_same_v<T, FObjectProperty> ||
-                        std::is_same_v<T, FObjectPropertyBase> ||
-                        std::is_same_v<T, FClassProperty> ||
-                        std::is_same_v<T, FWeakObjectProperty>)
-                        *GetPropertyPtr<UObject*>(base, p->Offset) = expanded.object;
+                    if constexpr (std::is_same_v<T, SDK::FObjectProperty> ||
+                        std::is_same_v<T, SDK::FObjectPropertyBase> ||
+                        std::is_same_v<T, SDK::FClassProperty> ||
+                        std::is_same_v<T, SDK::FWeakObjectProperty>)
+                        *GetPropertyPtr<SDK::UObject*>(base, p->Offset) = expanded.object;
                     else
                     {
                         warn("[cmd:call]   [{}] param '{}' not object property — name fallback",
@@ -1931,63 +1615,63 @@ namespace Commands
             }
         }
         uint32 savedFlags = Func->FunctionFlags;
-        if (static_cast<EFunctionFlags>(Func->FunctionFlags) & EFunctionFlags::Native) Func->FunctionFlags |= 0x400;
+        if (static_cast<SDK::EFunctionFlags>(Func->FunctionFlags) & SDK::EFunctionFlags::Native) Func->FunctionFlags |= 0x400;
         Owner->ProcessEvent(Func, parmsSize > 0 ? parmsBuf.data() : nullptr);
         Func->FunctionFlags = savedFlags;
-        for (FProperty* Prop : parmProps)
+        for (SDK::FProperty* Prop : parmProps)
             FieldCast::Visit(Prop, [&]<typename T>(T * p)
         {
             uintptr_t base = reinterpret_cast<uintptr_t>(parmsBuf.data());
-            if constexpr (std::is_same_v<T, FStrProperty>)
-                GetPropertyPtr<FString>(base, p->Offset)->~FString();
-            else if constexpr (std::is_same_v<T, FNameProperty>)
-                GetPropertyPtr<FName>(base, p->Offset)->~FName();
+            if constexpr (std::is_same_v<T, SDK::FStrProperty>)
+                GetPropertyPtr<SDK::FString>(base, p->Offset)->~SDK::FString();
+            else if constexpr (std::is_same_v<T, SDK::FNameProperty>)
+                GetPropertyPtr<SDK::FName>(base, p->Offset)->~SDK::FName();
         });
         info("[cmd:call] Called '{}' on '{}'.", funcName, Owner->GetName());
     }
 
     void TeleportAllToSelf(const ctx& = State::dummyCtx) {
-        if (!IsValidOf<APlayerCharacter>(GetLocalPlayer())) return;
-        TArray<APlayerCharacter*> Players = ActorLib::GetAllPlayerCharacters(GetWorld());
+        if (!IsValidOf<SDK::APlayerCharacter>(GetLocalPlayer())) return;
+        SDK::TArray<SDK::APlayerCharacter*> Players = ActorLib::GetAllPlayerCharacters(GetWorld());
         FVector Coords = GetLocalPlayer()->K2_GetActorLocation();
         for (auto TargetPlayer : Players)
             if (Kismet::IsServer(GetWorld()))
             {
-                FHitResult Hit;
-                if (IsValidOf<APlayerCharacter>(TargetPlayer))
+                SDK::FHitResult Hit;
+                if (IsValidOf<SDK::APlayerCharacter>(TargetPlayer))
                     TargetPlayer->K2_SetActorLocation(Coords, false, &Hit, true);
             }
             else
             {
-                for (auto* Actor : GetAllActorsOfClass<AReplicatedActor_C>())
-                    static_cast<AReplicatedActor_C*>(Actor)->Server_TeleportPlayer(TargetPlayer, Coords);
+                for (auto* Actor : GetAllActorsOfClass<SDK::AReplicatedActor_C>())
+                    static_cast<SDK::AReplicatedActor_C*>(Actor)->Server_TeleportPlayer(TargetPlayer, Coords);
             }
     }
 
     void PlayerTeleport(const ctx& ctx) {
-        if (!IsValidOf<APlayerCharacter>(GetLocalPlayer())) return;
+        if (!IsValidOf<SDK::APlayerCharacter>(GetLocalPlayer())) return;
 
-        TArray<APlayerCharacter*> Players = ActorLib::GetAllPlayerCharacters(GetWorld());
+        SDK::TArray<SDK::APlayerCharacter*> Players = ActorLib::GetAllPlayerCharacters(GetWorld());
         if (Players.Num() == 0) return;
 
         MutableContext mutableCtx = MutableContext(ctx);
         FVector Coords{};
-        std::vector<std::pair<std::string, APlayerCharacter*>> NameToPlayer{};
+        std::vector<std::pair<std::string, SDK::APlayerCharacter*>> NameToPlayer{};
         bool    foundDestinationPlayer = false;
         bool    targetIsSelf = false;
         bool    foundPlayerToMove = false;
         NameToPlayer.reserve(Players.Num());
 
-        for (APlayerCharacter* Player : Players) {
-            if (!IsValidOf<APlayerCharacter>(Player)) continue;
-            std::pair<std::string, APlayerCharacter*> entry{ Player->PlayerState->GetPlayerName().ToString(), Player };
+        for (SDK::APlayerCharacter* Player : Players) {
+            if (!IsValidOf<SDK::APlayerCharacter>(Player)) continue;
+            std::pair<std::string, SDK::APlayerCharacter*> entry{ Player->PlayerState->GetPlayerName().ToString(), Player };
             NameToPlayer.push_back(entry);
         }
 
         std::erase(mutableCtx.args, "ptp");
 
-        APlayerCharacter* TargetPlayer = nullptr;
-        APlayerCharacter* DestPlayer = nullptr;
+        SDK::APlayerCharacter* TargetPlayer = nullptr;
+        SDK::APlayerCharacter* DestPlayer = nullptr;
 
         // --- Parse "target <name>" ---
         if (auto it = std::find(mutableCtx.args.begin(), mutableCtx.args.end(), "target"); it != mutableCtx.args.end()) {
@@ -2072,14 +1756,14 @@ namespace Commands
         // --- Execute teleport ---
         if (Kismet::IsServer(GetWorld()))
         {
-            FHitResult Hit;
-            if (IsValidOf<APlayerCharacter>(TargetPlayer))
+            SDK::FHitResult Hit;
+            if (IsValidOf<SDK::APlayerCharacter>(TargetPlayer))
                 TargetPlayer->K2_SetActorLocation(Coords, false, &Hit, true);
         }
         else
         {
-            for (auto* Actor : GetAllActorsOfClass<AReplicatedActor_C>())
-                static_cast<AReplicatedActor_C*>(Actor)->Server_TeleportPlayer(TargetPlayer, Coords);
+            for (auto* Actor : GetAllActorsOfClass<SDK::AReplicatedActor_C>())
+                static_cast<SDK::AReplicatedActor_C*>(Actor)->Server_TeleportPlayer(TargetPlayer, Coords);
         }
     }
 
@@ -2106,14 +1790,14 @@ namespace Commands
         }
         if (Kismet::IsServer(GetWorld()))
         {
-            FHitResult Hit; Local->K2_SetActorLocation(Coords, sweep, &Hit, true);
+            SDK::FHitResult Hit; Local->K2_SetActorLocation(Coords, sweep, &Hit, true);
         }
         else
         {
-            TArray<AActor*> Actors;
-            UGameplayStatics::GetAllActorsOfClass(GetWorld(), AReplicatedActor_C::StaticClass(), &Actors);
+            SDK::TArray<SDK::AActor*> Actors;
+            SDK::UGameplayStatics::GetAllActorsOfClass(GetWorld(), SDK::AReplicatedActor_C::StaticClass(), &Actors);
             for (auto* Actor : Actors)
-                static_cast<AReplicatedActor_C*>(Actor)->Server_TeleportPlayer(Local, Coords);
+                static_cast<SDK::AReplicatedActor_C*>(Actor)->Server_TeleportPlayer(Local, Coords);
         }
         info("[cmd:tp] Teleported to ({}, {}, {})", Coords.X, Coords.Y, Coords.Z);
     }
@@ -2125,37 +1809,37 @@ namespace Commands
         if (!Kismet::IsValid(Local)) return;
         if (Kismet::IsServer(GetWorld()))
         {
-            FHitResult Hit; Local->K2_SetActorLocation({ 0, 0, 12550 }, false, &Hit, true);
+            SDK::FHitResult Hit; Local->K2_SetActorLocation({ 0, 0, 12550 }, false, &Hit, true);
         }
         else
         {
-            TArray<AActor*> Actors;
-            UGameplayStatics::GetAllActorsOfClass(GetWorld(), AReplicatedActor_C::StaticClass(), &Actors);
+            SDK::TArray<SDK::AActor*> Actors;
+            SDK::UGameplayStatics::GetAllActorsOfClass(GetWorld(), SDK::AReplicatedActor_C::StaticClass(), &Actors);
             for (auto* Actor : Actors)
-                static_cast<AReplicatedActor_C*>(Actor)->Server_TeleportPlayer(Local, { 0, 0, 12550 });
+                static_cast<SDK::AReplicatedActor_C*>(Actor)->Server_TeleportPlayer(Local, { 0, 0, 12550 });
         }
     }
 
     void Troll(const CommandContext& = State::dummyCtx)
     {
-        APlayerCharacter* Local = GetLocalPlayer();
-        AReplicatedActor_C* ActualTeleporter = nullptr;
-        TArray<AActor*> AllActors, Teleporters;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), &AllActors);
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AReplicatedActor_C::StaticClass(), &Teleporters);
+        SDK::APlayerCharacter* Local = GetLocalPlayer();
+        SDK::AReplicatedActor_C* ActualTeleporter = nullptr;
+        SDK::TArray<SDK::AActor*> AllActors, Teleporters;
+        SDK::UGameplayStatics::GetAllActorsOfClass(GetWorld(), SDK::AActor::StaticClass(), &AllActors);
+        SDK::UGameplayStatics::GetAllActorsOfClass(GetWorld(), SDK::AReplicatedActor_C::StaticClass(), &Teleporters);
         for (auto* T : Teleporters)
             if (T && Kismet::IsValid(T) && T->GetOwner() == Local)
             {
-                ActualTeleporter = static_cast<AReplicatedActor_C*>(T); break;
+                ActualTeleporter = static_cast<SDK::AReplicatedActor_C*>(T); break;
             }
-        if (!ActualTeleporter) { l::warn("[cmd:troll] No teleporter found."); return; }
-        std::vector<AActor*> actors;
+        if (!ActualTeleporter) { warn("[cmd:troll] No teleporter found."); return; }
+        std::vector<SDK::AActor*> actors;
         for (auto* A : AllActors) if (A && Kismet::IsValid(A) && A->bReplicates) actors.push_back(A);
         info("[cmd:troll] Found {} actors, starting teleport loop.", actors.size());
         auto rng = std::make_shared<std::mt19937>(std::random_device{}());
         auto teleporter = ActualTeleporter;
-        EnqueueThrottled<AActor*>(std::move(actors), std::chrono::milliseconds(16),
-            [rng, teleporter](AActor* target, size_t i, size_t total) -> bool
+        EnqueueThrottled<SDK::AActor*>(std::move(actors), std::chrono::milliseconds(16),
+            [rng, teleporter](SDK::AActor* target, size_t i, size_t total) -> bool
             {
                 if (!Kismet::IsValid(teleporter)) return false;
                 if (target && Kismet::IsValid(target))
@@ -2174,15 +1858,15 @@ namespace Commands
     void SpawnEnemies(const CommandContext& ctx)
     {
         if (ctx.ArgCount() < 4) { warn("[cmd:spawnenemies] Usage: spawnenemies <descriptor> <count> <x> <y> <z>"); return; }
-        FString Descriptor = ToFString(ctx.Arg(1));
+        SDK::FString Descriptor = ToFString(ctx.Arg(1));
         int     Count = std::stoi(ctx.Arg(2));
         FVector Location = { std::strtof(ctx.Arg(3).c_str(), nullptr),
                                 std::strtof(ctx.Arg(4).c_str(), nullptr),
                                 std::strtof(ctx.Arg(5).c_str(), nullptr) };
-        TArray<AActor*> Actors;
-        UGameplayStatics::GetAllActorsOfClass(GetWorld(), AReplicatedActor_C::StaticClass(), &Actors);
+        SDK::TArray<SDK::AActor*> Actors;
+        SDK::UGameplayStatics::GetAllActorsOfClass(GetWorld(), SDK::AReplicatedActor_C::StaticClass(), &Actors);
         for (auto* Actor : Actors)
-            static_cast<AReplicatedActor_C*>(Actor)->Server_SpawnEnemy(Descriptor, Count, Location, false, false);
+            static_cast<SDK::AReplicatedActor_C*>(Actor)->Server_SpawnEnemy(Descriptor, Count, Location, false, false);
         info("[cmd:spawnenemies] Spawned {} '{}' at ({}, {}, {})",
             Count, ctx.Arg(1), Location.X, Location.Y, Location.Z);
     }
@@ -2193,26 +1877,26 @@ namespace Commands
         const long double delayMs = static_cast<long double>(std::max(200.0f, SafeStof(ctx.Arg(1))));
 
         //Request all descriptors and all biomes. iterate on all of them including elite versions. Only spawn enemy ONCE , keep track of UClasses.
-        std::vector<UEnemyDescriptor*> descriptors{};
+        std::vector<SDK::UEnemyDescriptor*> descriptors{};
         descriptors.reserve(512);
-        for (auto* Descriptor : GObjectsOf<UEnemyDescriptor>())
+        for (auto* Descriptor : GObjectsOf<SDK::UEnemyDescriptor>())
             if (Descriptor->GetName().starts_with("ED_")) descriptors.push_back(Descriptor);
-        std::vector<UBiome*> biomes{};
-        for (auto* Biome : GObjectsOf<UBiome>())
+        std::vector<SDK::UBiome*> biomes{};
+        for (auto* Biome : GObjectsOf<SDK::UBiome>())
             biomes.push_back(Biome);
 
         // Build class → combos map: for each descriptor × (null + all biomes) × (non-elite + elite)
-        // call GetEnemyClass; group all (desc,biome,isElite) tuples that resolve to the same UClass.
+        // call GetEnemyClass; group all (desc,biome,isElite) tuples that resolve to the same SDK::UClass.
         struct Combo { std::string desc, biome; bool isElite; };
-        struct Entry { UClass* cls = nullptr; std::vector<Combo> combos; };
-        std::unordered_map<UClass*, Entry> classMap;
+        struct Entry { SDK::UClass* cls = nullptr; std::vector<Combo> combos; };
+        std::unordered_map<SDK::UClass*, Entry> classMap;
         classMap.reserve(256);
 
         for (auto* Desc : descriptors)
         {
-            auto tryAdd = [&](UBiome* Biome, bool IsElite)
+            auto tryAdd = [&](SDK::UBiome* Biome, bool IsElite)
                 {
-                    UClass* cls = static_cast<UClass*>(Desc->GetEnemyClass(Biome, IsElite));
+                    SDK::UClass* cls = static_cast<SDK::UClass*>(Desc->GetEnemyClass(Biome, IsElite));
                     if (!IsValidClass(cls)) return;
                     auto& e = classMap[cls];
                     e.cls = cls;
@@ -2227,8 +1911,8 @@ namespace Commands
         info("[spawndump] {} unique classes from {} descriptors x {} biomes, delay={:.0f}ms",
             classMap.size(), descriptors.size(), biomes.size(), static_cast<double>(delayMs));
 
-        APlayerCharacter* Player = GetLocalPlayer();
-        if (!IsValidOf<APlayerCharacter>(Player)) { warn("[spawndump] No local player"); return; }
+        SDK::APlayerCharacter* Player = GetLocalPlayer();
+        if (!IsValidOf<SDK::APlayerCharacter>(Player)) { warn("[spawndump] No local player"); return; }
         const FVector SpawnLoc = Player->K2_GetActorLocation() + Player->GetActorForwardVector() * 400.f;
 
         // Root JSON object to accumulate all data
@@ -2242,7 +1926,7 @@ namespace Commands
         (*rootJson)["enemies"] = nlohmann::json::array();
 
         // Numeric property dump — float/bool/int family, class chain up to StopAt
-        auto dumpNumeric = [](UObject* Obj, UClass* StopAt) -> nlohmann::json
+        auto dumpNumeric = [](SDK::UObject* Obj, SDK::UClass* StopAt) -> nlohmann::json
             {
                 if (!IsValid(Obj)) return nlohmann::json::object();
                 return ExtractNumericPropertiesAsJson(reinterpret_cast<uintptr_t>(Obj), StopAt);
@@ -2260,7 +1944,7 @@ namespace Commands
         for (auto& e : *entries) items.push_back(&e);
         items.push_back(nullptr);
 
-        auto prevPawn = std::make_shared<APawn*>(nullptr);
+        auto prevPawn = std::make_shared<SDK::APawn*>(nullptr);
         auto prevEntry = std::make_shared<Entry*>(nullptr);
 
         EnqueueThrottled<Entry*>(std::move(items),
@@ -2276,19 +1960,19 @@ namespace Commands
                     nlohmann::json& enemyEntry = (*rootJson)["Enemies"][descriptorName]["Direct"];
 
                     // Add all numeric properties
-                    auto actorProps = ExtractNumericPropertiesAsJson(reinterpret_cast<uintptr_t>(*prevPawn), AActor::StaticClass());
+                    auto actorProps = ExtractNumericPropertiesAsJson(reinterpret_cast<uintptr_t>(*prevPawn), SDK::AActor::StaticClass());
                     for (auto& [key, value] : actorProps.items())
                         enemyEntry[key] = value;
 
                     // Add component properties with component name prefix
-                    auto comps = (*prevPawn)->K2_GetComponentsByClass(UActorComponent::StaticClass());
+                    auto comps = (*prevPawn)->K2_GetComponentsByClass(SDK::UActorComponent::StaticClass());
                     for (auto* comp : comps)
                     {
                         if (comp->Outer == *prevPawn)
                         {
                             auto compProps = ExtractNumericPropertiesAsJson(
                                 reinterpret_cast<uintptr_t>(comp),
-                                UActorComponent::StaticClass(),
+                                SDK::UActorComponent::StaticClass(),
                                 comp->GetName() + "."
                             );
                             for (auto& [key, value] : compProps.items())
@@ -2319,10 +2003,10 @@ namespace Commands
                     return true;
                 }
 
-                FTransform SpawnTransform{};
+                SDKFTransform SpawnTransform{};
                 SpawnTransform.Translation = SpawnLoc;
-                APawn* Pawn = nullptr;
-                SpawnActor<APawn>(current->cls, SpawnTransform, Pawn);
+                SDK::APawn* Pawn = nullptr;
+                SpawnActor<SDK::APawn>(current->cls, SpawnTransform, Pawn);
                 *prevPawn = Pawn;
                 *prevEntry = Pawn ? current : nullptr;
                 if (!Pawn)
@@ -2338,19 +2022,19 @@ namespace Commands
 
         const long double delayMs = static_cast<long double>(std::max(16.0f, SafeStof(ctx.Arg(1))));
 
-        std::vector<UEnemyDescriptor*> descriptors;
+        std::vector<SDK::UEnemyDescriptor*> descriptors;
         descriptors.reserve(512);
-        for (UEnemyDescriptor* Descriptor : GObjectsOf<UEnemyDescriptor>())
+        for (SDK::UEnemyDescriptor* Descriptor : GObjectsOf<SDK::UEnemyDescriptor>())
             if (Descriptor->GetName().starts_with("ED_"))
                 descriptors.push_back(Descriptor);
 
-        struct Entry { UClass* cls = nullptr; std::string desc; };
+        struct Entry { SDK::UClass* cls = nullptr; std::string desc; };
 
-        std::unordered_map<UClass*, Entry> classMap;
+        std::unordered_map<SDK::UClass*, Entry> classMap;
         classMap.reserve(256);
         for (auto* Desc : descriptors)
         {
-            UClass* cls = static_cast<UClass*>(Desc->GetEnemyClass(nullptr, false));
+            SDK::UClass* cls = static_cast<SDK::UClass*>(Desc->GetEnemyClass(nullptr, false));
             if (!IsValidClass(cls)) continue;
             classMap.emplace(cls, Entry{ cls, Desc->GetName() });
         }
@@ -2359,8 +2043,8 @@ namespace Commands
         info("[spawndump] {} unique classes from {} descriptors, delay={:.0f}ms",
             classMap.size(), descriptors.size(), static_cast<double>(delayMs));
 
-        APlayerCharacter* Player = GetLocalPlayer();
-        if (!IsValidOf<APlayerCharacter>(Player)) { warn("[spawndump] No local player"); return; }
+        SDK::APlayerCharacter* Player = GetLocalPlayer();
+        if (!IsValidOf<SDK::APlayerCharacter>(Player)) { warn("[spawndump] No local player"); return; }
 
         const FVector SpawnLoc = Player->K2_GetActorLocation() + Player->GetActorForwardVector() * 400.f;
 
@@ -2375,7 +2059,7 @@ namespace Commands
         for (auto& e : *entries) items.push_back(&e);
         items.push_back(nullptr); // sentinel — triggers file write
 
-        auto prevPawn  = std::make_shared<APawn*>(nullptr);
+        auto prevPawn  = std::make_shared<SDK::APawn*>(nullptr);
         auto prevEntry = std::make_shared<Entry*>(nullptr);
 
         auto delay = std::chrono::milliseconds(static_cast<long long>(delayMs));
@@ -2390,16 +2074,16 @@ namespace Commands
                     nlohmann::json& enemyMats = (*rootJson)["Enemies"][descName]["Materials"];
 
                     uint32 matIndex = 0;
-                    TArray<UActorComponent*> comps =
-                        (*prevPawn)->K2_GetComponentsByClass(UPrimitiveComponent::StaticClass());
-                    for (UActorComponent* actorComp : comps)
+                    SDK::TArray<SDK::UActorComponent*> comps =
+                        (*prevPawn)->K2_GetComponentsByClass(SDK::UPrimitiveComponent::StaticClass());
+                    for (SDK::UActorComponent* actorComp : comps)
                     {
-                        auto* comp = Cast<UPrimitiveComponent>(actorComp);
+                        auto* comp = Cast<SDK::UPrimitiveComponent>(actorComp);
                         if (!comp) continue;
                         for (uint32 i = 0, n = comp->GetNumMaterials(); i < n; ++i)
                         {
-                            UMaterialInterface* mat = comp->GetMaterial(i);
-                            while (auto* mid = Cast<UMaterialInstanceDynamic>(mat))
+                            SDK::UMaterialInterface* mat = comp->GetMaterial(i);
+                            while (auto* mid = Cast<SDK::UMaterialInstanceDynamic>(mat))
                                 mat = mid->Parent;
                             enemyMats[matIndex++] = mat ? mat->GetName() : "";
                         }
@@ -2424,11 +2108,11 @@ namespace Commands
                 }
 
                 // ── Spawn next enemy ──────────────────────────────────────
-                static FTransform SpawnTransform{};
+                static SDKFTransform SpawnTransform{};
                 SpawnTransform.Translation = SpawnLoc;
 
-                APawn* Pawn = nullptr;
-                SpawnActor<APawn>(current->cls, SpawnTransform, Pawn);
+                SDK::APawn* Pawn = nullptr;
+                SpawnActor<SDK::APawn>(current->cls, SpawnTransform, Pawn);
                 *prevPawn  = Pawn;
                 *prevEntry = Pawn ? current : nullptr;
                 if (!Pawn)
@@ -2439,21 +2123,21 @@ namespace Commands
 
     void DumpDescriptors(const CommandContext& = State::dummyCtx)
     {
-        // UEnum* for a named field via FEnumProperty / FByteProperty reflection
-        auto getFieldEnum = [](UClass* Cls, const char* Name) -> UEnum*
+        // SDK::UEnum* for a named field via SDK::FEnumProperty / SDK::FByteProperty reflection
+        auto getFieldEnum = [](SDK::UClass* Cls, const char* Name) -> SDK::UEnum*
             {
-                FName needle(ToWide(std::string(Name)).c_str());
-                for (FField* field : FFieldRange(Cls->ChildProperties))
+                SDK::FName needle(ToWide(std::string(Name)).c_str());
+                for (SDK::FField* field : SDK::FFieldRange(Cls->ChildProperties))
                 {
                     if (field->Name != needle) continue;
-                    if (auto* ep = FieldCast::Cast<FEnumProperty>(field)) return ep->Enum;
-                    if (auto* bp = FieldCast::Cast<FByteProperty>(field))  return bp->Enum;
+                    if (auto* ep = FieldCast::Cast<SDK::FEnumProperty>(field)) return ep->Enum;
+                    if (auto* bp = FieldCast::Cast<SDK::FByteProperty>(field))  return bp->Enum;
                 }
                 return nullptr;
             };
 
-        // Enum integer → short name via UEnum::Names, strips "EnumClass::" prefix
-        auto enumName = [](UEnum* E, int64 Val) -> std::string
+        // Enum integer → short name via SDK::UEnum::Names, strips "EnumClass::" prefix
+        auto enumName = [](SDK::UEnum* E, int64 Val) -> std::string
             {
                 if (!E) return std::to_string(Val);
                 for (int32 i = 0; i < E->Names.Num(); ++i)
@@ -2466,14 +2150,14 @@ namespace Commands
                 return std::to_string(Val);
             };
 
-        // One FField walk per enum type, not per descriptor
-        UClass* DescClass = UEnemyDescriptor::StaticClass();
-        UEnum* SigEnum = getFieldEnum(DescClass, "EnemySignificance");
-        UEnum* VetEnum = getFieldEnum(DescClass, "VeteranScaling");
+        // One SDK::FField walk per enum type, not per descriptor
+        SDK::UClass* DescClass = SDK::UEnemyDescriptor::StaticClass();
+        SDK::UEnum* SigEnum = getFieldEnum(DescClass, "EnemySignificance");
+        SDK::UEnum* VetEnum = getFieldEnum(DescClass, "VeteranScaling");
 
         nlohmann::json root = nlohmann::json::object();
 
-        for (auto* Desc : GObjectsOf<UEnemyDescriptor>())
+        for (auto* Desc : GObjectsOf<SDK::UEnemyDescriptor>())
         {
             if (!Desc->GetName().starts_with("ED_")) continue;
 
@@ -2491,7 +2175,7 @@ namespace Commands
 
             d["Significance"] = enumName(SigEnum, static_cast<int64>(Desc->EnemySignificance));
             d["VeteranScaling"] = enumName(VetEnum, static_cast<int64>(Desc->VeteranScaling));
-            d["UsesVeteranLarge"] = (Desc->VeteranScaling == EVeteranScaling::LargeEnemy);
+            d["UsesVeteranLarge"] = (Desc->VeteranScaling == SDK::EVeteranScaling::LargeEnemy);
 
             nlohmann::json vets = nlohmann::json::array();
             for (int32 i = 0; i < Desc->VeteranClasses.Num(); ++i)
@@ -2551,24 +2235,38 @@ namespace Binds {
     void Crash() {
         Commands::Crash();
     }
-    struct BaseGunStats{};
 
-    std::unordered_map<FName, BaseGunStats> Stats;
-    void AimbotDisable() {}
+    void InfiniteAmmo() {
+        Commands::ToggleInfiniteAmmo();
+    }
 
-    struct WpTargetResult
-    {
-        FVector pos        = {};
-        bool hasWeakpoints = false; // enemy has WP bodies in physics asset at all
-        bool anyVisible    = false; // at least one visible, alive WP was found
-    };
+    void RegisterKeybinds() {
+        using enum Key;
+        using enum Trigger;
+        using enum Focus;
 
-    // Scans all mesh components for visible, alive weakpoint bodies.
-    // hasWeakpoints=true even if all are occluded or destroyed (enemy IS a WP enemy).
-    // anyVisible=true only if the returned pos is a valid WP target.
-    static WpTargetResult GetWeakpointTarget(AFSDPawn* Enemy, const std::vector<USkeletalMeshComponent*>& Meshes,
+        KeyBindings::RegisterGameThread(
+            Key::F4, Mod::None, Binds::Crash,
+            BindingOptions{ Press, Game, true });
+
+        KeyBindings::RegisterGameThread(
+            I, Mod::Ctrl, Binds::InfiniteAmmo,
+            BindingOptions{ Press, Game, true });
+
+        // Aimbot, RCS, and Silent Aim keybinds live in Aim.
+        AimAssist::RegisterKeybinds();
+    }
+}
+
+// ─── Original aim-related Binds body — moved to Aim.cpp ────────
+// The whole block below is preprocessed out. Removing the source rather than
+// trusting copy-paste means we keep one source of truth in the new module.
+#if 0
+namespace _moved_aim_body {
+    using WpTargetResult = int;
+    static WpTargetResult GetWeakpointTarget(SDK::AFSDPawn* Enemy, const std::vector<SDK::USkeletalMeshComponent*>& Meshes,
                                               const FVector& CamLoc, const FVector& Forward,
-                                              APlayerCharacter* LocalPlayer)
+                                              SDK::APlayerCharacter* LocalPlayer)
     {
         using namespace ObjectCast;
         static constexpr float kDeg2Rad = 3.14159265f / 180.f;
@@ -2578,7 +2276,7 @@ namespace Binds {
         float   BestMult = -1.f;
         float   BestDot  = -2.f;
 
-        for (USkeletalMeshComponent* Mesh : Meshes)
+        for (SDK::USkeletalMeshComponent* Mesh : Meshes)
         {
             if (!Mesh) continue;
             auto* SkelAsset = Mesh->SkeletalMesh;
@@ -2588,10 +2286,10 @@ namespace Binds {
 
             for (int32 i = 0; i < PhysAsset->SkeletalBodySetups.Num(); ++i)
             {
-                USkeletalBodySetup* Body = PhysAsset->SkeletalBodySetups[i];
+                SDK::USkeletalBodySetup* Body = PhysAsset->SkeletalBodySetups[i];
                 if (!Body || !Body->PhysMaterial) continue;
 
-                UFSDPhysicalMaterial* FSDMat = Cast<UFSDPhysicalMaterial>(Body->PhysMaterial);
+                SDK::UFSDPhysicalMaterial* FSDMat = Cast<SDK::UFSDPhysicalMaterial>(Body->PhysMaterial);
                 if (!FSDMat || !FSDMat->IsWeakPoint) continue;
 
                 result.hasWeakpoints = true;
@@ -2634,68 +2332,93 @@ namespace Binds {
         return result;
     }
 
-    void Aimbot() {
+    // Find best aim point. Returns the world-space position to aim at, or nullopt
+    // if no valid target is in the FOV cone. Used by the unified RCS+aimbot loop.
+    static std::optional<FVector> FindAimbotTargetPos(SDK::APlayerCharacter* LocalPlayer,
+                                                       SDK::APlayerCameraManager* CamMgr,
+                                                       const FVector& CamLoc,
+                                                       const FVector& Forward,
+                                                       float FOVDeg)
+    {
         using namespace ObjectCast;
         static constexpr float kDeg2Rad = 3.14159265f / 180.f;
-        struct Config {
-            float FOV        = 90.f;   // aim cone half-angle in degrees
-            float DeadzoneDeg = 2.f;   // don't correct if already within this many degrees
-        };
-        static Config Config;
 
-        State::AimbotHasTarget = false;
-        if (IsOnSpaceRig()) return;
+        if (IsOnSpaceRig()) return std::nullopt;
 
-        APlayerCharacter* LocalPlayer = GetLocalPlayer();
-        if (!IsValidOf<APlayerCharacter>(LocalPlayer)) return;
+        SDK::UInventoryComponent* Inventory = LocalPlayer->InventoryComponent;
+        if (!Inventory) return std::nullopt;
 
-        AFSDPlayerController* LocalController = Cast<AFSDPlayerController>(LocalPlayer->Controller);
-        if (!IsValidOf<AFSDPlayerController>(LocalController)) return;
-
-        APlayerCameraManager* CamMgr = LocalController->PlayerCameraManager;
-        if (!CamMgr) return;
-
-        UInventoryComponent* Inventory = LocalPlayer->InventoryComponent;
-        if (!Inventory) return;
-
-        AItem* Equipped = Inventory->GetEquippedItem();
-        if (!Equipped) return;
+        SDK::AItem* Equipped = Inventory->GetEquippedItem();
+        if (!Equipped) return std::nullopt;
         
+        static std::vector<SDK::FName> IgnoredItemClasses = std::vector<SDK::FName>();
+        if(IgnoredItemClasses.empty())[[unlikely]]
+        {
+            const std::vector<SDK::UClass*> Classes = { SDK::APickaxeItem::StaticClass() ,SDK::ADoubleDrillItem::StaticClass(),SDK::AZipLineItem::StaticClass(),SDK::AGrapplingHookGun::StaticClass() };
+            for (SDK::UClass* Class : Classes)
+                if (IsValidOf<SDK::UClass>(Class))
+                    IgnoredItemClasses.push_back(Class->Name);
+            IgnoredItemClasses.push_back(SDK::FName(L"WPN_PlatformGun_C"));
+        }
+
+        for (const SDK::FName& ClassName : IgnoredItemClasses)
+            if (IsChildOfByName(Equipped, ClassName)) return std::nullopt;
+
         Helpers::FDamageInfo DamageInfo;
-        
-        if (UDamageComponent* DamageComponent = GetComponent<UDamageComponent>(Equipped))
+        if (SDK::UDamageComponent* DamageComponent = GetComponent<SDK::UDamageComponent>(Equipped))
             Helpers::ExtractDamageInfo(DamageComponent, DamageInfo);
         else
         {
-            UProjectileLauncherComponent* Launcher = GetComponent<UProjectileLauncherComponent>(Equipped);
-            if (!Launcher) return;
-
-            if (!GetDamageInfoFromProjectileClass(Launcher->ProjectileClass, DamageInfo) ) return;
+            SDK::UProjectileLauncherComponent* Launcher = GetComponent<SDK::UProjectileLauncherComponent>(Equipped);
+            if (!Launcher) return std::nullopt;
+            if (!GetDamageInfoFromProjectileClass(Launcher->ProjectileClass, DamageInfo)) return std::nullopt;
         }
-        if (!DamageInfo.IsValid()) return;
+        if (!DamageInfo.IsValid()) return std::nullopt;
 
-        std::vector<AFSDPawn*> Enemies = GetAliveNonFriendlies();
-        if (Enemies.empty()) return;
+        std::vector<SDK::AFSDPawn*> Enemies = GetAliveNonFriendlies();
+        if (Enemies.empty()) return std::nullopt;
 
-        const FVector  CamLoc = CamMgr->GetCameraLocation();
-        const FRotator CamRot = CamMgr->GetCameraRotation();
+        const float HalfFOVCos = std::cos(FOVDeg * 0.5f * kDeg2Rad);
 
-        const float PR = CamRot.Pitch * kDeg2Rad;
-        const float YR = CamRot.Yaw   * kDeg2Rad;
-        const FVector Forward{
-            std::cos(PR) * std::cos(YR),
-            std::cos(PR) * std::sin(YR),
-            std::sin(PR)
-        };
-
-        const float HalfFOVCos = std::cos(Config.FOV * 0.5f * kDeg2Rad);
-
-        // Collect all candidates inside the FOV cone, sorted closest-to-crosshair first.
-        struct Candidate { float dot; AFSDPawn* enemy; };
+        struct Candidate { float dot; SDK::AFSDPawn* enemy; };
         std::vector<Candidate> candidates;
-        for (AFSDPawn* Enemy : Enemies)
+
+        static std::vector<SDK::FName> IgnoreBaseClasses = std::vector<SDK::FName>();
+        static std::vector<SDK::FName> ForceIncludeClasses = std::vector<SDK::FName>();
+        if (IgnoreBaseClasses.empty()) [[unlikely]] 
         {
-            if (!IsValidOf<AFSDPawn>(Enemy)) continue;
+            IgnoreBaseClasses.reserve(32);
+            IgnoreBaseClasses.push_back(SDK::FName(L"SDK::ENE_Spider_Grunt_Base_C"));
+        }
+        if (ForceIncludeClasses.empty()) [[unlikely]]
+        {
+            ForceIncludeClasses.reserve(32);
+        }
+
+        for (SDK::AFSDPawn* Enemy : Enemies)
+        {
+            if (!IsValidOf<SDK::AFSDPawn>(Enemy)) continue;
+
+            bool forceInclude = false;
+            if (Enemy->Class) {
+                for (const SDK::FName& name : ForceIncludeClasses)
+                    if (Enemy->Class->Name == name) { forceInclude = true; break; }
+            }
+
+            if (!forceInclude) {
+                bool eliteOrBoss = Enemy->IsElite();
+                if (!eliteOrBoss)
+                    if (auto* hc = Cast<SDK::UEnemyHealthComponent>(Enemy->GetHealthComponent()))
+                        eliteOrBoss = hc->bIsBossFight;
+
+                if (!eliteOrBoss) {
+                    bool ignored = false;
+                    for (const SDK::FName& name : IgnoreBaseClasses)
+                        if (IsChildOfByName(Enemy, name)) { ignored = true; break; }
+                    if (ignored) continue;
+                }
+            }
+
             FVector ToEnemy = Enemy->K2_GetActorLocation() - CamLoc;
             const float Dist = std::sqrt(ToEnemy.X*ToEnemy.X + ToEnemy.Y*ToEnemy.Y + ToEnemy.Z*ToEnemy.Z);
             if (Dist < 0.01f) continue;
@@ -2703,80 +2426,31 @@ namespace Binds {
             const float Dot = Forward.X*ToEnemy.X + Forward.Y*ToEnemy.Y + Forward.Z*ToEnemy.Z;
             if (Dot >= HalfFOVCos) candidates.push_back({Dot, Enemy});
         }
+        if (candidates.empty()) return std::nullopt;
         std::sort(candidates.begin(), candidates.end(),
             [](const Candidate& a, const Candidate& b) { return a.dot > b.dot; });
 
-        // Pick the first candidate that either has no weakpoints (aim at center)
-        // or has at least one visible, alive weakpoint.
-        AFSDPawn* BestTarget = nullptr;
-        FVector   AimPos     = {};
         for (auto& c : candidates)
         {
             auto meshes = Helpers::GetEnemyMeshes(c.enemy);
-            if (meshes.empty()) {
-                // No mesh data — fall back to actor center.
-                BestTarget = c.enemy;
-                AimPos     = c.enemy->K2_GetActorLocation();
-                break;
-            }
+            if (meshes.empty()) return c.enemy->K2_GetActorLocation();
             auto wp = GetWeakpointTarget(c.enemy, meshes, CamLoc, Forward, LocalPlayer);
-            if (wp.hasWeakpoints && !wp.anyVisible) continue; // WP enemy, but none visible
-            BestTarget = c.enemy;
-            AimPos     = wp.pos;
-            break;
+            if (wp.hasWeakpoints && !wp.anyVisible) continue;
+            return wp.pos;
         }
-        if (!BestTarget) return;
-
-        const FRotator AimRot = UKismetMathLibrary::FindLookAtRotation(CamLoc, AimPos);
-
-        // Deadzone: skip correction if already aimed within DeadzoneDeg of the target.
-        {
-            const float AP = AimRot.Pitch * kDeg2Rad, AY = AimRot.Yaw * kDeg2Rad;
-            const FVector AimDir{ std::cos(AP)*std::cos(AY), std::cos(AP)*std::sin(AY), std::sin(AP) };
-            const float dotToAim = Forward.X*AimDir.X + Forward.Y*AimDir.Y + Forward.Z*AimDir.Z;
-            if (dotToAim >= std::cos(Config.DeadzoneDeg * kDeg2Rad)) return;
-        }
-
-        State::AimbotHasTarget = true;
-        const FRotator CtrlRot = LocalController->GetControlRotation();
-        LocalPlayer->K2_SetActorRotation({0.f, AimRot.Yaw, 0.f}, false);
-        LocalController->SetControlRotation({AimRot.Pitch, AimRot.Yaw, CtrlRot.Roll});
+        return std::nullopt;
     }
 
-    void EnableAimbot() {
-        if (State::AimbotEnabled) return;
-        State::AimbotEnabled = true;
-        State::AimbotHandle = GameHooks::OnProcessEventByNameAndClass(
-            "ReceiveTick", APlayerCameraManager::StaticClass(),
-            [](UObject* Obj, UFunction*, void*) {
-                using namespace ObjectCast;
-                APlayerCharacter* Player = GetLocalPlayer();
-                if (!IsValidOf<APlayerCharacter>(Player)) return;
-                AFSDPlayerController* Ctrl = Cast<AFSDPlayerController>(Player->Controller);
-                if (!IsValidOf<AFSDPlayerController>(Ctrl)) return;
-                if (static_cast<APlayerCameraManager*>(Obj) != Ctrl->PlayerCameraManager) return;
-                Aimbot();
-            },
-            GameHooks::ClassMatchMode::ExactOrSubclass,
-            GameHooks::ExecutionTiming::Before,
-            GameHooks::ExecutionMode::CallOriginal);
-    }
-
-    void DisableAimbot() {
-        State::AimbotEnabled   = false;
-        State::AimbotHasTarget = false;
-        GameHooks::RemoveHook(State::AimbotHandle);
-        State::AimbotHandle = 0;
-    }
+    // Keybind handlers — Press / Release flag a single bool. The unified RCS
+    // loop reads the flag each camera frame and runs aimbot from inside.
+    void AimbotPressed()  { State::AimbotKeyHeld = true; }
+    void AimbotReleased() { State::AimbotKeyHeld = false; }
 
     void ToggleRecoilControl() {
         State::RecoilEnabled  = !State::RecoilEnabled;
         State::RCSInitialized = false;
 
         if (State::RecoilEnabled) {
-            struct RCSConfig { float Factor = 1.0f; };
-            static RCSConfig RCSConfig;
-
             // UE4 pitch/yaw live in [0,360): normalize to [-180,180] so
             // arithmetic and clamps stay geometrically correct.
             auto normP = [](float a) -> float {
@@ -2790,13 +2464,13 @@ namespace Binds {
                 if (!State::RecoilEnabled) return false;
 
                 using namespace ObjectCast;
-                APlayerCharacter* Player = GetLocalPlayer();
-                if (!IsValidOf<APlayerCharacter>(Player)) return true;
+                SDK::APlayerCharacter* Player = GetLocalPlayer();
+                if (!IsValidOf<SDK::APlayerCharacter>(Player)) return true;
 
-                AFSDPlayerController* Ctrl = Cast<AFSDPlayerController>(Player->Controller);
-                if (!IsValidOf<AFSDPlayerController>(Ctrl)) return true;
+                SDK::AFSDPlayerController* Ctrl = Cast<SDK::AFSDPlayerController>(Player->Controller);
+                if (!IsValidOf<SDK::AFSDPlayerController>(Ctrl)) return true;
 
-                APlayerCameraManager* CamMgr = Ctrl->PlayerCameraManager;
+                SDK::APlayerCameraManager* CamMgr = Ctrl->PlayerCameraManager;
                 if (!CamMgr) return true;
 
                 const FRotator ctrlRot = Ctrl->GetControlRotation();
@@ -2827,24 +2501,53 @@ namespace Binds {
                 lastCamPitch = camPitch;
                 lastCamYaw   = camYaw;
 
-                // ── Pitch ──────────────────────────────────────────────
-                // Fold in mouse input (ctrl change we didn't write).
-                State::RCSDesiredPitch += normP(ctrlPitch - State::RCSPrevCtrlPitch);
-                State::RCSDesiredPitch  = std::clamp(State::RCSDesiredPitch, -90.f, 90.f);
+                // ── Aimbot integration ─────────────────────────────────
+                // If the aimbot key is held, find a target and override the
+                // desired rotation with target's look-at. The recoil
+                // compensation below then pre-subtracts the spring offset
+                // from THAT direction, so the rendered camera lands exactly
+                // on the target — no fighting between aimbot and RCS.
+                bool aimbotSet = false;
+                if (State::AimbotKeyHeld) {
+                    static constexpr float kDeg2Rad = 3.14159265f / 180.f;
+                    static constexpr float kFOV     = 90.f;
 
+                    const FVector CamLoc = CamMgr->GetCameraLocation();
+                    const float   PR     = camRot.Pitch * kDeg2Rad;
+                    const float   YR     = camRot.Yaw   * kDeg2Rad;
+                    const FVector Forward{
+                        std::cos(PR) * std::cos(YR),
+                        std::cos(PR) * std::sin(YR),
+                        std::sin(PR)
+                    };
+                    if (auto target = FindAimbotTargetPos(Player, CamMgr, CamLoc, Forward, kFOV))
+                    {
+                        // This can be replaced with SDK::UKismetMathLibrary::MakeRotFromX(*target-CamLoc);
+                        // and later on with inline implementation of MakeRotFromX
+                        const FRotator AimRot = SDK::UKismetMathLibrary::MakeRotFromX(*target-CamLoc);
+                        State::RCSDesiredPitch = std::clamp(normP(AimRot.Pitch), -90.f, 90.f);
+                        State::RCSDesiredYaw   = normP(AimRot.Yaw);
+                        aimbotSet = true;
+                    }
+                }
+
+                if (!aimbotSet) {
+                    // No aimbot override — fold in actual mouse input.
+                    State::RCSDesiredPitch += normP(ctrlPitch - State::RCSPrevCtrlPitch);
+                    State::RCSDesiredPitch  = std::clamp(State::RCSDesiredPitch, -90.f, 90.f);
+                    State::RCSDesiredYaw   += normP(ctrlYaw - State::RCSPrevCtrlYaw);
+                    State::RCSDesiredYaw    = normP(State::RCSDesiredYaw);
+                }
+
+                // ── Recoil compensation (always) ───────────────────────
+                // ctrl = desired - recoil_offset, so camera = ctrl + offset = desired.
                 const float pitchOffset = camPitch - ctrlPitch;
+                const float yawOffset   = normP(camYaw - ctrlYaw);
                 const float newPitch = std::clamp(
-                    State::RCSDesiredPitch - pitchOffset * RCSConfig.Factor,
+                    State::RCSDesiredPitch - pitchOffset * State::RCSFactor,
                     -90.f, 90.f);
-
-                // ── Yaw ────────────────────────────────────────────────
-                // Same pattern, but no [-90,90] clamp — yaw wraps full circle.
-                // Normalize desired/offset to handle the 0/360 seam.
-                State::RCSDesiredYaw += normP(ctrlYaw - State::RCSPrevCtrlYaw);
-                State::RCSDesiredYaw  = normP(State::RCSDesiredYaw);
-
-                const float yawOffset = normP(camYaw - ctrlYaw);
-                const float newYaw    = normP(State::RCSDesiredYaw - yawOffset * RCSConfig.Factor);
+                const float newYaw = normP(
+                    State::RCSDesiredYaw - yawOffset * State::RCSFactor);
 
                 FRotator rot = ctrlRot;
                 rot.Pitch = newPitch;
@@ -2856,34 +2559,34 @@ namespace Binds {
                 return true;
             });
         }
-        spdlog::info("[recoil] {}", State::RecoilEnabled ? "ON" : "OFF");
+        info("[recoil] {}", State::RecoilEnabled ? "ON" : "OFF");
     }
 
     void ToggleSilentAim() {
         State::SilentAimEnabled = !State::SilentAimEnabled;
         if (State::SilentAimEnabled) {
             State::SilentAimHandle = GameHooks::OnProcessEventByNameAndClass(
-                "Fire", UWeaponFireComponent::StaticClass(),
-                [](UObject* Obj, UFunction*, void* Parms) {
+                "Fire", SDK::UWeaponFireComponent::StaticClass(),
+                [](SDK::UObject* Obj, SDK::UFunction*, void* Parms) {
                     using namespace ObjectCast;
                     if (!Parms) return;
 
-                    auto* Weapon = Cast<AAmmoDrivenWeapon>(Obj->Outer);
-                    if (!IsValidOf<AAmmoDrivenWeapon>(Weapon)) return;
+                    auto* Weapon = Cast<SDK::AAmmoDrivenWeapon>(Obj->Outer);
+                    if (!IsValidOf<SDK::AAmmoDrivenWeapon>(Weapon)) return;
 
-                    APlayerCharacter* Player = GetLocalPlayer();
-                    if (!IsValidOf<APlayerCharacter>(Player)) return;
+                    SDK::APlayerCharacter* Player = GetLocalPlayer();
+                    if (!IsValidOf<SDK::APlayerCharacter>(Player)) return;
                     if (Weapon->Character != Player || !Weapon->IsEquipped) return;
 
-                    AFSDPlayerController* Ctrl = Cast<AFSDPlayerController>(Player->Controller);
-                    if (!IsValidOf<AFSDPlayerController>(Ctrl)) return;
+                    SDK::AFSDPlayerController* Ctrl = Cast<SDK::AFSDPlayerController>(Player->Controller);
+                    if (!IsValidOf<SDK::AFSDPlayerController>(Ctrl)) return;
 
-                    APlayerCameraManager* CamMgr = Ctrl->PlayerCameraManager;
+                    SDK::APlayerCameraManager* CamMgr = Ctrl->PlayerCameraManager;
                     if (!CamMgr) return;
 
                     if (IsOnSpaceRig()) return;
 
-                    std::vector<AFSDPawn*> Enemies = GetAliveNonFriendlies();
+                    std::vector<SDK::AFSDPawn*> Enemies = GetAliveNonFriendlies();
                     if (Enemies.empty()) return;
 
                     static constexpr float kDeg2Rad = 3.14159265f / 180.f;
@@ -2902,11 +2605,11 @@ namespace Binds {
 
                     const float HalfFOVCos = std::cos(Config.FOV * 0.5f * kDeg2Rad);
 
-                    struct Candidate { float dot; AFSDPawn* enemy; };
+                    struct Candidate { float dot; SDK::AFSDPawn* enemy; };
                     std::vector<Candidate> candidates;
-                    for (AFSDPawn* Enemy : Enemies)
+                    for (SDK::AFSDPawn* Enemy : Enemies)
                     {
-                        if (!IsValidOf<AFSDPawn>(Enemy)) continue;
+                        if (!IsValidOf<SDK::AFSDPawn>(Enemy)) continue;
                         FVector ToEnemy = Enemy->K2_GetActorLocation() - CamLoc;
                         const float Dist = std::sqrt(ToEnemy.X*ToEnemy.X + ToEnemy.Y*ToEnemy.Y + ToEnemy.Z*ToEnemy.Z);
                         if (Dist < 0.01f) continue;
@@ -2918,7 +2621,7 @@ namespace Binds {
                     std::sort(candidates.begin(), candidates.end(),
                         [](const Candidate& a, const Candidate& b) { return a.dot > b.dot; });
 
-                    AFSDPawn* BestTarget = nullptr;
+                    SDK::AFSDPawn* BestTarget = nullptr;
                     FVector   AimPos     = {};
                     for (auto& c : candidates)
                     {
@@ -2950,7 +2653,7 @@ namespace Binds {
             GameHooks::RemoveHook(State::SilentAimHandle);
             State::SilentAimHandle = 0;
         }
-        spdlog::info("[silent aim] {}", State::SilentAimEnabled ? "ON" : "OFF");
+        info("[silent aim] {}", State::SilentAimEnabled ? "ON" : "OFF");
     }
 
     void InfiniteAmmo() {
@@ -2975,14 +2678,14 @@ namespace Binds {
         KeyBindings::RegisterGameThread(
             MouseLeft,
             Mod::None,
-            Binds::EnableAimbot,
+            Binds::AimbotPressed,
             BindingOptions{ Press, Game, false }
         );
 
         KeyBindings::RegisterGameThread(
             MouseLeft,
             Mod::None,
-            Binds::DisableAimbot,
+            Binds::AimbotReleased,
             BindingOptions{ Release, Game, false }
         );
 
@@ -3024,6 +2727,7 @@ namespace Binds {
     }
 
 }
+#endif // _moved_aim_body
 
 // =========================================================================
 // Public interface
@@ -3040,7 +2744,6 @@ void RegisterCommands(CommandHandler& handler)
     // Enemies
     handler.Register("dumpdescriptors", Commands::DumpDescriptors, "Enemies", R"(Dump all ED_* descriptor controls to C:\Dumper-7\DescriptorDump.json)");
     handler.Register("fearall", Commands::FearAll, "Enemies", R"(Instantly fear all enemies (requires Coil Gun equipped))");
-    handler.Register("wpinfo", Commands::WPInfo, "Enemies", R"(Dump weakpoint physics bodies for the nearest enemy)");
     handler.Register("spawndump", Commands::SpawnAndDump, "Enemies", R"(Dump float/bool/int props for all enemy descriptors x biomes: spawndump [delay_ms])");
     handler.Register("spawnenemies", Commands::SpawnEnemies, "Enemies", R"(Spawn enemies: spawnenemies <descriptor> <count> <x> <y> <z>)");
     handler.Register("spawnmatdump", Commands::SpawnAndDumpMaterials, "Enemies", R"(Dump material names for all enemy descriptors x biomes: spawnmatdump [delay_ms])");
@@ -3059,8 +2762,9 @@ void RegisterCommands(CommandHandler& handler)
     handler.Register("infiniteammo", Commands::ToggleInfiniteAmmo, "Player", R"(Toggle infinite ammo for local player)");
     handler.Register("readname", Commands::ReadName, "Player", R"(Read the name of the local player)");
     handler.Register("rename", Commands::Rename, "Player", R"(Rename the local player: rename <new_name>)");
-    handler.Register("recoil", [](const CommandContext&) { Binds::ToggleRecoilControl(); }, "Player", R"(Toggle recoil compensation (cancels expected RecoilPitch per shot via OnWeaponFired))");
-    handler.Register("silentaim", [](const CommandContext&) { Binds::ToggleSilentAim(); }, "Player", R"(Toggle silent aim (redirects Fire direction to nearest weakpoint, no view rotation) [Ctrl+S])");
+
+    // Aimbot + RCS + Silent Aim + wpinfo all live in Lib_AimAssist.
+    AimAssist::RegisterCommands(handler);
 
     // System
     handler.Register("beginplay", Commands::BeginPlay, "System", R"(Toggle BeginPlay spawn watcher)");

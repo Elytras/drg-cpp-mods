@@ -40,7 +40,7 @@ namespace GameHooks
     enum class ExecutionMode    { CallOriginal, SkipOriginal };
     enum class ClassMatchMode   { Exact, ExactOrSubclass, SubclassOnly };
 
-    using ProcessEventCallback = std::function<void(UObject*, UFunction*, void*)>;
+    using ProcessEventCallback = std::function<void(SDK::UObject*, SDK::UFunction*, void*)>;
     using CallbackHandle       = size_t;
 
     class ProcessEventHook
@@ -52,10 +52,10 @@ namespace GameHooks
         {
             CallbackHandle       handle;
             std::string          functionNameFilter;
-            FName                functionNameFName;
-            UClass*              classFilter;
-            const UObject*       objectFilter;
-            UFunction*           functionFilter;
+            SDK::FName           functionNameFName;
+            SDK::UClass*         classFilter;
+            const SDK::UObject*  objectFilter;
+            SDK::UFunction*      functionFilter;
             ClassMatchMode       classMatchMode;
             ExecutionTiming      timing;
             ExecutionMode        mode;
@@ -63,7 +63,7 @@ namespace GameHooks
             bool                 enabled;
 
             CallbackEntry(CallbackHandle h, const std::string& funcName,
-                UClass* cls, const UObject* obj, UFunction* func,
+                SDK::UClass* cls, const SDK::UObject* obj, SDK::UFunction* func,
                 ClassMatchMode clsMode, ExecutionTiming tim,
                 ExecutionMode mod, ProcessEventCallback cb)
                 : handle(h), functionNameFilter(funcName), functionNameFName{}
@@ -78,9 +78,9 @@ namespace GameHooks
 
         struct DispatchCache
         {
-            std::unordered_map<UFunction*, std::vector<size_t>> byFunctionPtr;
-            std::unordered_map<FName,      std::vector<size_t>> byFunctionName;
-            std::vector<size_t>                                 wildcards;
+            std::unordered_map<SDK::UFunction*, std::vector<size_t>> byFunctionPtr;
+            std::unordered_map<SDK::FName,      std::vector<size_t>> byFunctionName;
+            std::vector<size_t>                                      wildcards;
 
             void Validate() const
             {
@@ -117,7 +117,7 @@ namespace GameHooks
         static constexpr size_t          kMaxDispatchBuf = 32;
 
         static ProcessEventHook*         instance;
-        static void(*OriginalProcessEvent)(UObject*, UFunction*, void*);
+        static void(*OriginalProcessEvent)(SDK::UObject*, SDK::UFunction*, void*);
         static inline std::atomic<int>   executionDepth_{ 0 };
 
         std::atomic<bool>                              pendingUninstall_{ false };
@@ -135,12 +135,12 @@ namespace GameHooks
         ProcessEventHook();
         void StoreState(std::shared_ptr<const CallbackState> s);
         static std::shared_ptr<const CallbackState> BuildState(CallbackList list);
-        static bool MatchesClassFilter(UObject* Object, UClass* classFilter, ClassMatchMode mode);
+        static bool MatchesClassFilter(SDK::UObject* Object, SDK::UClass* classFilter, ClassMatchMode mode);
         static bool RunBeforePass(const CallbackList& list, const size_t* idx, size_t count,
-                                  UObject* Object, UFunction* Function, void* Parms);
+                                  SDK::UObject* Object, SDK::UFunction* Function, void* Parms);
         static void RunAfterPass (const CallbackList& list, const size_t* idx, size_t count,
-                                  UObject* Object, UFunction* Function, void* Parms);
-        static void __fastcall HookedProcessEvent(UObject* Object, UFunction* Function, void* Parms);
+                                  SDK::UObject* Object, SDK::UFunction* Function, void* Parms);
+        static void __fastcall HookedProcessEvent(SDK::UObject* Object, SDK::UFunction* Function, void* Parms);
         bool DoUninstall();
         CallbackList CloneList() const;
 
@@ -154,8 +154,8 @@ namespace GameHooks
         void Enqueue(std::function<void()> task);
 
         CallbackHandle AddCallback(ProcessEventCallback callback,
-            const std::string& functionName = "", UClass* classFilter = nullptr,
-            const UObject* objectFilter = nullptr, UFunction* functionFilter = nullptr,
+            const std::string& functionName = "", SDK::UClass* classFilter = nullptr,
+            const SDK::UObject* objectFilter = nullptr, SDK::UFunction* functionFilter = nullptr,
             ClassMatchMode classMatchMode = ClassMatchMode::ExactOrSubclass,
             ExecutionTiming timing = ExecutionTiming::Before,
             ExecutionMode mode = ExecutionMode::CallOriginal);
@@ -175,21 +175,21 @@ namespace GameHooks
     CallbackHandle OnProcessEventByName(const std::string& fn, ProcessEventCallback cb,
         ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal);
 
-    CallbackHandle OnProcessEventByClass(UClass* cls, ProcessEventCallback cb,
+    CallbackHandle OnProcessEventByClass(SDK::UClass* cls, ProcessEventCallback cb,
         ClassMatchMode m = ClassMatchMode::ExactOrSubclass,
         ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal);
 
-    CallbackHandle OnProcessEventByNameAndClass(const std::string& fn, UClass* cls, ProcessEventCallback cb,
+    CallbackHandle OnProcessEventByNameAndClass(const std::string& fn, SDK::UClass* cls, ProcessEventCallback cb,
         ClassMatchMode m = ClassMatchMode::ExactOrSubclass,
         ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal);
 
-    CallbackHandle OnProcessEventByObject(const UObject* obj, ProcessEventCallback cb,
+    CallbackHandle OnProcessEventByObject(const SDK::UObject* obj, ProcessEventCallback cb,
         ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal);
 
-    CallbackHandle OnProcessEventByFunction(UFunction* func, ProcessEventCallback cb,
+    CallbackHandle OnProcessEventByFunction(SDK::UFunction* func, ProcessEventCallback cb,
         ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal);
 
-    CallbackHandle OnProcessEventByFunctionAndObject(UFunction* func, const UObject* obj, ProcessEventCallback cb,
+    CallbackHandle OnProcessEventByFunctionAndObject(SDK::UFunction* func, const SDK::UObject* obj, ProcessEventCallback cb,
         ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal);
 
     CallbackHandle OnProcessEventAll(ProcessEventCallback cb,
@@ -197,18 +197,18 @@ namespace GameHooks
 
     struct CallbackParams
     {
-        std::string     functionName   = "";
-        UClass*         classFilter    = nullptr;
-        const UObject*  objectFilter   = nullptr;
-        UFunction*      functionFilter = nullptr;
-        ClassMatchMode  classMatchMode = ClassMatchMode::ExactOrSubclass;
-        ExecutionTiming timing         = ExecutionTiming::Before;
-        ExecutionMode   mode           = ExecutionMode::CallOriginal;
+        std::string         functionName   = "";
+        SDK::UClass*        classFilter    = nullptr;
+        const SDK::UObject* objectFilter   = nullptr;
+        SDK::UFunction*     functionFilter = nullptr;
+        ClassMatchMode      classMatchMode = ClassMatchMode::ExactOrSubclass;
+        ExecutionTiming     timing         = ExecutionTiming::Before;
+        ExecutionMode       mode           = ExecutionMode::CallOriginal;
     };
 
     CallbackHandle OnProcessEventAdvanced(ProcessEventCallback cb,
-        const std::string& fn = "", UClass* cls = nullptr, const UObject* obj = nullptr,
-        UFunction* func = nullptr, ClassMatchMode m = ClassMatchMode::ExactOrSubclass,
+        const std::string& fn = "", SDK::UClass* cls = nullptr, const SDK::UObject* obj = nullptr,
+        SDK::UFunction* func = nullptr, ClassMatchMode m = ClassMatchMode::ExactOrSubclass,
         ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal);
 
     CallbackHandle OnProcessEventAdvanced(const CallbackParams& p, ProcessEventCallback cb);

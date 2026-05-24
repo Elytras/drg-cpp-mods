@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <format>
 
+using namespace SDK;  // file-local; no math types used in this TU
+
 // =========================================================================
 // Class chain helpers
 // =========================================================================
@@ -28,7 +30,7 @@ std::vector<UStruct*> BuildClassChain(UClass* Class, UClass* OuterBase)
 void PrintClassHierarchy(const UClass* Class)
 {
     for (const UStruct* c = Class; c; c = c->SuperStruct)
-        spdlog::info("{}", c->GetName());
+        info("{}", c->GetName());
 }
 
 // =========================================================================
@@ -74,53 +76,53 @@ void PrintFieldValue(uintptr_t Base, FField* Field,
             const std::string fname = labelOverride.empty() ? prop->Name.ToString() : labelOverride;
             auto* fakeBase = reinterpret_cast<UObject*>(Base);
 
-            if constexpr (std::is_same_v<T, FIntProperty>)    spdlog::info("{}{} = {}", pre, fname, *GetPropertyPtr<int32>(Base, prop->Offset));
-            else if constexpr (std::is_same_v<T, FInt8Property>)   spdlog::info("{}{} = {}", pre, fname, *GetPropertyPtr<int8>(Base, prop->Offset));
-            else if constexpr (std::is_same_v<T, FInt16Property>)  spdlog::info("{}{} = {}", pre, fname, *GetPropertyPtr<int16>(Base, prop->Offset));
-            else if constexpr (std::is_same_v<T, FInt64Property>)  spdlog::info("{}{} = {}", pre, fname, *GetPropertyPtr<int64>(Base, prop->Offset));
-            else if constexpr (std::is_same_v<T, FUInt16Property>) spdlog::info("{}{} = {}", pre, fname, *GetPropertyPtr<uint16>(Base, prop->Offset));
-            else if constexpr (std::is_same_v<T, FUInt32Property>) spdlog::info("{}{} = {}", pre, fname, *GetPropertyPtr<uint32>(Base, prop->Offset));
-            else if constexpr (std::is_same_v<T, FUInt64Property>) spdlog::info("{}{} = {}", pre, fname, *GetPropertyPtr<uint64>(Base, prop->Offset));
-            else if constexpr (std::is_same_v<T, FFloatProperty>)  spdlog::info("{}{} = {:.4f}", pre, fname, *GetPropertyPtr<float>(Base, prop->Offset));
-            else if constexpr (std::is_same_v<T, FDoubleProperty>) spdlog::info("{}{} = {:.6f}", pre, fname, *GetPropertyPtr<double>(Base, prop->Offset));
+            if constexpr (std::is_same_v<T, FIntProperty>)    info("{}{} = {}", pre, fname, *GetPropertyPtr<int32>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FInt8Property>)   info("{}{} = {}", pre, fname, *GetPropertyPtr<int8>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FInt16Property>)  info("{}{} = {}", pre, fname, *GetPropertyPtr<int16>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FInt64Property>)  info("{}{} = {}", pre, fname, *GetPropertyPtr<int64>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FUInt16Property>) info("{}{} = {}", pre, fname, *GetPropertyPtr<uint16>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FUInt32Property>) info("{}{} = {}", pre, fname, *GetPropertyPtr<uint32>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FUInt64Property>) info("{}{} = {}", pre, fname, *GetPropertyPtr<uint64>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FFloatProperty>)  info("{}{} = {:.4f}", pre, fname, *GetPropertyPtr<float>(Base, prop->Offset));
+            else if constexpr (std::is_same_v<T, FDoubleProperty>) info("{}{} = {:.6f}", pre, fname, *GetPropertyPtr<double>(Base, prop->Offset));
             else if constexpr (std::is_same_v<T, FByteProperty>)
             {
                 const uint8 val = *GetPropertyPtr<uint8>(Base, prop->Offset);
-                if (prop->Enum) spdlog::info("{}{} = {} ({})", pre, fname, val, prop->Enum->GetName());
-                else            spdlog::info("{}{} = {}", pre, fname, val);
+                if (prop->Enum) info("{}{} = {} ({})", pre, fname, val, prop->Enum->GetName());
+                else            info("{}{} = {}", pre, fname, val);
             }
             else if constexpr (std::is_same_v<T, FBoolProperty>)
-                spdlog::info("{}{} = {}", pre, fname, ReadBool(fakeBase, prop));
+                info("{}{} = {}", pre, fname, ReadBool(fakeBase, prop));
             else if constexpr (std::is_same_v<T, FStrProperty>)
             {
                 const auto& str = *GetPropertyPtr<UC::FString>(Base, prop->Offset);
-                spdlog::info("{}{} = \"{}\"", pre, fname, str.IsValid() ? str.ToString() : "<empty>");
+                info("{}{} = \"{}\"", pre, fname, str.IsValid() ? str.ToString() : "<empty>");
             }
             else if constexpr (std::is_same_v<T, FNameProperty>)
-                spdlog::info("{}{} = {}", pre, fname, GetPropertyRef<FName>(fakeBase, prop->Offset).ToString());
+                info("{}{} = {}", pre, fname, GetPropertyRef<FName>(fakeBase, prop->Offset).ToString());
             else if constexpr (std::is_same_v<T, FTextProperty>)
-                spdlog::info("{}{} = [FText]", pre, fname);
+                info("{}{} = [FText]", pre, fname);
             else if constexpr (std::is_same_v<T, FEnumProperty>)
             {
                 int64 enumVal = 0;
                 memcpy(&enumVal, GetPropertyPtr<void>(Base, prop->Offset), prop->UnderlayingProperty->ElementSize);
-                spdlog::info("{}{} = {} ({})", pre, fname, enumVal, prop->Enum ? prop->Enum->GetName() : "?");
+                info("{}{} = {} ({})", pre, fname, enumVal, prop->Enum ? prop->Enum->GetName() : "?");
             }
             else if constexpr (std::is_same_v<T, FClassProperty>)
             {
                 auto* cls = *GetPropertyPtr<UClass*>(Base, prop->Offset);
-                spdlog::info("{}{} = {}", pre, fname, cls && IsValid(cls) ? cls->GetName() : "null");
+                info("{}{} = {}", pre, fname, cls && IsValid(cls) ? cls->GetName() : "null");
             }
             else if constexpr (std::is_same_v<T, FObjectProperty> || std::is_same_v<T, FObjectPropertyBase>)
             {
                 auto* obj = *GetPropertyPtr<UObject*>(Base, prop->Offset);
-                spdlog::info("{}{} = {} ({})", pre, fname,
+                info("{}{} = {} ({})", pre, fname,
                     obj && IsValidRaw(obj) ? obj->GetName() : "null",
                     obj && IsValidRaw(obj) ? obj->Class->GetName() : "?");
             }
             else if constexpr (std::is_same_v<T, FStructProperty>)
             {
-                spdlog::info("{}{} ({}):", pre, fname, prop->Struct->GetName());
+                info("{}{} ({}):", pre, fname, prop->Struct->GetName());
                 std::vector<FField*> children;
                 for (auto* inner : FFieldRange(prop->Struct->ChildProperties)) children.push_back(inner);
                 std::vector<bool> ca = ancestry; ca.push_back(!isLast);
@@ -132,7 +134,7 @@ void PrintFieldValue(uintptr_t Base, FField* Field,
             {
                 const auto& arr = *GetPropertyPtr<UC::TArray<uint8>>(Base, prop->Offset);
                 const int32 num = arr.Num(), maxShow = (std::min)(num, 8);
-                spdlog::info("{}{} [TArray {}/{}] <{}>", pre, fname, num, arr.Max(),
+                info("{}{} [TArray {}/{}] <{}>", pre, fname, num, arr.Max(),
                     prop->InnerProperty->ClassPrivate->Name.ToString());
                 if (arr.IsValid() && num > 0)
                 {
@@ -142,11 +144,11 @@ void PrintFieldValue(uintptr_t Base, FField* Field,
                     for (int32 i = 0; i < maxShow; ++i)
                     {
                         const bool le = (i == maxShow - 1) && (num <= maxShow);
-                        spdlog::info("{}[{}]", Detail::Prefix(ca, le), i);
+                        info("{}[{}]", Detail::Prefix(ca, le), i);
                         std::vector<bool> ea = ca; ea.push_back(!le);
                         PrintFieldValue(db + i * es, prop->InnerProperty, ea, true);
                     }
-                    if (num > maxShow) spdlog::info("{}... ({} more)", Detail::ChildPrefix(ancestry, !isLast), num - maxShow);
+                    if (num > maxShow) info("{}... ({} more)", Detail::ChildPrefix(ancestry, !isLast), num - maxShow);
                 }
             }
             else if constexpr (std::is_same_v<T, FSetProperty>)
@@ -161,7 +163,7 @@ void PrintFieldValue(uintptr_t Base, FField* Field,
                 const int32 es  = prop->ElementProperty->ElementSize + 8;
                 int32 lc = 0;
                 for (int32 i = 0; i < na; ++i) if (bd && (bd[i / 32] & (1u << (i % 32)))) ++lc;
-                spdlog::info("{}{} [TSet {}/{}] <{}>", pre, fname, lc, na, prop->ElementProperty->ClassPrivate->Name.ToString());
+                info("{}{} [TSet {}/{}] <{}>", pre, fname, lc, na, prop->ElementProperty->ClassPrivate->Name.ToString());
                 if (!dp || na <= 0) return;
                 std::vector<bool> ca = ancestry; ca.push_back(!isLast);
                 const int32 ms = (std::min)(lc, 8); int32 shown = 0;
@@ -169,11 +171,11 @@ void PrintFieldValue(uintptr_t Base, FField* Field,
                 {
                     if (!bd || !(bd[i / 32] & (1u << (i % 32)))) continue;
                     const bool le = (shown == ms - 1) && (lc <= ms);
-                    spdlog::info("{}[{}]", Detail::Prefix(ca, le), shown);
+                    info("{}[{}]", Detail::Prefix(ca, le), shown);
                     PrintFieldValue(dp + i * es, prop->ElementProperty, ca, true);
                     ++shown;
                 }
-                if (lc > ms) spdlog::info("{}... ({} more)", Detail::ChildPrefix(ancestry, !isLast), lc - ms);
+                if (lc > ms) info("{}... ({} more)", Detail::ChildPrefix(ancestry, !isLast), lc - ms);
             }
             else if constexpr (std::is_same_v<T, FMapProperty>)
             {
@@ -187,7 +189,7 @@ void PrintFieldValue(uintptr_t Base, FField* Field,
                 const int32 ps  = (((prop->ValueProperty->Offset + prop->ValueProperty->ElementSize) + 7) & ~7) + 8;
                 int32 lc = 0;
                 for (int32 i = 0; i < na; ++i) if (bd && (bd[i / 32] & (1u << (i % 32)))) ++lc;
-                spdlog::info("{}{} [TMap {}/{}] <{}, {}>", pre, fname, lc, na,
+                info("{}{} [TMap {}/{}] <{}, {}>", pre, fname, lc, na,
                     prop->KeyProperty->ClassPrivate->Name.ToString(),
                     prop->ValueProperty->ClassPrivate->Name.ToString());
                 if (!dp || na <= 0) return;
@@ -198,16 +200,16 @@ void PrintFieldValue(uintptr_t Base, FField* Field,
                     if (!bd || !(bd[i / 32] & (1u << (i % 32)))) continue;
                     const uintptr_t pb = dp + i * ps;
                     const bool le = (shown == ms - 1) && (lc <= ms);
-                    spdlog::info("{}[{}]", Detail::Prefix(ca, le), shown);
+                    info("{}[{}]", Detail::Prefix(ca, le), shown);
                     std::vector<bool> ea = ca; ea.push_back(!le);
                     PrintFieldValue(pb, prop->KeyProperty, ea, false, "key");
                     PrintFieldValue(pb, prop->ValueProperty, ea, true,  "val");
                     ++shown;
                 }
-                if (lc > ms) spdlog::info("{}... ({} more)", Detail::ChildPrefix(ancestry, !isLast), lc - ms);
+                if (lc > ms) info("{}... ({} more)", Detail::ChildPrefix(ancestry, !isLast), lc - ms);
             }
             else if constexpr (std::is_base_of_v<FProperty, T>)
-                spdlog::info("{}{} @ +{:#x} ({} bytes) [{}]", pre, fname, prop->Offset, prop->ElementSize,
+                info("{}{} @ +{:#x} ({} bytes) [{}]", pre, fname, prop->Offset, prop->ElementSize,
                     prop->ClassPrivate ? prop->ClassPrivate->Name.ToString() : "?");
         });
 }
@@ -229,17 +231,17 @@ void DumpItemProperties(UObject* Item, UClass* OuterBase)
     if (!Item || !IsValid(Item)) return;
 
     const auto chain = BuildClassChain(Item->Class, OuterBase);
-    spdlog::info("╔══ {} ({})", Item->GetName(), Item->Class->GetName());
+    info("╔══ {} ({})", Item->GetName(), Item->Class->GetName());
 
     for (size_t i = 0; i < chain.size(); ++i)
     {
         UStruct* level   = chain[i];
         UClass*  asClass = static_cast<UClass*>(level);
 
-        spdlog::info("╠═ [{}] {}", Detail::ClassTag(asClass), level->GetName());
+        info("╠═ [{}] {}", Detail::ClassTag(asClass), level->GetName());
 
         if (!level->ChildProperties) {
-            spdlog::info("║   (no properties)");
+            info("║   (no properties)");
             continue;
         }
 
@@ -261,7 +263,7 @@ void DumpItemProperties(UObject* Item, UClass* OuterBase)
         for (size_t j = 0; j < fields.size(); ++j)
             PrintFieldValue(reinterpret_cast<uintptr_t>(Item), fields[j], root, j == fields.size() - 1);
     }
-    spdlog::info("╚══════════════════════════");
+    info("╚══════════════════════════");
 }
 
 // Explicit instantiations — satisfies every extern template declaration in the header.
@@ -279,16 +281,16 @@ void DumpItemPropertiesSorted(UObject* Item, UClass* OuterBase)
 
     auto chain = BuildClassChain(Item->Class, OuterBase);
 
-    spdlog::info("╔══ {} ({})", Item->GetName(), Item->Class->GetName());
+    info("╔══ {} ({})", Item->GetName(), Item->Class->GetName());
 
     for (auto* structlevel : chain)
     {
         auto level = ObjectCast::Cast<UClass>(structlevel);
         if (!level) continue;
-        spdlog::info("╠═ [{}] {}", Detail::ClassTag(level), level->GetName());
+        info("╠═ [{}] {}", Detail::ClassTag(level), level->GetName());
 
         if (!level->ChildProperties) {
-            spdlog::info("║   (no properties)");
+            info("║   (no properties)");
             continue;
         }
 
@@ -320,9 +322,9 @@ void DumpItemPropertiesSorted(UObject* Item, UClass* OuterBase)
         });
 
         for (const auto& p : propList)
-            spdlog::info("║   {:<35} : {}", p.Name, p.Type);
+            info("║   {:<35} : {}", p.Name, p.Type);
     }
-    spdlog::info("╚══════════════════════════");
+    info("╚══════════════════════════");
 }
 
 // =========================================================================

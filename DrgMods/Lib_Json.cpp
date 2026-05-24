@@ -19,6 +19,8 @@
 #include "SDK/SDK/JSONValue_classes.hpp"
 #include "SDK/SDK/JSON_parameters.hpp"
 
+using namespace SDK;  // file-local; no math types used in this TU
+
 // �����������������������������������������������������������������������������
 // Internal State & Raw UE Structures
 // �����������������������������������������������������������������������������
@@ -658,12 +660,12 @@ namespace JsonHook {
                 fn->FunctionFlags &= ~(uint32_t)SDK::EFunctionFlags::Native;
             }
             ++swept;
-            spdlog::warn("[JsonHook] Swept extra UFunction copy @ {:p}", static_cast<void*>(fn));
+            warn("[JsonHook] Swept extra UFunction copy @ {:p}", static_cast<void*>(fn));
         }
         if (swept)
-            spdlog::info("[JsonHook] Swept {} extra UFunction instance(s)", swept);
+            info("[JsonHook] Swept {} extra UFunction instance(s)", swept);
         else
-            spdlog::debug("[JsonHook] GObjects sweep: no extra copies found");
+            debug("[JsonHook] GObjects sweep: no extra copies found");
     }
 }
 

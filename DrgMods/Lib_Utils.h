@@ -19,22 +19,22 @@
 // =========================================================================
 
 template<typename T>
-concept IsUObject = std::is_base_of_v<UObject, T>;
+concept IsUObject = std::is_base_of_v<SDK::UObject, T>;
 
 template<typename T>
 concept DerivedUObject =
     IsUObject<T> &&
-    !std::is_same_v<T, UObject> &&
-    requires { { T::StaticClass() } -> std::same_as<UClass*>; };
+    !std::is_same_v<T, SDK::UObject> &&
+    requires { { T::StaticClass() } -> std::same_as<SDK::UClass*>; };
 
 template<typename T>
-concept IsAActor = std::is_base_of_v<AActor, T>;
+concept IsAActor = std::is_base_of_v<SDK::AActor, T>;
 
 template<typename T>
-concept IsAItem = std::is_base_of_v<AItem, T>;
+concept IsAItem = std::is_base_of_v<SDK::AItem, T>;
 
 template<typename T>
-concept IsUComponent = std::is_base_of_v<UActorComponent, T>;
+concept IsUComponent = std::is_base_of_v<SDK::UActorComponent, T>;
 
 template<typename T>
 concept IsIndexableContainer = requires (const T& c, size_t i) {
@@ -50,8 +50,8 @@ concept IsIndexableContainer = requires (const T& c, size_t i) {
 
 struct PairKey
 {
-    const UClass* derived;
-    const UClass* base;
+    const SDK::UClass* derived;
+    const SDK::UClass* base;
     bool operator==(const PairKey& o) const { return derived == o.derived && base == o.base; }
 };
 
@@ -69,7 +69,7 @@ class SubclassCache
 {
 public:
     static SubclassCache& Get() { static SubclassCache i; return i; }
-    bool IsSubclassOf(const UClass* derived, const UClass* base);
+    bool IsSubclassOf(const SDK::UClass* derived, const SDK::UClass* base);
     void Clear();
 private:
     SubclassCache() { cache_.reserve(256); }
@@ -98,14 +98,14 @@ template<typename T, typename... Ts> bool AnyOf (T c, Ts... ts) { return ((c == 
 // =========================================================================
 
 std::wstring ToWide   (std::string_view in);
-FString      ToFString(std::string_view str);
+SDK::FString ToFString(std::string_view str);
 
 // =========================================================================
 // Core helpers
 // =========================================================================
 
-std::string GetDisplayName (UObject* Obj);
-bool        IsInActiveWorld(UObject* obj);
+std::string GetDisplayName (SDK::UObject* Obj);
+bool        IsInActiveWorld(SDK::UObject* obj);
 void        SleepNow       (uint64_t ms);
 uint64_t    GetTimeMs      ();
 void        Exec           (std::string cmd);
@@ -119,18 +119,18 @@ inline bool IsOnSpaceRig() { return IsOnSpacerig(); }
 
 template<typename T>
     requires DerivedUObject<T>
-bool IsChildOf(UClass* Test)
+bool IsChildOf(SDK::UClass* Test)
 {
-    UClass* Base = T::StaticClass();
+    SDK::UClass* Base = T::StaticClass();
     if (!Base || !Test) return false;
     return MathLib::ClassIsChildOf(Test, Base);
 }
 
 template<typename T>
-bool IsValidOf(const UObject* Target)
+bool IsValidOf(const SDK::UObject* Target)
 {
     if (!Target) return false;
-    if (UObject::GObjects.GetTypedPtr()->GetByIndex(Target->Index) != Target) return false;
+    if (SDK::UObject::GObjects.GetTypedPtr()->GetByIndex(Target->Index) != Target) return false;
     if (!IsValidRaw(Target) || !IsValid(Target)) return false;
     if constexpr (DerivedUObject<T>) { if (!IsChildOf<T>(Target->Class)) return false; }
     return true;
@@ -138,11 +138,11 @@ bool IsValidOf(const UObject* Target)
 
 template<typename UEType>
     requires DerivedUObject<UEType>
-UEType* GetTypedOuter(UObject* Obj)
+UEType* GetTypedOuter(SDK::UObject* Obj)
 {
     if (!Obj || !IsValid(Obj)) return nullptr;
-    const UClass* Class = UEType::StaticClass();
-    for (UObject* Outer = Obj->Outer; Outer; Outer = Outer->Outer)
+    const SDK::UClass* Class = UEType::StaticClass();
+    for (SDK::UObject* Outer = Obj->Outer; Outer; Outer = Outer->Outer)
         if (Outer->IsA(Class)) return static_cast<UEType*>(Outer);
     return nullptr;
 }
@@ -161,81 +161,84 @@ typename Container::value_type GetOrDefault(
     return def;
 }
 
-template<typename AActorType = AActor>
+template<typename AActorType = SDK::AActor>
     requires IsAActor<AActorType>
-AActorType* GetActorOfClass(UClass* Class = AActorType::StaticClass())
+AActorType* GetActorOfClass(SDK::UClass* Class = AActorType::StaticClass())
 {
-    if (!IsValidClass(Class) || !(Class->IsA(EClassCastFlags::Actor) || Class->IsSubclassOf(AActor::StaticClass())))
+    if (!IsValidClass(Class) || !(Class->IsA(SDK::EClassCastFlags::Actor) || Class->IsSubclassOf(SDK::AActor::StaticClass())))
     {
-        spdlog::warn("GetActorOfClass: Invalid class");
+        warn("GetActorOfClass: Invalid class");
         return nullptr;
     }
-    for (AActor* Object : GObjectsOf<AActor>())
+    for (SDK::AActor* Object : GObjectsOf<SDK::AActor>())
     {
         if ((Object->Class->IsSubclassOf(Class) || Object->Class->IsA(Class)) && !Object->IsDefaultObject())
             return static_cast<AActorType*>(Object);
     }
-    spdlog::warn("GetActorOfClass: No actor of class {} found", Class->StaticName().ToString());
+    warn("GetActorOfClass: No actor of class {} found", Class->StaticName().ToString());
     return nullptr;
 }
 
-template<typename TComponentClass = UActorComponent>
+template<typename TComponentClass = SDK::UActorComponent>
     requires IsUComponent<TComponentClass>
-TComponentClass* AttachComponent(AActor* Actor, TSubclassOf<TComponentClass> ComponentClass)
+TComponentClass* AttachComponent(SDK::AActor* Actor, SDK::TSubclassOf<TComponentClass> ComponentClass)
 {
     if (!IsValid(Actor) || !IsValidClass(ComponentClass)) return nullptr;
-    if (!ComponentClass->IsSubclassOf(UActorComponent::StaticClass())) return nullptr;
+    if (!ComponentClass->IsSubclassOf(SDK::UActorComponent::StaticClass())) return nullptr;
+    // NOTE: FTransform() refers to our wrapper ::FTransform (matches SDK::FTransform layout).
     return Actor->AddComponentByClass(ComponentClass, false, FTransform(), false);
 }
 
 template<typename T>
     requires IsAItem<T>
-T* GetItem(APlayerCharacter* Target, EItemCategory Category)
+T* GetItem(SDK::APlayerCharacter* Target, SDK::EItemCategory Category)
 {
-    if (Category == EItemCategory::EItemCategory_MAX) return nullptr;
-    if (!IsValidOf<APlayerCharacter>(Target)) return nullptr;
+    if (Category == SDK::EItemCategory::EItemCategory_MAX) return nullptr;
+    if (!IsValidOf<SDK::APlayerCharacter>(Target)) return nullptr;
     if (!Target->InventoryComponent) return nullptr;
-    AItem* Item = Target->InventoryComponent->GetItem(Category);
-    if (!IsValidOf<AItem>(Item)) return nullptr;
+    SDK::AItem* Item = Target->InventoryComponent->GetItem(Category);
+    if (!IsValidOf<SDK::AItem>(Item)) return nullptr;
     return ObjectCast::Cast<T>(Item);
 }
 
-template<typename T> T* GetPrimaryWeapon  (APlayerCharacter* P) { return GetItem<T>(P, EItemCategory::PrimaryWeapon); }
-template<typename T> T* GetSecondaryWeapon(APlayerCharacter* P) { return GetItem<T>(P, EItemCategory::SecondaryWeapon); }
-template<typename T> T* GetTraversalTool  (APlayerCharacter* P) { return GetItem<T>(P, EItemCategory::TraversalTool); }
-template<typename T> T* GetClassTool      (APlayerCharacter* P) { return GetItem<T>(P, EItemCategory::ClassTool); }
-template<typename T> T* GetGrenade        (APlayerCharacter* P) { return GetItem<T>(P, EItemCategory::Grenade); }
-template<typename T> T* GetFlare          (APlayerCharacter* P) { return GetItem<T>(P, EItemCategory::Flare); }
-template<typename T> T* GetMiningTool     (APlayerCharacter* P) { return GetItem<T>(P, EItemCategory::MiningTool); }
-template<typename T> T* GetArmor          (APlayerCharacter* P) { return GetItem<T>(P, EItemCategory::Armor); }
+template<typename T> T* GetPrimaryWeapon  (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::PrimaryWeapon); }
+template<typename T> T* GetSecondaryWeapon(SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::SecondaryWeapon); }
+template<typename T> T* GetTraversalTool  (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::TraversalTool); }
+template<typename T> T* GetClassTool      (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::ClassTool); }
+template<typename T> T* GetGrenade        (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::Grenade); }
+template<typename T> T* GetFlare          (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::Flare); }
+template<typename T> T* GetMiningTool     (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::MiningTool); }
+template<typename T> T* GetArmor          (SDK::APlayerCharacter* P) { return GetItem<T>(P, SDK::EItemCategory::Armor); }
 
-template<typename T = AActor>
+template<typename T = SDK::AActor>
     requires IsAActor<T>
-bool SpawnActor(TSubclassOf<T> ActorClass, const FTransform& SpawnTransform, T*& OutActor)
+bool SpawnActor(SDK::TSubclassOf<T> ActorClass, const SDK::FTransform& SpawnTransform, T*& OutActor)
 {
     OutActor = nullptr;
-    if (!ActorClass || !IsValidClass(ActorClass) || !MathLib::ClassIsChildOf(ActorClass, AActor::StaticClass()))
+    if (!ActorClass || !IsValidClass(ActorClass) || !MathLib::ClassIsChildOf(ActorClass, SDK::AActor::StaticClass()))
         return false;
-    AActor* TempActor = UGameplayStatics::BeginDeferredActorSpawnFromClass(
+    // NOTE: SpawnTransform is our wrapper ::FTransform; implicit-converts to SDK::FTransform.
+    SDK::AActor* TempActor = SDK::UGameplayStatics::BeginDeferredActorSpawnFromClass(
         GetWorld(), ActorClass, SpawnTransform,
-        ESpawnActorCollisionHandlingMethod::AlwaysSpawn, nullptr);
+        SDK::ESpawnActorCollisionHandlingMethod::AlwaysSpawn, nullptr);
     if (!TempActor) return false;
-    OutActor = ObjectCast::Cast<T>(UGameplayStatics::FinishSpawningActor(TempActor, SpawnTransform));
+    OutActor = ObjectCast::Cast<T>(SDK::UGameplayStatics::FinishSpawningActor(TempActor, SpawnTransform));
     return OutActor != nullptr;
 }
 
 template<typename T >
     requires IsUComponent<T>
-T* GetComponent(AActor* Actor) {
+T* GetComponent(SDK::AActor* Actor) {
+    if (!Actor) return nullptr;
     return ObjectCast::Cast<T>(Actor->GetComponentByClass(T::StaticClass()));
 }
 
-template<typename T = AActor>
+template<typename T = SDK::AActor>
     requires IsAActor<T>
-TArray<AActor*> GetAllActorsOfClass()
+SDK::TArray<SDK::AActor*> GetAllActorsOfClass()
 {
-    TArray<AActor*> Out;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), T::StaticClass(), &Out);
+    SDK::TArray<SDK::AActor*> Out;
+    SDK::UGameplayStatics::GetAllActorsOfClass(GetWorld(), T::StaticClass(), &Out);
     return Out;
 }
 
@@ -243,17 +246,17 @@ TArray<AActor*> GetAllActorsOfClass()
 // Player helpers
 // =========================================================================
 
-AFSDPlayerController* GetLocalController();
-APlayerCharacter* GetLocalPlayerCharacterBlocking(uint64_t MaxWaitMs);
-APlayerCharacter* GetLocalPlayer();
-AFSDPlayerState*  GetLocalPlayerState();
+SDK::AFSDPlayerController* GetLocalController();
+SDK::APlayerCharacter*     GetLocalPlayerCharacterBlocking(uint64_t MaxWaitMs);
+SDK::APlayerCharacter*     GetLocalPlayer();
+SDK::AFSDPlayerState*      GetLocalPlayerState();
 
 // =========================================================================
 // Misc non-template helpers
 // =========================================================================
 
-std::vector<AFSDPawn*> GetAliveNonFriendlies();
-std::string            ObjToStr    (const UObject* Obj);
+std::vector<SDK::AFSDPawn*> GetAliveNonFriendlies();
+std::string                ObjToStr    (const SDK::UObject* Obj);
 std::string            parse_quoted(std::string_view input);
 void*                  FindPattern (const wchar_t* moduleName, std::string_view pattern);
 

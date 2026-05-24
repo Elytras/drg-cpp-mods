@@ -477,13 +477,13 @@ namespace KeyBindings
         s_hHook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, NULL, 0);
         if (!s_hHook)
         {
-            spdlog::error("[KeyBindings] SetWindowsHookEx (keyboard) failed (err {})", GetLastError());
+            error("[KeyBindings] SetWindowsHookEx (keyboard) failed (err {})", GetLastError());
             return 1;
         }
 
         s_hMouseHook = SetWindowsHookExW(WH_MOUSE_LL, LowLevelMouseProc, NULL, 0);
         if (!s_hMouseHook)
-            spdlog::warn("[KeyBindings] SetWindowsHookEx (mouse) failed (err {}) — mouse bindings disabled", GetLastError());
+            warn("[KeyBindings] SetWindowsHookEx (mouse) failed (err {}) — mouse bindings disabled", GetLastError());
 
         s_tickActive.store(true, std::memory_order_relaxed);
         s_heldTickThread = CreateThread(NULL, 0, HeldTickThreadProc, NULL, 0, NULL);
@@ -535,7 +535,7 @@ namespace KeyBindings
                 && sameCoKeys(b.opts.coKeys, opts.coKeys) && triggersOverlap)
             {
                 BindingEntry tmp{ 0, key, mods, opts, {} };
-                spdlog::error("[KeyBindings] Conflict: {} [{}] {} already registered as handle {}. Second binding rejected.",
+                error("[KeyBindings] Conflict: {} [{}] {} already registered as handle {}. Second binding rejected.",
                     BindingLabel(tmp), FocusName(opts.focus), TriggerName(opts.trigger), b.handle);
                 return 0;
             }
@@ -545,7 +545,7 @@ namespace KeyBindings
         s_bindings.push_back({ h, key, mods, opts, std::move(callback) });
         {
             const auto& added = s_bindings.back();
-            spdlog::trace("[KeyBindings] Registered {} [{}] {} handle={}",
+            trace("[KeyBindings] Registered {} [{}] {} handle={}",
                 BindingLabel(added), FocusName(opts.focus), TriggerName(opts.trigger), h);
         }
         return h;
@@ -568,7 +568,7 @@ namespace KeyBindings
             [handle](const BindingEntry& b) { return b.handle == handle; });
         if (it != s_bindings.end())
         {
-            spdlog::trace("[KeyBindings] Unregistered handle {}", handle);
+            trace("[KeyBindings] Unregistered handle {}", handle);
             s_bindings.erase(it);
         }
     }
@@ -578,7 +578,7 @@ namespace KeyBindings
         if (s_hookThread) return; // idempotent
         s_hookThread = CreateThread(NULL, 0, HookThreadProc, NULL, 0, &s_hookThreadId);
         if (!s_hookThread)
-            spdlog::error("[KeyBindings] CreateThread failed (err {})", GetLastError());
+            error("[KeyBindings] CreateThread failed (err {})", GetLastError());
     }
 
     void Shutdown()
@@ -594,7 +594,7 @@ namespace KeyBindings
     void SetCLIWindow(uintptr_t hwnd)
     {
         s_cliHwnd.store(hwnd, std::memory_order_relaxed);
-        spdlog::trace("[KeyBindings] CLI window set to 0x{:X}", hwnd);
+        trace("[KeyBindings] CLI window set to 0x{:X}", hwnd);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -641,7 +641,7 @@ namespace KeyBindings
             for (const auto& e : kKeyTable)
             {
                 if (KeyToVk(e.k) == e.vk) { ++ok; continue; }
-                spdlog::warn("[KeyBindings] probe MISMATCH: Key '{}' enum=0x{:02X} table_vk=0x{:02X}",
+                warn("[KeyBindings] probe MISMATCH: Key '{}' enum=0x{:02X} table_vk=0x{:02X}",
                     e.name, KeyToVk(e.k), e.vk);
                 ++fail;
             }

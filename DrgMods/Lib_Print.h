@@ -9,8 +9,8 @@
 // Class chain helpers
 // =========================================================================
 
-std::vector<UStruct*> BuildClassChain(UClass* Class, UClass* OuterBase = nullptr);
-void                  PrintClassHierarchy(const UClass* Class);
+std::vector<SDK::UStruct*> BuildClassChain(SDK::UClass* Class, SDK::UClass* OuterBase = nullptr);
+void                       PrintClassHierarchy(const SDK::UClass* Class);
 
 // =========================================================================
 // Detail namespace
@@ -20,32 +20,32 @@ namespace Detail
 {
     std::string Prefix     (const std::vector<bool>& ancestry, bool isLast);
     std::string ChildPrefix(const std::vector<bool>& ancestry, bool open);
-    std::string ClassTag   (const UClass* cls);
+    std::string ClassTag   (const SDK::UClass* cls);
 } // namespace Detail
 
 // =========================================================================
 // PrintFieldValue / GetFieldValueAsString
 // =========================================================================
 
-void        PrintFieldValue      (uintptr_t Base, FField* Field, const std::vector<bool>& ancestry, bool isLast, const std::string& labelOverride = "");
-void        PrintFieldValue      (UObject*  Base, FField* Field, const std::vector<bool>& ancestry, bool isLast, const std::string& labelOverride = "");
-std::string GetFieldValueAsString(uintptr_t Base, FField* Field);
+void        PrintFieldValue      (uintptr_t Base, SDK::FField* Field, const std::vector<bool>& ancestry, bool isLast, const std::string& labelOverride = "");
+void        PrintFieldValue      (SDK::UObject* Base, SDK::FField* Field, const std::vector<bool>& ancestry, bool isLast, const std::string& labelOverride = "");
+std::string GetFieldValueAsString(uintptr_t Base, SDK::FField* Field);
 
 // =========================================================================
 // DumpItemProperties
 // =========================================================================
 
 template <bool bSort = false>
-void DumpItemProperties(UObject* Item, UClass* OuterBase = nullptr);
+void DumpItemProperties(SDK::UObject* Item, SDK::UClass* OuterBase = nullptr);
 
-extern template void DumpItemProperties<false>(UObject*, UClass*);
-extern template void DumpItemProperties<true> (UObject*, UClass*);
+extern template void DumpItemProperties<false>(SDK::UObject*, SDK::UClass*);
+extern template void DumpItemProperties<true> (SDK::UObject*, SDK::UClass*);
 
 // =========================================================================
 // DumpItemPropertiesSorted
 // =========================================================================
 
-void DumpItemPropertiesSorted(UObject* Item, UClass* OuterBase = nullptr);
+void DumpItemPropertiesSorted(SDK::UObject* Item, SDK::UClass* OuterBase = nullptr);
 
 // =========================================================================
 // Flag diagnostics
