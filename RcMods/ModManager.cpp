@@ -2,8 +2,6 @@
 #include "Commands.h"
 #include "Library.h"
 
-// File-local SDK pollution: this TU does not use math wrappers (FVector etc.),
-// so unqualified SDK type lookup here is unambiguous.
 using namespace SDK;
 
 static inline const constexpr bool UseThreads = false;

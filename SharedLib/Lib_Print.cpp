@@ -228,7 +228,14 @@ void PrintFieldValue(UObject* Base, FField* Field,
 template <bool bSort>
 void DumpItemProperties(UObject* Item, UClass* OuterBase)
 {
-    if (!Item || !IsValid(Item)) return;
+    // Use IsValidRaw (flag check on EObjectFlags) rather than Kismet::IsValid:
+    // the latter goes through ProcessEvent and rejects on EInternalObjectFlags
+    // (Garbage / Unreachable) that the engine sometimes sets on actors which
+    // are still being controlled by the player. For a property dump the only
+    // thing that actually matters is that the memory is safe to dereference.
+    if (!Item)           { warn("[dump] null target"); return; }
+    if (!IsValidRaw(Item)){ warn("[dump] '{}' is flagged BeginDestroyed/MirroredGarbage — skipping", Item->GetName()); return; }
+    if (!Item->Class)    { warn("[dump] '{}' has null Class — skipping", Item->GetName()); return; }
 
     const auto chain = BuildClassChain(Item->Class, OuterBase);
     info("╔══ {} ({})", Item->GetName(), Item->Class->GetName());

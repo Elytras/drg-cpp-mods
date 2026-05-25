@@ -25,11 +25,19 @@ class UnrealAllocator
 
     static GCreateMallocFn GetCreateMalloc()
     {
-        // GCreateMalloc unique prologue: sub rsp, 0xa8 ; mov rax, gs:[0x58]
+        // GCreateMalloc unique prologue.
+        //   UE 4.27 (DRG): sub rsp, 0xA8 ; mov rax, gs:[0x58]
+        //   UE 5.6  (RC) : sub rsp, 0xB8 ; mov ecx, [rel ?] ; mov rax, gs:[0x58]
+        // (UE5 added a TLS-init dword check before the gs read.)
         static GCreateMallocFn fn = []() -> GCreateMallocFn
         {
+#if defined(RogueCore) && RogueCore
             uint8_t* match = FindPattern(nullptr,
-                "48 81 EC A8 00 00 00 65 48 8B 04 25 58 00 00 00");
+                "48 81 EC ?? ?? ?? ?? 8B 0D ?? ?? ?? ?? 65 48 8B 04 25 58 00 00 00");
+#else
+            uint8_t* match = FindPattern(nullptr,
+                "48 81 EC ?? ?? ?? ?? 65 48 8B 04 25 58 00 00 00");
+#endif
             return match ? reinterpret_cast<GCreateMallocFn>(match) : nullptr;
         }();
         return fn;
@@ -124,30 +132,73 @@ public:
 
     UnrealAllocator(const UnrealAllocator&) = delete;
     UnrealAllocator& operator=(const UnrealAllocator&) = delete;
-    virtual void Pad00_Destructor() = 0;
-    virtual bool Exec(void* World, const wchar_t* Cmd, void* Ar) = 0;
 
-    virtual void* Malloc(uint64 Count, uint32 Alignment = 1) = 0;
-    virtual void* TryMalloc(uint64 Count, uint32 Alignment = 1) = 0;
-    virtual void* Realloc(void* Original, uint64 Count, uint32 Alignment = 1) = 0;
-    virtual void* TryRealloc(void* Original, uint64 Count, uint32 Alignment = 1) = 0;
-    virtual void  Free(void* Original) = 0;
+    // FMalloc vtable layout. Diverges between UE 4.27 and UE 5.6 because
+    // UE5 expanded FExec (added Exec_Dev / Exec_Runtime), pushing all of
+    // FMalloc's own slots down. Confirmed for UE5 via FMemory::Malloc:
+    //   jmp qword [rax+0x28]      → Malloc at slot 5
+    //   call qword [rax+0xB8]     → ValidateHeap at slot 23
+    // Slots that aren't directly confirmed (pads, GetDescriptiveName etc.)
+    // are placed by best guess from UE5 public source; nothing currently
+    // calls them so a wrong slot would still compile cleanly.
+#if defined(RogueCore) && RogueCore
+    // ── UE 5.6 ────────────────────────────────────────────────────────────
+    virtual void           Pad00_Destructor()                                         = 0;  // slot 0
+    virtual bool           Exec               (void*, const wchar_t*, void*)          = 0;  // slot 1
+    virtual bool           _Pad10_ExecDev     ()                                      = 0;  // slot 2 — UE5: FExec::Exec_Dev
+    virtual bool           _Pad18_ExecRuntime ()                                      = 0;  // slot 3 — UE5: FExec::Exec_Runtime
+    virtual void           _Pad20             ()                                      = 0;  // slot 4 — unknown UE5 virtual
 
-    virtual uint64 QuantizeSize(uint64 Count, uint32 Alignment = 1) = 0;
-    virtual bool GetAllocationSize(void* Original, uint64& SizeOut) = 0;
+    virtual void*          Malloc             (uint64 Count, uint32 Alignment = 1)    = 0;  // slot 5  [+0x28] ✓
+    virtual void*          TryMalloc          (uint64 Count, uint32 Alignment = 1)    = 0;  // slot 6
+    virtual void*          Realloc            (void* Original, uint64 Count, uint32 Alignment = 1) = 0; // slot 7
+    virtual void*          TryRealloc         (void* Original, uint64 Count, uint32 Alignment = 1) = 0; // slot 8
+    virtual void           Free               (void* Original)                        = 0;  // slot 9
 
-    virtual void Trim(bool bTrimThreadCaches) = 0;
-    virtual void SetupTLSCachesOnCurrentThread() = 0;
-    virtual void ClearAndDisableTLSCachesOnCurrentThread() = 0;
-    virtual void InitializeStatsMetadata() = 0;
+    virtual uint64         QuantizeSize       (uint64 Count, uint32 Alignment = 1)    = 0;  // slot 10
+    virtual bool           GetAllocationSize  (void* Original, uint64& SizeOut)       = 0;  // slot 11
 
-    virtual void UpdateStats() = 0;
-    virtual void GetAllocatorStats(void* out_Stats) = 0;
-    virtual void DumpAllocatorStats(void* Ar) = 0;
+    virtual void           Trim                                  (bool bTrimThreadCaches) = 0; // slot 12
+    virtual void           SetupTLSCachesOnCurrentThread         ()                       = 0; // slot 13
+    virtual void           _Pad70_MarkTLSUsed                    ()                       = 0; // slot 14 — UE5 new
+    virtual void           _Pad78_MarkTLSUnused                  ()                       = 0; // slot 15 — UE5 new
+    virtual void           ClearAndDisableTLSCachesOnCurrentThread()                      = 0; // slot 16
+    virtual void           InitializeStatsMetadata               ()                       = 0; // slot 17
 
-    virtual bool IsInternallyThreadSafe() = 0;
-    virtual bool ValidateHeap() = 0;
-    virtual const wchar_t* GetDescriptiveName() = 0;
+    virtual void           UpdateStats                           ()                       = 0; // slot 18
+    virtual void           GetAllocatorStats                     (void* out_Stats)        = 0; // slot 19
+    virtual const wchar_t* GetDescriptiveName                    ()                       = 0; // slot 20
+    virtual void           DumpAllocatorStats                    (void* Ar)               = 0; // slot 21
+
+    virtual bool           IsInternallyThreadSafe                ()                       = 0; // slot 22
+    virtual bool           ValidateHeap                          ()                       = 0; // slot 23 [+0xB8] ✓
+#else
+    // ── UE 4.27 ───────────────────────────────────────────────────────────
+    virtual void           Pad00_Destructor()                                         = 0;  // slot 0
+    virtual bool           Exec               (void*, const wchar_t*, void*)          = 0;  // slot 1
+
+    virtual void*          Malloc             (uint64 Count, uint32 Alignment = 1)    = 0;  // slot 2  [+0x10]
+    virtual void*          TryMalloc          (uint64 Count, uint32 Alignment = 1)    = 0;  // slot 3
+    virtual void*          Realloc            (void* Original, uint64 Count, uint32 Alignment = 1) = 0; // slot 4
+    virtual void*          TryRealloc         (void* Original, uint64 Count, uint32 Alignment = 1) = 0; // slot 5
+    virtual void           Free               (void* Original)                        = 0;  // slot 6
+
+    virtual uint64         QuantizeSize       (uint64 Count, uint32 Alignment = 1)    = 0;  // slot 7
+    virtual bool           GetAllocationSize  (void* Original, uint64& SizeOut)       = 0;  // slot 8
+
+    virtual void           Trim                                  (bool bTrimThreadCaches) = 0; // slot 9
+    virtual void           SetupTLSCachesOnCurrentThread         ()                       = 0; // slot 10
+    virtual void           ClearAndDisableTLSCachesOnCurrentThread()                      = 0; // slot 11
+    virtual void           InitializeStatsMetadata               ()                       = 0; // slot 12
+
+    virtual void           UpdateStats                           ()                       = 0; // slot 13
+    virtual void           GetAllocatorStats                     (void* out_Stats)        = 0; // slot 14
+    virtual void           DumpAllocatorStats                    (void* Ar)               = 0; // slot 15
+
+    virtual bool           IsInternallyThreadSafe                ()                       = 0; // slot 16
+    virtual bool           ValidateHeap                          ()                       = 0; // slot 17
+    virtual const wchar_t* GetDescriptiveName                    ()                       = 0; // slot 18
+#endif
 };
 
 template<typename T>

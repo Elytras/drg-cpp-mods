@@ -88,11 +88,9 @@
   <ItemGroup>
     <ClInclude Include="Lib_CommandHandler.h" />
     <ClInclude Include="Lib_EasyHook.h" />
-    <ClInclude Include="Lib_FField.h" />
     <ClInclude Include="Lib_GameHooks.h" />
     <ClInclude Include="Lib_Json.h" />
     <ClInclude Include="Lib_KeyBindings.h" />
-    <ClInclude Include="Lib_Math.h" />
     <ClInclude Include="Lib_ObjectCast.h" />
     <ClInclude Include="Lib_ObjectFactory.h" />
     <ClInclude Include="Lib_Print.h" />

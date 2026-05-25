@@ -392,7 +392,7 @@ namespace Twerking
         long double calculatedHz = 0.0L;
 
         if constexpr (bUseVelocity) {
-            const long double speed = (long double)player->GetVelocity().Size();
+            const long double speed = (long double)Math::Size(player->GetVelocity());
 
             s.smoothedSpeed = (s.smoothedSpeed * (1.0L - alpha)) + (speed * alpha);
             calculatedHz = s.smoothedSpeed / spacingUnits * 0.1L;
@@ -401,7 +401,7 @@ namespace Twerking
         }
         else {
             // --- Displacement Branch ---
-            const long double distance = (long double)FVector::Dist(currentPosition, lastPosition);
+            const long double distance = (long double)Math::Dist(currentPosition,lastPosition);
 
             s.smoothedDistance = (s.smoothedDistance * (1.0L - alpha)) + (distance * alpha);
             calculatedHz = s.smoothedDistance / (spacingUnits * 0.1L);
@@ -715,71 +715,10 @@ namespace Weapons
 // =========================================================================
 namespace Scan
 {
-    std::string BuildExplicitCallName(SDK::UObject* Owner, SDK::UFunction* Func)
-    {
-        const std::string ownerClass = Owner && Owner->Class ? Owner->Class->GetName() : "?";
-        const std::string ownerName = Owner ? Owner->GetName() : "?";
-        const std::string funcName = Func ? Func->GetName() : "?";
-        return ownerClass + "::" + ownerName + "::" + funcName;
-    }
-
-    std::string BuildFuncSig(SDK::UFunction* Func)
-    {
-        std::string name = Func->GetName();
-        struct ParamEntry { std::string text; };
-        std::vector<ParamEntry> params;
-        params.reserve(8);
-        size_t totalParamChars = 0;
-        for (auto* field : SDK::FFieldRange(Func->ChildProperties))
-        {
-            if (!SDK::FieldCast::IsA<SDK::FProperty>(field)) continue;
-            auto* Prop = static_cast<SDK::FProperty*>(field);
-            auto  pflags = static_cast<SDK::EPropertyFlags>(Prop->PropertyFlags);
-            if (pflags & SDK::EPropertyFlags::ReturnParm) continue;
-            if (!(pflags & SDK::EPropertyFlags::Parm))    continue;
-            auto& e = params.emplace_back();
-            e.text = Prop->Name.ToString();
-            e.text += ": ";
-            e.text += GetTypeName(field);
-            totalParamChars += e.text.size();
-        }
-        if (params.empty()) { std::string r = name; r += "()"; return r; }
-
-        size_t singleSize = name.size() + 1 + totalParamChars + (params.size() - 1) * 2 + 1;
-        constexpr size_t LineLimit = 80;
-        if (singleSize <= LineLimit)
-        {
-            std::string r = name; r += '(';
-            for (size_t i = 0; i < params.size(); ++i) { if (i) r += ", "; r += params[i].text; }
-            r += ')'; return r;
-        }
-        constexpr std::string_view prefix = "║       ", close = "║   )";
-        std::string r = name; r += "(\n";
-        for (size_t i = 0; i < params.size(); ++i)
-        {
-            r += prefix; r += params[i].text;
-            if (i < params.size() - 1) r += ',';
-            r += '\n';
-        }
-        r += close;
-        return r;
-    }
-
-    void ScanFunctions(SDK::UObject* Obj, std::vector<std::string>& out)
-    {
-        for (SDK::UClass* cls : UClassHierarchyRange(Obj->Class))
-            for (auto* field : SDK::UFieldRange(cls->Children))
-            {
-                if (!field->IsA(SDK::UFunction::StaticClass())) continue;
-                auto* Func = static_cast<SDK::UFunction*>(field);
-                auto  flags = static_cast<SDK::EFunctionFlags>(Func->FunctionFlags);
-                if (!(flags & SDK::EFunctionFlags::Net))       continue;
-                if (!(flags & SDK::EFunctionFlags::NetServer)) continue;
-                out.push_back(BuildFuncSig(Func));
-            }
-        std::sort(out.begin(), out.end());
-        out.erase(std::unique(out.begin(), out.end()), out.end());
-    }
+    // BuildExplicitCallName / BuildFuncSig / ScanFunctions live in
+    // SharedLib/Lib_Scan.cpp — same namespace, same signatures, no shim needed.
+    // Only DRG-specific helpers (DoScan with player-ownership filter +
+    // State::ScannedFunctions cache) stay in this TU.
 
     void DoScan()
     {

@@ -84,9 +84,6 @@
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_KeyBindings.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Math.cpp">
-      <Filter>External</Filter>
-    </ClCompile>
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectCast.cpp">
       <Filter>External</Filter>
     </ClCompile>
@@ -103,6 +100,9 @@
       <Filter>External</Filter>
     </ClCompile>
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_VarSystem.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Scan.cpp">
       <Filter>External</Filter>
     </ClCompile>
   </ItemGroup>

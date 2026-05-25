@@ -338,12 +338,13 @@ int main(int argc, char** argv)
     g_pSplit = &split;
 
     auto Print = [&](const std::string& s) { split.PrintCmd(s); };
-    {
+    auto PrintBanner = [&]() {
         std::string banner = "--- ";
         banner += (g_Profile->id == GameId::RC) ? "RC" : "DRG";
         banner += " Mod CLI ---  Tab: complete  Right: accept hint  Up/Down: history";
         Print(banner);
-    }
+    };
+    PrintBanner();
     // ── Shared memory ──────────────────────────────────────────────────────
     if (!InitSharedMemory())
     {
@@ -381,13 +382,16 @@ int main(int argc, char** argv)
     );
 
     input.SetDescriptionCallback([](const std::string& candidate) -> std::string {
-        if (IEquals(candidate, "load"))   return "Load the DLL into the game process";
-        if (IEquals(candidate, "unload")) return "Unload the DLL from the game process";
-        if (IEquals(candidate, "reload")) return "Hot-reload the DLL";
-        if (IEquals(candidate, "d7l"))    return "Load Dumper7 into the game process";
-        if (IEquals(candidate, "d7u"))    return "Unload Dumper7 (in-game F6 only)";
+        if (IEquals(candidate, "load"))     return "Load the DLL into the game process";
+        if (IEquals(candidate, "unload"))   return "Unload the DLL from the game process";
+        if (IEquals(candidate, "reload"))   return "Hot-reload the DLL";
+        if (IEquals(candidate, "d7l"))      return "Load Dumper7 into the game process";
+        if (IEquals(candidate, "d7u"))      return "Unload Dumper7 (in-game F6 only)";
         if (IEquals(candidate, "exit"))     return "Exit the CLI";
         if (IEquals(candidate, "killgame")) return "Kill the game process immediately";
+        if (IEquals(candidate, "mode"))     return "Switch target game: mode drg | mode rc";
+        if (IEquals(candidate, "mode drg")) return "Switch to DRG (FSD-Win64-Shipping.exe)";
+        if (IEquals(candidate, "mode rc"))  return "Switch to RogueCore (RogueCore-Win64-Shipping.exe)";
 
         for (const auto& kc : g_KnownCommands)
             if (IEquals(kc.name, candidate)) return kc.desc;
@@ -404,6 +408,57 @@ int main(int argc, char** argv)
         return "";
     });
 
+    // ── Profile switcher ──────────────────────────────────────────────────
+    // Shuts down all background threads, tears down shared memory, swaps the
+    // profile, then brings everything back up — without relaunching the CLI.
+    auto SwitchToProfile = [&](const Profile* newProfile)
+    {
+        if (g_Profile == newProfile)
+        {
+            Print(std::string("Already targeting ") + newProfile->targetProcessNarrow + ".");
+            return;
+        }
+
+        const char* newName = (newProfile->id == GameId::RC) ? "RC" : "DRG";
+        Print(std::string("Switching to ") + newName + "...");
+
+        if (DllActive()) { UnloadDLL(false); Sleep(300); }
+
+        // Wake and join all background threads before touching the handles.
+        g_Running.store(false);
+        if (g_hLogEvent)      SetEvent(g_hLogEvent);
+        if (g_hDllReadyEvent) SetEvent(g_hDllReadyEvent);
+        logThread.join();
+        hotThread.join();
+        watchThread.join();
+        readyThread.join();
+
+        CleanupSharedMemory();
+
+        g_Profile = newProfile;
+        g_KnownFunctions.clear();
+        g_KnownCommands.clear();
+        g_SourceDllPath.clear();
+        g_CopyDllPath.clear();
+        g_Dumper7Loaded.store(false);
+        kWatchPollMs = 1000;
+
+        g_Running.store(true);
+        if (!InitSharedMemory())
+        {
+            Print("Failed to initialize shared memory for new profile. CLI is now inert.");
+            return;
+        }
+
+        logThread   = std::thread(DllLogThread, g_pLogBuffer, g_hLogEvent);
+        hotThread   = std::thread(HotReloadThread);
+        watchThread = std::thread(ProcessWatcherThread);
+        readyThread = std::thread(DllReadyThread);
+
+        PrintBanner();
+        Log(std::string("Switched to ") + newName + ". Watching for " + g_Profile->targetProcessNarrow + "...");
+    };
+
     // ── REPL ───────────────────────────────────────────────────────────────
     while (true)
     {
@@ -419,6 +474,31 @@ int main(int argc, char** argv)
         {
             UnloadDLL(false);
             break;
+        }
+
+        // Built-in: mode [drg|rc]
+        if (IEquals(line, "mode") || IStartsWith(line, "mode "))
+        {
+            std::string arg = (line.size() > 5) ? line.substr(5) : "";
+            while (!arg.empty() && arg.front() == ' ') arg.erase(arg.begin());
+
+            if (arg.empty())
+            {
+                Print(std::string("Current profile: ") +
+                    ((g_Profile->id == GameId::RC) ? "RC" : "DRG") +
+                    " (" + g_Profile->targetProcessNarrow + ")."
+                    "  Use 'mode drg' or 'mode rc' to switch.");
+            }
+            else
+            {
+                std::wstring warg = StringLib::ToWide(arg);
+                const Profile* newProfile = ResolveProfile(warg.c_str());
+                if (!newProfile)
+                    Print("Unknown profile '" + arg + "'. Use 'mode drg' or 'mode rc'.");
+                else
+                    SwitchToProfile(newProfile);
+            }
+            continue;
         }
 
         // Serialize the entire send+wait cycle vs the auto-listcmds thread so

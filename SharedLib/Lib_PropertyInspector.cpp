@@ -1,6 +1,7 @@
 #include "Lib_PropertyInspector.h"
 #include "Lib_Print.h"
 #include <algorithm>
+#include <cctype>
 #include <unordered_map>
 
 namespace PropertyInspector
@@ -39,15 +40,38 @@ int GetMatchScore(const std::string& haystack, const std::string& needle)
     return 0;
 }
 
+// UE strips the leading A/U/F/E/I/S/T prefix when registering reflection names,
+// so `APlayerCharacter` in C++ becomes `PlayerCharacter` in GObjects. Try the
+// stripped form as a fallback so users can write either spelling.
+static std::string StripUEPrefix(const std::string& s)
+{
+    if (s.size() < 2) return s;
+    const char p = s[0];
+    if ((p == 'A' || p == 'U' || p == 'F' || p == 'E' ||
+         p == 'I' || p == 'S' || p == 'T') &&
+        std::isupper(static_cast<unsigned char>(s[1])))
+        return s.substr(1);
+    return s;
+}
+
 UClass* FindClass(const std::string& name, bool fuzzy)
 {
+    const std::string stripped = StripUEPrefix(name);
+    const bool hasStripped = stripped != name;
+
     UClass* bestMatch = nullptr;
     int bestScore = 0;
     for (int i = 0; i < UObject::GObjects->Num(); ++i)
     {
         auto* obj = UObject::GObjects->GetByIndex(i);
         if (!obj || !obj->IsA(UClass::StaticClass())) continue;
-        int score = GetMatchScore(obj->GetName(), name);
+        const std::string objName = obj->GetName();
+        int score = GetMatchScore(objName, name);
+        if (hasStripped)
+        {
+            int sscore = GetMatchScore(objName, stripped);
+            if (sscore > score) score = sscore;
+        }
         if (!fuzzy && score < 3) continue;
         if (score > bestScore) {
             bestScore = score;
@@ -121,6 +145,7 @@ std::vector<UObject*> FindAllInstances(const std::string& name, bool fuzzy, UCla
         if (obj->IsA(UClass::StaticClass()))                          continue;
         if (obj->IsA(UFunction::StaticClass()))                       continue;
         if (obj->IsA(UPackage::StaticClass()))                        continue;
+        if (!IsValidRaw(obj))                                         continue;
         if (parentClass && !obj->IsA(parentClass))                    continue;
         if (name != "*" && !NameMatches(obj->GetName(), name, fuzzy)) continue;
         results.push_back(obj);
@@ -575,7 +600,13 @@ void DispatchCommand(const CommandContext& ctx)
     {
         parentClass = FindClass(parentClassName, false);
         if (!parentClass) { parentClass = FindClass(parentClassName, true); if (parentClass) info("[prop] Class '{}' fuzzy→'{}'", parentClassName, parentClass->GetName()); }
-        if (!parentClass) warn("[prop] Parent class '{}' not found", parentClassName);
+        if (!parentClass)
+        {
+            // Abort — silently dropping a missing class filter would dump every
+            // UObject, which is almost certainly not what the user asked for.
+            warn("[prop] Parent class '{}' not found — aborting.", parentClassName);
+            return;
+        }
     }
 
     bool isCDO = (kindStr == "cdo");

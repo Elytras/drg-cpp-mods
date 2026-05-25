@@ -199,12 +199,77 @@ SDK::TArray<SDK::AActor*> GetAllActorsOfClass()
     return Out;
 }
 
+template<typename T = SDK::AActor>
+    requires IsAActor<T>
+bool SpawnActor(SDK::TSubclassOf<T> ActorClass, const SDK::FTransform& SpawnTransform, T*& OutActor)
+{
+    OutActor = nullptr;
+    if (!ActorClass || !IsValidClass(ActorClass) || !MathLib::ClassIsChildOf(ActorClass, SDK::AActor::StaticClass()))
+        return false;
+    SDK::AActor* TempActor = SDK::UGameplayStatics::BeginDeferredActorSpawnFromClass(
+        GetWorld(), ActorClass, SpawnTransform,
+        SDK::ESpawnActorCollisionHandlingMethod::AlwaysSpawn, nullptr);
+    if (!TempActor) return false;
+    OutActor = ObjectCast::Cast<T>(SDK::UGameplayStatics::FinishSpawningActor(TempActor, SpawnTransform));
+    return OutActor != nullptr;
+}
+
 // =========================================================================
 // Player helpers
 // =========================================================================
 
 SDK::APlayerController* GetLocalController();
-SDK::APlayerCharacter*       GetLocalPlayer();
+SDK::APlayerCharacter*  GetLocalPlayer();
+
+// Poll GetLocalPlayer() until it returns non-null or `MaxWaitMs` elapses.
+// Returns the resolved player or nullptr on timeout.
+SDK::APlayerCharacter*  GetLocalPlayerCharacterBlocking(uint64_t MaxWaitMs);
+
+// =========================================================================
+// DRG-only helpers — declared here as `static_assert` stubs so RC code that
+// accidentally calls one gets a focused compile error explaining why, instead
+// of an "undeclared identifier" or cryptic SFINAE failure. Implement on the
+// RC side (with whatever the RC equivalent is) before using.
+// =========================================================================
+
+namespace _rc_stubs {
+    template<typename T = void> struct dependent_false : std::false_type {};
+}
+
+#define RC_DRG_ONLY(MSG)                                                       \
+    static_assert(::_rc_stubs::dependent_false<T>::value,                       \
+        "RogueCore: " MSG " — DRG-specific helper, not implemented for RC.")
+
+// `prop`-style item access (DRG inventory model: APlayerCharacter +
+// InventoryComponent + EItemCategory). RC has a different item system.
+template<typename T> T* GetItem(SDK::APlayerCharacter*, int /*category*/)
+{ RC_DRG_ONLY("GetItem<T>"); return nullptr; }
+
+template<typename T> T* GetPrimaryWeapon  (SDK::APlayerCharacter*) { RC_DRG_ONLY("GetPrimaryWeapon");   return nullptr; }
+template<typename T> T* GetSecondaryWeapon(SDK::APlayerCharacter*) { RC_DRG_ONLY("GetSecondaryWeapon"); return nullptr; }
+template<typename T> T* GetTraversalTool  (SDK::APlayerCharacter*) { RC_DRG_ONLY("GetTraversalTool");   return nullptr; }
+template<typename T> T* GetClassTool      (SDK::APlayerCharacter*) { RC_DRG_ONLY("GetClassTool");       return nullptr; }
+template<typename T> T* GetGrenade        (SDK::APlayerCharacter*) { RC_DRG_ONLY("GetGrenade");         return nullptr; }
+template<typename T> T* GetFlare          (SDK::APlayerCharacter*) { RC_DRG_ONLY("GetFlare");           return nullptr; }
+template<typename T> T* GetMiningTool     (SDK::APlayerCharacter*) { RC_DRG_ONLY("GetMiningTool");      return nullptr; }
+template<typename T> T* GetArmor          (SDK::APlayerCharacter*) { RC_DRG_ONLY("GetArmor");           return nullptr; }
+
+// Map-state queries — "space rig" is a DRG-only concept (the hub map between
+// missions). RC has no analogous notion.
+template<typename T = void> bool IsOnSpacerig() { RC_DRG_ONLY("IsOnSpacerig"); return false; }
+template<typename T = void> bool IsOnSpaceRig() { RC_DRG_ONLY("IsOnSpaceRig"); return false; }
+
+// Player-state subclass — DRG's AFSDPlayerState carries DRG-specific data
+// (perks, vanity, etc.). RC code wanting the player state should use the
+// engine's APlayerState directly via GetLocalController()->PlayerState.
+template<typename T = void> SDK::APlayerState* GetLocalPlayerState()
+{ RC_DRG_ONLY("GetLocalPlayerState"); return nullptr; }
+
+// Enemy enumeration — depends on AFSDPawn / DRG enemy faction system.
+template<typename T = void> std::vector<SDK::AActor*> GetAliveNonFriendlies()
+{ RC_DRG_ONLY("GetAliveNonFriendlies"); return {}; }
+
+#undef RC_DRG_ONLY
 
 // =========================================================================
 // Misc non-template helpers

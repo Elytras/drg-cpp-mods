@@ -578,9 +578,9 @@ namespace JsonHook {
             LastJson = parser.Parse();
 
             Info = { outer->Index, outer->Name };
-            if (LastString.GetInnerPtr() != nullptr )
+            if (LastString.GetDataPtr() != nullptr )
             {
-                UnrealAllocator::Get()->Free(LastString.GetInnerPtr());
+                UnrealAllocator::Get()->Free(const_cast<TCHAR*>(LastString.GetDataPtr()));
             }
             LastString = JsonImpl::MakeFString(pInput->CStr(), pInput->Num()-1);
 
@@ -611,10 +611,10 @@ namespace JsonHook {
         if (g_Active) return;
         if (!g_Fn) g_Fn = SDK::UJSON_C::StaticClass()->GetFunction("JSON_C", "FromString");
         if (!g_Fn) return;
-        if (g_Fn->ExecFunction != &FromStringExec) {
+        if (g_Fn->ExecFunction != reinterpret_cast<UFunction::FNativeFuncPtr>(&FromStringExec)) {
             g_OrigFlags = g_Fn->FunctionFlags;
             g_OrigExec = g_Fn->ExecFunction;
-            g_Fn->ExecFunction = &FromStringExec;
+            g_Fn->ExecFunction = reinterpret_cast<UFunction::FNativeFuncPtr>(&FromStringExec);
         }
         g_Fn->FunctionFlags |= (uint32_t)SDK::EFunctionFlags::Native;
         if (g_PEHandle == 0)
@@ -646,7 +646,7 @@ namespace JsonHook {
         const auto myExec = &FromStringExec;
         int32_t swept = 0;
         for (auto* fn : GObjectsOf<SDK::UFunction>()) {
-            if (fn->ExecFunction != myExec) continue;
+            if (fn->ExecFunction != reinterpret_cast<UFunction::FNativeFuncPtr>(myExec)) continue;
             if (savedExec) {
                 // Restore to original thunk + original flags.
                 fn->ExecFunction  = savedExec;

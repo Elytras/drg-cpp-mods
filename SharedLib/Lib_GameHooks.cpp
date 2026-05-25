@@ -173,43 +173,46 @@ void __fastcall ProcessEventHook::HookedProcessEvent(UObject* Object, UFunction*
     }
 
     auto state = std::atomic_load(&inst->stateOwner_);
-    if (state)
+    bool hasCallbacks = state && !state->list.empty();
+
+    if (hasCallbacks)
     {
         DBG_CHECK_PTR(state.get());
         state->Validate();
 
-        if (!state->list.empty())
+        size_t buf[kMaxDispatchBuf];
+        size_t cnt = 0;
+        auto push = [&](size_t i)
         {
-            size_t buf[kMaxDispatchBuf];
-            size_t cnt = 0;
-            auto push = [&](size_t i)
-            {
-                if (cnt < kMaxDispatchBuf) { DBG_CHECK_RANGE(i, 0, state->list.size()); buf[cnt++] = i; }
-                else { DBG_ASSERT(false, "Callback buffer overflow"); }
-            };
+            if (cnt < kMaxDispatchBuf) { DBG_CHECK_RANGE(i, 0, state->list.size()); buf[cnt++] = i; }
+            else { DBG_ASSERT(false, "Callback buffer overflow"); }
+        };
 
-            if (Function)
-            {
-                DBG_CHECK_PTR(Function);
-                if (auto it = state->cache.byFunctionPtr.find(Function);  it != state->cache.byFunctionPtr.end())
-                    for (size_t i : it->second) push(i);
-                if (auto it = state->cache.byFunctionName.find(Function->Name); it != state->cache.byFunctionName.end())
-                    for (size_t i : it->second) push(i);
-            }
-            for (size_t i : state->cache.wildcards) push(i);
-
-            bool callOriginal = RunBeforePass(state->list, buf, cnt, Object, Function, Parms);
-            if (callOriginal)
-            {
-                __assume(OriginalProcessEvent != nullptr);
-                try { OriginalProcessEvent(Object, Function, Parms); }
-                catch (const std::exception&) { DBG_ASSERT(false, "OriginalProcessEvent threw exception"); }
-            }
-            RunAfterPass(state->list, buf, cnt, Object, Function, Parms);
+        if (Function)
+        {
+            DBG_CHECK_PTR(Function);
+            if (auto it = state->cache.byFunctionPtr.find(Function);  it != state->cache.byFunctionPtr.end())
+                for (size_t i : it->second) push(i);
+            if (auto it = state->cache.byFunctionName.find(Function->Name); it != state->cache.byFunctionName.end())
+                for (size_t i : it->second) push(i);
         }
+        for (size_t i : state->cache.wildcards) push(i);
+
+        bool callOriginal = RunBeforePass(state->list, buf, cnt, Object, Function, Parms);
+        if (callOriginal)
+        {
+            __assume(OriginalProcessEvent != nullptr);
+            try { OriginalProcessEvent(Object, Function, Parms); }
+            catch (const std::exception&) { DBG_ASSERT(false, "OriginalProcessEvent threw exception"); }
+        }
+        RunAfterPass(state->list, buf, cnt, Object, Function, Parms);
     }
     else
     {
+        // No callbacks registered (or no state yet): pure passthrough.
+        // ANY OTHER PATH that doesn't call OriginalProcessEvent silently
+        // swallows every PE call — that's the bug that made RcMods freeze
+        // the game world while DrgMods worked (DRG always has callbacks).
         __assume(OriginalProcessEvent != nullptr);
         try { OriginalProcessEvent(Object, Function, Parms); }
         catch (const std::exception&) { DBG_ASSERT(false, "OriginalProcessEvent threw exception"); }

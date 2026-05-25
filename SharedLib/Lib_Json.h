@@ -22,8 +22,6 @@
  *  - Includes a GObjects sweep during Teardown to identify and patch "clone"
  *    UFunctions created by Blueprint class regeneration, preventing crashes
  *    after the DLL is unloaded.
- *
- * PSA: This was an ai generated messages with my own tweaks to it limited by my own understanding of the implementation, and edits based on my use knowledge of the function in game
  */
 
 namespace JsonHook {

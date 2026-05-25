@@ -5,6 +5,7 @@
 #include "SDK/UnrealContainers.hpp"
 #include "SDK/SDK/Basic.hpp"
 #include "Lib_Forward.h"
+#include "SDK/SDK/CoreUObject_structs.hpp"
 
 using ERenameFlags = uint32;
 namespace REN

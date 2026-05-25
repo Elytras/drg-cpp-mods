@@ -24,6 +24,7 @@
     <ProjectGuid>{29226e80-3235-487e-8bab-fe494f04b8c1}</ProjectGuid>
     <RootNamespace>DrgCli</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>Cli</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">

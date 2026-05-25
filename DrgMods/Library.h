@@ -64,6 +64,6 @@
 #include "Lib_VarSystem.h"          // VarSystem (commands deferred to Lib_CommandHandler.h)
 #include "Lib_CommandHandler.h"     // CommandContext, MutableContext, CommandHandler, VarSystem commands
 #include "Lib_PropertyInspector.h"  // PropertyInspector namespace
+#include "Lib_Scan.h"               // Scan:: helpers (BuildFuncSig, ScanAllClasses, …)
 #include "Lib_Json.h"               // JsonHook::Setup, JsonImpl::Parser, JSONType constants
 #include "Lib_KeyBindings.h"        // Key, Mod, Trigger, Focus, KeyBindings:: API
-#include "Lib_Math.h"               // FVector/FRotator/FLinearColor wrappers, Math:: utilities

@@ -103,6 +103,17 @@ APlayerCharacter* GetLocalPlayer()
     return ObjectCast::Cast<APlayerCharacter>(Controller->Pawn);
 }
 
+APlayerCharacter* GetLocalPlayerCharacterBlocking(uint64_t MaxWaitMs)
+{
+    const uint64_t deadline = GetTimeMs() + MaxWaitMs;
+    while (true)
+    {
+        if (auto* p = GetLocalPlayer()) return p;
+        if (GetTimeMs() >= deadline) return nullptr;
+        SleepNow(20);
+    }
+}
+
 // =========================================================================
 // Misc non-template helpers
 // =========================================================================

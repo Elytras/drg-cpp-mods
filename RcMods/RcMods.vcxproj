@@ -176,24 +176,25 @@
       for everything in SharedLib.
 
       Excluded for RC:
-        - Lib_ObjectFactory.cpp — UE4.27/DRG hardcoding (RVA 0x1F9C870,
-          "FSD-Win64-Shipping.exe" module, UE4.27 FFrame layout). Re-enable
-          after porting layouts + RVA + call-site signature to UE 5.6.
-        - Lib_Json.cpp — depends on Lib_ObjectFactory.h (above) and on the
-          DRG-specific JSON_* SDK headers (JSONType_structs.hpp,
-          JSON_classes.hpp, JSONValue_classes.hpp, JSON_parameters.hpp);
-          RogueCore exposes a different / no JSON binding. Port together
-          with Lib_ObjectFactory.
+        - Lib_Json.cpp — depends on DRG-specific JSON_* SDK headers
+          (JSONType_structs.hpp, JSON_classes.hpp, JSONValue_classes.hpp,
+          JSON_parameters.hpp); RogueCore exposes a different / no JSON
+          binding. Port when RC needs blueprint JSON access.
+
+      Lib_ObjectFactory.cpp IS compiled for RC but currently logs and
+      no-ops at runtime — fill in RcMods/GameOffsets.h with RC's
+      SCO_Internal RVA or call-site signature to enable NewObject<T>().
     -->
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_CommandHandler.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_EasyHook.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_GameHooks.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_KeyBindings.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Math.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectCast.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectFactory.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_Print.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyAccess.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyInspector.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Scan.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_VarSystem.cpp" />
     <ClCompile Include="SDK\SDK\Basic.cpp">
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpplatest</LanguageStandard>

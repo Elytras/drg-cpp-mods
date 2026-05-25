@@ -777,7 +777,14 @@ private:
         {
             // Dedicated AC pane mode.
             // Row 0 of the AC pane is the tooltip row; candidates start at row 1.
-            int maxCandVisible = std::max(1, (csbiC.srWindow.Bottom - csbiC.srWindow.Top + 1) / 2 - 1);
+            // Budget: keep the input row + CLI output pane (~3) + 2 dividers +
+            // ~3 minimum log rows visible, and hand the rest to candidates.
+            // The previous `consoleH/2 - 1` cap meant `call <Tab>` could only
+            // show ~14 rows even on a 40-row terminal — way too few once
+            // `scanfuncs` returns 600+ matches.
+            const int consoleH = csbiC.srWindow.Bottom - csbiC.srWindow.Top + 1;
+            constexpr int kReserve = /*CLI pane*/3 + /*dividers*/2 + /*min log*/3;
+            int maxCandVisible = std::max(1, consoleH - kReserve - /*tooltip*/1);
             int visibleRows    = std::min(numCandRows, maxCandVisible);
             int acH            = visibleRows + 1; // +1 for tooltip row
 

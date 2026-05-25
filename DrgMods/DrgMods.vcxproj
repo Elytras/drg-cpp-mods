@@ -183,12 +183,12 @@
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_GameHooks.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_Json.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_KeyBindings.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Math.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectCast.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectFactory.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_Print.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyAccess.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyInspector.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Scan.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_VarSystem.cpp" />
     <ClCompile Include="SDK\SDK\AssetRegistry_functions.cpp" />
     <ClCompile Include="SDK\SDK\Basic.cpp">

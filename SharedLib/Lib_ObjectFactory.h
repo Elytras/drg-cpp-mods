@@ -81,29 +81,11 @@ namespace ObjectFactory
 
     using FStaticConstructObjectFn = UObject * (*)(FStaticConstructObjectParameters*);
 
-    // RVA confirmed from FSD-Win64-Shipping.exe disassembly (NewObject<UEngine> call site @ 140859422).
-    static constexpr uintptr_t kStaticConstructObjectRVA = 0x1F9C870;
-
-    // Call-site signature: the E8 call to StaticConstructObject_Internal immediately before
-    // the NewObject<UEngine> epilogue. Stable because the epilogue layout (callee-save restore
-    // order and rsp offsets) is determined by the MSVC ABI and the function's frame size, not
-    // by game logic — changes only if the UEngine template instantiation's frame layout changes.
+    // RVA + call-site signature live in per-game GameOffsets.h:
+    //   DrgMods/GameOffsets.h — DRG (UE 4.27, FSD-Win64-Shipping.exe)
+    //   RcMods/GameOffsets.h  — RC  (UE 5.6,  RogueCore-Win64-Shipping.exe) — TBD
     //
-    // Source: NewObject<UEngine> @ 140859380, call @ 140859422, epilogue @ 140859427:
-    //   E8 ?? ?? ?? ??          call  StaticConstructObject_Internal
-    //   48 8B 5C 24 70          mov   rbx, [rsp+0x70]
-    //   48 8B 6C 24 78          mov   rbp, [rsp+0x78]
-    //   48 8B B4 24 88 00 00 00 mov   rsi, [rsp+0x88]
-    //   48 83 C4 60             add   rsp, 0x60
-    //   5F C3                   pop   rdi; retn
-    static constexpr std::string_view kStaticConstructObjectCallSig =
-        "E8 ?? ?? ?? ?? "
-        "48 8B 5C 24 70 "
-        "48 8B 6C 24 78 "
-        "48 8B B4 24 88 00 00 00 "
-        "48 83 C4 60 "
-        "5F C3";
-
+    // Returns nullptr (and logs once) if neither resolution path succeeds.
     FStaticConstructObjectFn GetStaticConstructObject();
 
     // =========================================================================

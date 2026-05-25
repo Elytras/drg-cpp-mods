@@ -154,6 +154,16 @@ std::vector<std::string> SplitParams(const std::string& params)
 
 void CompletionCallback(const std::string& buf, std::vector<std::string>& out)
 {
+    // "mode <profile>" — complete profile name argument
+    if (IStartsWith(buf, "mode "))
+    {
+        const std::string arg = buf.substr(5);
+        for (const char* m : { "drg", "rc" })
+            if (IStartsWith(m, arg))
+                out.push_back(std::string("mode ") + m);
+        return;
+    }
+
     auto p = ParseBuffer(buf);
 
     if (p.mode == CallParse::Mode::TopLevel)
@@ -197,6 +207,24 @@ WinHint HintCallback(const std::string& buf, int cursor)
     if (buf.empty() || cursor < 0) return {};
 
     const std::string atCursor = buf.substr(0, cursor);
+
+    // "mode <profile>" — hint the profile name
+    if (IStartsWith(atCursor, "mode "))
+    {
+        const std::string arg = atCursor.substr(5);
+        for (const char* m : { "drg", "rc" })
+        {
+            if (IStartsWith(m, arg))
+            {
+                WinHint h;
+                h.color      = kHintColor;
+                h.inlineText = std::string(m).substr(arg.size());
+                return h;
+            }
+        }
+        return {};
+    }
+
     auto p = ParseBuffer(atCursor);
 
     auto makeNameHint = [&](const std::string& fullName,

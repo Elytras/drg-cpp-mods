@@ -69,9 +69,6 @@
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_KeyBindings.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Math.cpp">
-      <Filter>External</Filter>
-    </ClCompile>
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectCast.cpp">
       <Filter>External</Filter>
     </ClCompile>
@@ -89,6 +86,12 @@
     </ClCompile>
     <ClCompile Include="SDK\SDK\RogueCore_functions.cpp">
       <Filter>Source Files\SDK Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Scan.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectFactory.cpp">
+      <Filter>External</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
