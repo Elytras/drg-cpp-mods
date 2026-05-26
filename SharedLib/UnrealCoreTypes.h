@@ -1,20 +1,28 @@
 #pragma once
+#include <string_view>
 #include <string>
 #include <exception>
 using uint64 = unsigned long long;
-using int64 = long long;
-using int32 = int;
+using int64 = signed long long;
+using int32 = signed int;
 using uint32 = unsigned int;
 using uint16 = unsigned short;
-using int16 = short;
+using int16 = signed short;
 using uint8 = unsigned char;
-using int8 = char;
+using int8 = signed char;
 using wchar = wchar_t;
 using GCreateMallocFn = void(*)();
 
-extern uint64 GetImageBase();
+namespace SDK {
+    namespace InSDKUtils
+    {
+        extern uint64 GetImageBase();
+    }
+};
+
+using namespace SDK::InSDKUtils;
 extern int Utf8ToWide(const char* src, wchar* dst, int capacity);
-extern uint8_t* FindPattern(const char* moduleName, const char* signature);
+extern void* FindPattern(const wchar_t* moduleName, std::string_view pattern);
 class UnrealAllocator
 {
     static inline uint64 RVA = 0;
@@ -26,17 +34,19 @@ class UnrealAllocator
     static GCreateMallocFn GetCreateMalloc()
     {
         // GCreateMalloc unique prologue.
-        //   UE 4.27 (DRG): sub rsp, 0xA8 ; mov rax, gs:[0x58]
-        //   UE 5.6  (RC) : sub rsp, 0xB8 ; mov ecx, [rel ?] ; mov rax, gs:[0x58]
-        // (UE5 added a TLS-init dword check before the gs read.)
+        //   UE 4.27 (DRG): sub rsp, 0xA8 ; mov rax, gs:[0x58] ; mov ecx, [rel tls_index]
+        //                  The tls_index load follows the gs read. Exact rsp size + trailing
+        //                  8B 0D needed — 16 bytes alone has a second match in this binary.
+        //   UE 5.6  (RC) : sub rsp, 0xB8 ; mov ecx, [rel tls_index] ; mov rax, gs:[0x58]
+        //                  (UE5 moved the tls_index load to before the gs read.)
         static GCreateMallocFn fn = []() -> GCreateMallocFn
         {
 #if defined(RogueCore) && RogueCore
-            uint8_t* match = FindPattern(nullptr,
-                "48 81 EC ?? ?? ?? ?? 8B 0D ?? ?? ?? ?? 65 48 8B 04 25 58 00 00 00");
+            uint8_t* match = static_cast<uint8_t*>(FindPattern(nullptr,
+                "48 81 EC ?? ?? ?? ?? 8B 0D ?? ?? ?? ?? 65 48 8B 04 25 58 00 00 00"));
 #else
-            uint8_t* match = FindPattern(nullptr,
-                "48 81 EC ?? ?? ?? ?? 65 48 8B 04 25 58 00 00 00");
+            uint8_t* match = static_cast<uint8_t*>(FindPattern(nullptr,
+                "48 81 EC A8 00 00 00 65 48 8B 04 25 58 00 00 00 8B 0D ?? ?? ?? ??"));
 #endif
             return match ? reinterpret_cast<GCreateMallocFn>(match) : nullptr;
         }();

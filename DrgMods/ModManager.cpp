@@ -1,4 +1,5 @@
-﻿#include "ModManager.h"
+﻿#define USEOWNIMPL 0
+#include "ModManager.h"
 #include "Commands.h"
 #include "Library.h"
 #if USEOWNIMPL
@@ -50,7 +51,7 @@ namespace Internal
 
     static bool TestAllocator()
     {
-        UnrealAllocator* allocator = UnrealAllocator::Get();
+        SDK::UnrealAllocator* allocator = SDK::UnrealAllocator::Get(true);
         if (!allocator)
         {
             error("[ModManager] UnrealAllocator is null");
@@ -140,6 +141,8 @@ void ModManager::LoadMods()
         error("[ModManager] ProcessEvent hook failed to install.");
         return;
     }
+    if (!GameHooks::InstallEngineTickHook(VTableLayout::UEngine::Tick))
+        error("[ModManager] EngineTick hook failed to install (slot {}).", VTableLayout::UEngine::Tick);
     GameHooks::ProcessEventHook::Get().Enqueue([this]() { LoadModsGameThread(); });
 }
 
@@ -178,6 +181,7 @@ void ModManager::UnloadMods()
     ResetCallbackHandles();
     VarSystem::Clear();
     JsonHook::Teardown(); // restore ExecFunction/flags before DLL pages are freed
+    GameHooks::EngineTickHook::Get().RequestUninstall();
     GameHooks::ProcessEventHook::Get().RequestUninstall();
     WaitForShutdown();
 

@@ -76,6 +76,8 @@ void ModManager::LoadMods()
         error("[ModManager] ProcessEvent hook failed to install.");
         return;
     }
+    if (!GameHooks::InstallEngineTickHook(VTableLayout::UEngine::Tick))
+        error("[ModManager] EngineTick hook failed to install (slot {}).", VTableLayout::UEngine::Tick);
     GameHooks::ProcessEventHook::Get().Enqueue([this]() { LoadModsGameThread(); });
 }
 
@@ -109,6 +111,7 @@ void ModManager::UnloadMods()
     TickSystem::Reset();
     ResetCallbackHandles();
     VarSystem::Clear();
+    GameHooks::EngineTickHook::Get().RequestUninstall();
     GameHooks::ProcessEventHook::Get().RequestUninstall();
     WaitForShutdown();
 

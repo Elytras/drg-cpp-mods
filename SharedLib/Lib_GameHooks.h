@@ -217,6 +217,93 @@ namespace GameHooks
     bool SetHookExecutionMode (CallbackHandle h, ExecutionMode m);
     bool SetHookExecutionTiming(CallbackHandle h, ExecutionTiming t);
 
+    // =========================================================================
+    // EngineTickHook — generic hook on UGameEngine::Tick.
+    //
+    //   Signature on the wire: void(UGameEngine* this, float DeltaSeconds, bool bIdleMode)
+    //
+    // Unlike ProcessEventHook there are no per-callback filters (function name,
+    // class, etc.) — Tick is a single virtual on the engine, so every registered
+    // callback fires every frame at the requested timing.
+    //
+    // The vtable slot of UEngine::Tick is per-game and must be supplied to
+    // Install() by the caller — Dumper-7 doesn't emit it the way it emits
+    // SDK::Offsets::ProcessEventIdx.
+    // =========================================================================
+
+    using EngineTickCallback = std::function<void(SDK::UEngine*, float, bool)>;
+
+    class EngineTickHook
+    {
+    private:
+        struct CallbackEntry
+        {
+            CallbackHandle      handle;
+            EngineTickCallback  callback;
+            ExecutionTiming     timing;
+            ExecutionMode       mode;
+            bool                enabled;
+
+            CallbackEntry(CallbackHandle h, EngineTickCallback cb,
+                          ExecutionTiming tim, ExecutionMode mod)
+                : handle(h), callback(std::move(cb))
+                , timing(tim), mode(mod), enabled(true)
+            {
+                DBG_ASSERT(h > 0,    "Invalid callback handle");
+                DBG_ASSERT(callback, "Callback function is null");
+            }
+        };
+
+        using CallbackList = std::vector<CallbackEntry>;
+
+        static EngineTickHook*           instance;
+        static void(*OriginalTick)(SDK::UEngine*, float, bool);
+        static inline std::atomic<int>   executionDepth_{ 0 };
+
+        std::atomic<bool>                              pendingUninstall_{ false };
+        std::atomic<bool>                              hookInstalled_{ false };
+        std::atomic<std::shared_ptr<const CallbackList>> stateOwner_{};
+        mutable std::mutex                             writeMutex_;
+        std::function<void()>                          onUninstalled_;
+        CallbackHandle                                 nextHandle_{ 1 };
+
+        EngineTickHook();
+        void StoreState(std::shared_ptr<const CallbackList> s);
+        static bool RunBeforePass(const CallbackList& list, SDK::UEngine* Eng, float Dt, bool Idle);
+        static void RunAfterPass (const CallbackList& list, SDK::UEngine* Eng, float Dt, bool Idle);
+        static void __fastcall HookedTick(SDK::UEngine* Engine, float DeltaSeconds, bool bIdleMode);
+        bool DoUninstall();
+        CallbackList CloneList() const;
+
+    public:
+        static EngineTickHook& Get();
+
+        bool IsInstalled() const;
+        // vtableSlot: index of UEngine::Tick in the engine's vtable (per-game).
+        bool Install(int32 vtableSlot);
+        bool RequestUninstall();
+        void SetOnUninstalled(std::function<void()> cb);
+
+        CallbackHandle AddCallback(EngineTickCallback cb,
+            ExecutionTiming timing = ExecutionTiming::Before,
+            ExecutionMode  mode   = ExecutionMode::CallOriginal);
+
+        bool   RemoveCallback     (CallbackHandle handle);
+        bool   EnableCallback     (CallbackHandle handle, bool enabled);
+        bool   SetExecutionMode   (CallbackHandle handle, ExecutionMode mode);
+        bool   SetExecutionTiming (CallbackHandle handle, ExecutionTiming timing);
+        void   ClearAllCallbacks();
+        size_t GetCallbackCount() const;
+    };
+
+    // ── Free convenience functions for the tick hook ─────────────────────────
+
+    bool InstallEngineTickHook(int32 vtableSlot);
+
+    CallbackHandle OnEngineTick(EngineTickCallback cb,
+        ExecutionTiming t = ExecutionTiming::Before,
+        ExecutionMode mode = ExecutionMode::CallOriginal);
+
 } // namespace GameHooks
 
 // =========================================================================

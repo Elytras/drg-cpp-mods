@@ -28,3 +28,24 @@
 //   4. Re-enable the `HOOKALIASES`-gated `Hooks::` namespace in Lib_VTableHook.h
 //      once the slot constants exist, OR just call SlotHook<N, FSig> directly
 //      with raw slot numbers at the call sites.
+
+// Minimal VTableLayout scaffolding — only exposes the UEngine::Tick slot used
+// by GameHooks::EngineTickHook. Counted from SDK/VTableLayout_5_06_Template.ini:
+//   UObjectBase           slots 0-3   (4 entries inc. __vecDelDtor)
+//   UObjectBaseUtility    slots 4-8   (+5 new virtuals)
+//   UObject               slots 9-85  (+77 new virtuals)
+//   UEngine               slots 86+   (__vecDelDtor override at slot 0, then
+//                                      WorldAdded@86, WorldDestroyed@87, …, Tick@94)
+namespace VTableLayout
+{
+    namespace Slots
+    {
+        constexpr int32 VecDelDtor  = 0;
+        constexpr int32 Engine_Tick = 94;
+    }
+    namespace UEngine
+    {
+        constexpr int32 VecDelDtor = Slots::VecDelDtor;
+        constexpr int32 Tick       = Slots::Engine_Tick;
+    }
+}

@@ -209,6 +209,11 @@ namespace VTableLayout
         constexpr int32 ValidateGeneratedRepEnums = 75;
         constexpr int32 SetNetPushIdDynamic = 76;
         constexpr int32 GetNetPushIdDynamic = 77;
+
+        // ── UEngine (78+) — counted from SDK/VTableLayout_4_27_Template.ini ────
+        // UEngine's own __vecDelDtor is the override of slot 0; new virtuals
+        // start at slot 78. Only Tick is exposed here; add more as needed.
+        constexpr int32 Engine_Tick = 86;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -302,6 +307,11 @@ namespace VTableLayout
         constexpr int32 ValidateGeneratedRepEnums = Slots::ValidateGeneratedRepEnums;
         constexpr int32 SetNetPushIdDynamic = Slots::SetNetPushIdDynamic;
         constexpr int32 GetNetPushIdDynamic = Slots::GetNetPushIdDynamic;
+    }
+    namespace UEngine
+    {
+        constexpr int32 VecDelDtor = Slots::VecDelDtor;
+        constexpr int32 Tick       = Slots::Engine_Tick;
     }
 }
 

@@ -209,6 +209,7 @@
     <ClInclude Include="Lib_VTableInfo.h" />
     <ClInclude Include="ModManager.h" />
     <ClInclude Include="SDK\SDK\Basic.hpp" />
+    <ClInclude Include="SDK\SDK\CoreUObject_classes.hpp" />
     <ClInclude Include="SDK\SDK\FSD_classes.hpp" />
     <ClInclude Include="SDK\UnrealContainers.hpp" />
   </ItemGroup>

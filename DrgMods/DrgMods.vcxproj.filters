@@ -140,5 +140,8 @@
     <ClInclude Include="Aim.h">
       <Filter>Header Files\DLL Headers</Filter>
     </ClInclude>
+    <ClInclude Include="SDK\SDK\CoreUObject_classes.hpp">
+      <Filter>Header Files\SDK Headers</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

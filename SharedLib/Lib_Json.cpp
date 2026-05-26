@@ -20,7 +20,7 @@
 #include "SDK/SDK/JSON_parameters.hpp"
 
 using namespace SDK;  // file-local; no math types used in this TU
-
+constexpr inline bool LogJson = false;
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal State & Raw UE Structures
 // ─────────────────────────────────────────────────────────────────────────────
@@ -567,7 +567,7 @@ namespace JsonHook {
 
         if (!outer || !Info.IndexPrivate || Info.IndexPrivate != outer->Index || Info.Name != outer->Name || LastString != *pInput || !LastJson)
         {
-            {
+            if constexpr (LogJson) {
                 if (!outer) info("Reparsing because outer invalid");
                 else if (!Info.IndexPrivate) info("Reparsing because cached IndexPrivate is invalid");
                 else if (Info.IndexPrivate != outer->Index) info("Reparsing because different outer (index)");
