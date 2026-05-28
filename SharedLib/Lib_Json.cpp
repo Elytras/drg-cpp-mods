@@ -77,9 +77,6 @@ namespace JsonImpl {
         int32_t        _pad;
     };
 
-    template<typename T>
-    struct RawTArray { T* Data; int32_t Num; int32_t Max; };
-
     inline const uint32_t* CRCTable() {
         static const uint32_t* t = nullptr;
         if (!t) {
@@ -104,7 +101,7 @@ namespace JsonImpl {
     }
 
     inline void* UEAlloc(size_t n) {
-        return SDK::UnrealAllocator::Get()->Malloc(static_cast<uint64_t>(n));
+        return SDK::FMemory::Malloc(static_cast<uint64_t>(n));
     }
 
     inline UC::FString MakeFString(const wchar_t* s, int32_t len) {
@@ -353,16 +350,13 @@ namespace JsonImpl {
             node->Type = JSONType::Array;
 
             const int32_t N = CountTopLevelItems(L']');
-            auto& arr = reinterpret_cast<RawTArray<SDK::UJSONValue_C*>&>(node->Array);
             if (N == 0) { Require(L']'); return node; }
-
-            arr.Data = static_cast<SDK::UJSONValue_C**>(UEAlloc(N * sizeof(void*)));
-            arr.Max = N;
+            node->Array.Reserve(N);
             do {
                 // IMPORTANT: Pass 'node' as the Outer for the child element
                 auto* v = ParseValue(node);
                 if (!ok_) break;
-                arr.Data[arr.Num++] = v;
+                node->Array.AddGrow(v);
             } while (Eat(L','));
 
             Require(L']');
@@ -580,7 +574,7 @@ namespace JsonHook {
             Info = { outer->Index, outer->Name };
             if (LastString.GetDataPtr() != nullptr )
             {
-                UnrealAllocator::Get()->Free(const_cast<TCHAR*>(LastString.GetDataPtr()));
+                SDK::FMemory::Free(const_cast<TCHAR*>(LastString.GetDataPtr()));
             }
             LastString = JsonImpl::MakeFString(pInput->CStr(), pInput->Num()-1);
 

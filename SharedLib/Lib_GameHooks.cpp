@@ -568,6 +568,22 @@ void __fastcall EngineTickHook::HookedTick(UEngine* Engine, float DeltaSeconds, 
     static EngineTickHook* inst = &Get();
     DBG_CHECK_PTR(inst);
 
+    if (depthBefore == 0 && inst->hasTasks_.load(std::memory_order_acquire))
+    {
+        std::vector<std::function<void()>> local;
+        {
+            std::lock_guard lock(inst->taskMutex_);
+            std::swap(local, inst->taskQueue_);
+            inst->hasTasks_.store(false, std::memory_order_relaxed);
+        }
+        for (auto& t : local)
+        {
+            DBG_ASSERT(t, "Null task in queue");
+            try { t(); }
+            catch (const std::exception&) { DBG_ASSERT(false, "Task threw exception"); }
+        }
+    }
+
     auto state = std::atomic_load(&inst->stateOwner_);
     bool hasCallbacks = state && !state->empty();
 
@@ -678,6 +694,15 @@ void EngineTickHook::SetOnUninstalled(std::function<void()> cb)
     onUninstalled_ = std::move(cb);
 }
 
+void EngineTickHook::Enqueue(std::function<void()> task)
+{
+    DBG_ASSERT(task, "Null task passed to Enqueue");
+    std::lock_guard lock(taskMutex_);
+    taskQueue_.push_back(std::move(task));
+    DBG_CHECK_RANGE(taskQueue_.size(), 1, 100000);
+    hasTasks_.store(true, std::memory_order_release);
+}
+
 CallbackHandle EngineTickHook::AddCallback(EngineTickCallback callback,
     ExecutionTiming timing, ExecutionMode mode)
 {
@@ -777,12 +802,12 @@ CallbackHandle OnEngineTick(EngineTickCallback cb, ExecutionTiming t, ExecutionM
 
 void EnqueueOnce(std::function<void()> fn)
 {
-    GameHooks::ProcessEventHook::Get().Enqueue(std::move(fn));
+    GameHooks::EngineTickHook::Get().Enqueue(std::move(fn));
 }
 
 void EnqueueWhile(std::function<bool()> fn)
 {
-    auto& hook = GameHooks::ProcessEventHook::Get();
+    auto& hook = GameHooks::EngineTickHook::Get();
     auto task = std::make_shared<std::function<void()>>();
     *task = [fn = std::move(fn), task, &hook]() mutable
         {

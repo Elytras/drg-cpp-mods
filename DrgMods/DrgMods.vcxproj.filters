@@ -34,6 +34,12 @@
     <Filter Include="External">
       <UniqueIdentifier>{7a24b1e8-9100-4dc9-8194-a8f664c7e7b3}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\DLL Impl\Commands">
+      <UniqueIdentifier>{3579ff44-63ae-4544-ba8a-ba9b660efed9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\DLL Impl\Aimbot">
+      <UniqueIdentifier>{289c942c-6925-495c-8799-02340d181ade}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="SDK\SDK\AssetRegistry_functions.cpp">
@@ -65,9 +71,6 @@
     </ClCompile>
     <ClCompile Include="Lib_Utils.cpp">
       <Filter>Source Files\LibraryImplementations</Filter>
-    </ClCompile>
-    <ClCompile Include="Aim.cpp">
-      <Filter>Source Files\DLL Impl</Filter>
     </ClCompile>
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_CommandHandler.cpp">
       <Filter>External</Filter>
@@ -105,6 +108,39 @@
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_Scan.cpp">
       <Filter>External</Filter>
     </ClCompile>
+    <ClCompile Include="Aimbot_Base.cpp">
+      <Filter>Source Files\DLL Impl\Aimbot</Filter>
+    </ClCompile>
+    <ClCompile Include="Aimbot_Config.cpp">
+      <Filter>Source Files\DLL Impl\Aimbot</Filter>
+    </ClCompile>
+    <ClCompile Include="Aimbot_DebugConfig.cpp">
+      <Filter>Source Files\DLL Impl\Aimbot</Filter>
+    </ClCompile>
+    <ClCompile Include="Aimbot_Hitscan_Capsule.cpp">
+      <Filter>Source Files\DLL Impl\Aimbot</Filter>
+    </ClCompile>
+    <ClCompile Include="Aimbot_Hitscan_Destructable.cpp">
+      <Filter>Source Files\DLL Impl\Aimbot</Filter>
+    </ClCompile>
+    <ClCompile Include="Aimbot_Hitscan_Reflection.cpp">
+      <Filter>Source Files\DLL Impl\Aimbot</Filter>
+    </ClCompile>
+    <ClCompile Include="Aimbot_Hitscan_Multi.cpp">
+      <Filter>Source Files\DLL Impl\Aimbot</Filter>
+    </ClCompile>
+    <ClCompile Include="Aimbot_Hitscan_Standard.cpp">
+      <Filter>Source Files\DLL Impl\Aimbot</Filter>
+    </ClCompile>
+    <ClCompile Include="Aimbot_Projectile_Activate.cpp">
+      <Filter>Source Files\DLL Impl\Aimbot</Filter>
+    </ClCompile>
+    <ClCompile Include="Aimbot_Projectile_ServerFire.cpp">
+      <Filter>Source Files\DLL Impl\Aimbot</Filter>
+    </ClCompile>
+    <ClCompile Include="Aimbot_TargetSelection.cpp">
+      <Filter>Source Files\DLL Impl\Aimbot</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Lib_Forward.h">
@@ -140,7 +176,13 @@
     <ClInclude Include="Aim.h">
       <Filter>Header Files\DLL Headers</Filter>
     </ClInclude>
+    <ClInclude Include="Aim_Internal.h">
+      <Filter>Header Files\DLL Headers</Filter>
+    </ClInclude>
     <ClInclude Include="SDK\SDK\CoreUObject_classes.hpp">
+      <Filter>Header Files\SDK Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="SDK\SDK\FSD_structs.hpp">
       <Filter>Header Files\SDK Headers</Filter>
     </ClInclude>
   </ItemGroup>

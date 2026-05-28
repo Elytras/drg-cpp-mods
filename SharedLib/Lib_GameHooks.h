@@ -262,8 +262,11 @@ namespace GameHooks
 
         std::atomic<bool>                              pendingUninstall_{ false };
         std::atomic<bool>                              hookInstalled_{ false };
+        std::atomic<bool>                              hasTasks_{ false };
         std::atomic<std::shared_ptr<const CallbackList>> stateOwner_{};
         mutable std::mutex                             writeMutex_;
+        std::mutex                                     taskMutex_;
+        std::vector<std::function<void()>>             taskQueue_;
         std::function<void()>                          onUninstalled_;
         CallbackHandle                                 nextHandle_{ 1 };
 
@@ -283,6 +286,7 @@ namespace GameHooks
         bool Install(int32 vtableSlot);
         bool RequestUninstall();
         void SetOnUninstalled(std::function<void()> cb);
+        void Enqueue(std::function<void()> task);
 
         CallbackHandle AddCallback(EngineTickCallback cb,
             ExecutionTiming timing = ExecutionTiming::Before,
@@ -330,7 +334,7 @@ void EnqueueThrottled(
     std::chrono::milliseconds interval,
     std::function<bool(T&, size_t, size_t)> fn)
 {
-    auto& hook = GameHooks::ProcessEventHook::Get();
+    auto& hook = GameHooks::EngineTickHook::Get();
 
     auto shared   = std::make_shared<std::vector<T>>(std::move(items));
     auto index    = std::make_shared<size_t>(0);
@@ -386,7 +390,7 @@ void EnqueueDelayed(std::function<void()> fn, T delay = T(200))
         ? duration_cast<milliseconds>(duration<long double>(delay))
         : milliseconds(static_cast<long long>(delay));
 
-    auto& hook  = GameHooks::ProcessEventHook::Get();
+    auto& hook  = GameHooks::EngineTickHook::Get();
     auto fireAt = std::make_shared<steady_clock::time_point>(steady_clock::now() + ms);
     auto task   = std::make_shared<std::function<void()>>();
 

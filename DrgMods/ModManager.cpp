@@ -51,59 +51,50 @@ namespace Internal
 
     static bool TestAllocator()
     {
+        constexpr uint32 size = 1024;
+        constexpr const char* testStr = "Hello from GMalloc!\0";
+
         SDK::UnrealAllocator* allocator = SDK::UnrealAllocator::Get(true);
         if (!allocator)
         {
             error("[ModManager] UnrealAllocator is null");
             return false;
         }
-
-        const void* allocAddr = static_cast<const void*>(allocator);
         info("[ModManager] Found GMalloc at {:p} ({})",
-            allocAddr,
+            static_cast<const void*>(allocator),
             FString(allocator->GetDescriptiveName()).ToString());
-
         info("[ModManager] Testing GMalloc...");
 
-        constexpr uint32 size = 1024;
-        void* mem = allocator->Malloc(size);
-
+        void* mem = SDK::FMemory::Malloc(size);
         if (!mem)
         {
             error("[ModManager] GMalloc allocation failed.");
             return false;
         }
 
-        memcpy(mem, "Hello from GMalloc!\0", 21);
+        SDK::FMemory::Memcpy(mem, testStr, 21);
 
         uint64 actualSize = 0;
-        const bool sizeOk = allocator->GetAllocationSize(mem, actualSize);
-
-        if (!sizeOk || actualSize < size)
+        if (!SDK::FMemory::GetAllocSize(mem, actualSize) || actualSize < size)
         {
             error("[ModManager] Allocation size validation failed (got {}).", actualSize);
-            allocator->Free(mem);
+            SDK::FMemory::Free(mem);
             return false;
         }
 
         info("[ModManager] GMalloc allocation successful.");
         info("[ModManager] Allocated size: {} bytes", actualSize);
         info("[ModManager] Test allocation address: {:p}", mem);
-        info("[ModManager] Is Allocator Internally Thread Safe? {}",
-            allocator->IsInternallyThreadSafe() ? "Yes" : "No");
-
-        // Safe print: avoid assuming null-termination safety from raw buffer
-        info("[ModManager] Test allocation content: {}",
-            std::string(static_cast<char*>(mem), 21));
-
-        allocator->Free(mem);
-
+        info("[ModManager] Is Allocator Internally Thread Safe? {}", allocator->IsInternallyThreadSafe() ? "Yes" : "No");
+        info("[ModManager] Test allocation content: {}", std::string(static_cast<char*>(mem), 21));
+        info("[ModManager] Test allocation content validity: {}", std::string(static_cast<char*>(mem)) == testStr ? "Valid" : "Invalid");
         info("[ModManager] GMalloc test passed.");
+        SDK::FMemory::Free(mem);
         return true;
     }
 }
 
-using namespace Internal;
+using namespace ::Internal;
     // =========================================================================
     // Constructor
     // =========================================================================

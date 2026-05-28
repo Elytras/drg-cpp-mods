@@ -139,7 +139,7 @@ std::vector<AFSDPawn*> GetAliveNonFriendlies()
         auto Enemy = ObjectCast::Cast<AFSDPawn>(A);
         if (!IsValidOf<AFSDPawn>(Enemy)) continue;
         UHealthComponentBase* Health = GetComponent<UHealthComponentBase>(Enemy);
-        if (!Health || !Health->IsAlive() || !Health->GetHealth() > 0.01) continue;
+        if (!Health || !Health->IsAlive() || !Health->GetHealth() > 0.1) continue;
         if (Enemy->GetAttitude() == EPawnAttitude::Friendly) continue;
         Actors.push_back(Enemy);
     }

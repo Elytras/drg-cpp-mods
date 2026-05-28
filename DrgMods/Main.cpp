@@ -5,6 +5,7 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include <spdlog/sinks/base_sink.h>
 #include <spdlog/spdlog.h>
@@ -99,6 +100,63 @@ private:
 
 using shmem_sink_mt = shmem_sink<std::mutex>;
 
+// Custom file sink. We don't use spdlog's basic_file_sink because we want
+// to truncate the file on demand (via the `clearlog` command) while spdlog
+// still has the handle open — basic_file_sink holds the handle exclusively
+// and an external fopen("w") fails. Here we own the FILE* and expose a
+// truncate() method that closes+reopens in trunc mode under the sink mutex.
+template<typename Mutex>
+class file_sink : public spdlog::sinks::base_sink<Mutex>
+{
+public:
+    explicit file_sink(std::string path) : path_(std::move(path))
+    {
+        if (fopen_s(&fp_, path_.c_str(), "a") != 0) fp_ = nullptr;
+    }
+    ~file_sink() override { if (fp_) std::fclose(fp_); }
+
+    // Returns true if the file was successfully closed + reopened in truncate
+    // mode. On failure (e.g. an external editor holds an exclusive lock on
+    // the file) we fall back to append mode so subsequent log writes still
+    // land somewhere — caller can inspect the bool to surface a warning.
+    bool truncate()
+    {
+        std::lock_guard<Mutex> lock(spdlog::sinks::base_sink<Mutex>::mutex_);
+        if (fp_) { std::fclose(fp_); fp_ = nullptr; }
+        const bool ok = (fopen_s(&fp_, path_.c_str(), "w") == 0 && fp_ != nullptr);
+        if (!ok) {
+            fp_ = nullptr;
+            // Best-effort reopen so we don't lose every subsequent log.
+            (void)fopen_s(&fp_, path_.c_str(), "a");
+        }
+        return ok;
+    }
+
+protected:
+    void sink_it_(const spdlog::details::log_msg& msg) override
+    {
+        if (!fp_) return;
+        spdlog::memory_buf_t formatted;
+        spdlog::sinks::base_sink<Mutex>::formatter_->format(msg, formatted);
+        std::fwrite(formatted.data(), 1, formatted.size(), fp_);
+    }
+    void flush_() override { if (fp_) std::fflush(fp_); }
+
+private:
+    std::string path_;
+    std::FILE*  fp_ = nullptr;
+};
+
+using file_sink_mt = file_sink<std::mutex>;
+
+// Owned by WorkerThread's logger; called from the `clearlog` command (Commands.cpp).
+std::shared_ptr<file_sink_mt> g_FileSink;
+
+bool TruncateLogFile()
+{
+    return g_FileSink ? g_FileSink->truncate() : false;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Shared memory init / cleanup
 // ─────────────────────────────────────────────────────────────────────────────
@@ -191,18 +249,32 @@ void WorkerThread()
 
     try
     {
-        auto sink = std::make_shared<shmem_sink_mt>();
-        sink->set_pattern("%v");
-        sink->set_level(spdlog::level::trace);
+        auto shmem = std::make_shared<shmem_sink_mt>();
+        shmem->set_pattern("%v");
+        shmem->set_level(spdlog::level::trace);
 
-        auto logger = std::make_shared<spdlog::logger>("drg", sink);
+        // Parallel file sink — custom file_sink_mt so `clearlog` can truncate
+        // the file while spdlog still holds the handle (basic_file_sink_mt
+        // keeps an exclusive handle and external truncate calls would fail).
+        try {
+            g_FileSink = std::make_shared<file_sink_mt>("D:/drg_log.txt");
+            g_FileSink->set_pattern("[%H:%M:%S.%e] %v");
+            g_FileSink->set_level(spdlog::level::trace);
+        } catch (...) {
+            g_FileSink.reset();
+        }
+
+        std::vector<spdlog::sink_ptr> sinks = { shmem };
+        if (g_FileSink) sinks.push_back(g_FileSink);
+        auto logger = std::make_shared<spdlog::logger>("drg", sinks.begin(), sinks.end());
         logger->set_level(spdlog::level::trace);
 
         spdlog::set_default_logger(logger);
         spdlog::set_level(spdlog::level::trace);
         spdlog::flush_on(spdlog::level::trace);
-        spdlog::info("DLL initialized{}",
-            g_pRespBuffer ? " (response channel active)" : " (no response channel)");
+        spdlog::info("DLL initialized{} (file log: {})",
+            g_pRespBuffer ? " (response channel active)" : " (no response channel)",
+            g_FileSink ? "D:/drg_log.txt" : "DISABLED");
     }
     catch (...) { return; }
 

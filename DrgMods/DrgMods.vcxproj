@@ -159,7 +159,17 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Commands.cpp" />
-    <ClCompile Include="Aim.cpp" />
+    <ClCompile Include="Aimbot_Base.cpp" />
+    <ClCompile Include="Aimbot_Config.cpp" />
+    <ClCompile Include="Aimbot_DebugConfig.cpp" />
+    <ClCompile Include="Aimbot_Hitscan_Capsule.cpp" />
+    <ClCompile Include="Aimbot_Hitscan_Destructable.cpp" />
+    <ClCompile Include="Aimbot_Hitscan_Reflection.cpp" />
+    <ClCompile Include="Aimbot_Hitscan_Multi.cpp" />
+    <ClCompile Include="Aimbot_Hitscan_Standard.cpp" />
+    <ClCompile Include="Aimbot_Projectile_Activate.cpp" />
+    <ClCompile Include="Aimbot_Projectile_ServerFire.cpp" />
+    <ClCompile Include="Aimbot_TargetSelection.cpp" />
     <ClCompile Include="Lib_Utils.cpp" />
     <ClCompile Include="Main.cpp">
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
@@ -203,6 +213,7 @@
     <ClInclude Include="Commands.h" />
     <ClInclude Include="Common.h" />
     <ClInclude Include="Aim.h" />
+    <ClInclude Include="Aim_Internal.h" />
     <ClInclude Include="Lib_Forward.h" />
     <ClInclude Include="Library.h" />
     <ClInclude Include="Lib_Utils.h" />
@@ -211,6 +222,7 @@
     <ClInclude Include="SDK\SDK\Basic.hpp" />
     <ClInclude Include="SDK\SDK\CoreUObject_classes.hpp" />
     <ClInclude Include="SDK\SDK\FSD_classes.hpp" />
+    <ClInclude Include="SDK\SDK\FSD_structs.hpp" />
     <ClInclude Include="SDK\UnrealContainers.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

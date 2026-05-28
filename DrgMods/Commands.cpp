@@ -186,6 +186,7 @@ namespace State
     CallbackHandle ProxyModCallback = 0;
     CallbackHandle BeginPlayCallback = 0;
 
+    bool autoCrasherEnabled = false;
     bool infiniteAmmoEnabled = false;
     std::unordered_map<SDK::UObject*, int> OldShotCost;
 
@@ -1039,6 +1040,34 @@ namespace Commands
         Start.X = SafeStof(ctx.Arg(1)); Start.Y = SafeStof(ctx.Arg(2)); Start.Z = SafeStof(ctx.Arg(3));
         End.X = SafeStof(ctx.Arg(4)); End.Y = SafeStof(ctx.Arg(5)); End.Z = SafeStof(ctx.Arg(6));
         CoilGun->Server_HitTerrain(Start, End, SafeStof(ctx.Arg(7)));
+    }
+
+    void AutoCrasher(const CommandContext& = State::dummyCtx)
+    {
+        State::autoCrasherEnabled = !State::autoCrasherEnabled;
+        if(State::autoCrasherEnabled) 
+        {
+            EnqueueWhile(
+                []() -> bool 
+                {
+                    if (!State::autoCrasherEnabled) return false;
+                    SDK::UWorld* World = GetWorld();
+                    if (!World) return true;
+                    if (Kismet::IsServer(World)) return true;
+                    SDK::APlayerCharacter* Player = GetLocalPlayer();
+                    if (!IsValidOf<SDK::APlayerCharacter>(Player)) return true;
+                    Player->Server_SpawnEnemies(SDK::UEnemyDescriptor::GetDefaultObj(), 100000);
+                    info("AutoCrasher triggered");
+                    return true;
+                }
+            );
+            info("Autocrasher enabled.");
+        }
+        else 
+        {
+            info("Autocrasher disabled.");
+        }
+            
     }
 
     void FearAll(const CommandContext& = State::dummyCtx)
@@ -2199,477 +2228,6 @@ namespace Binds {
     }
 }
 
-// ─── Original aim-related Binds body — moved to Aim.cpp ────────
-// The whole block below is preprocessed out. Removing the source rather than
-// trusting copy-paste means we keep one source of truth in the new module.
-#if 0
-namespace _moved_aim_body {
-    using WpTargetResult = int;
-    static WpTargetResult GetWeakpointTarget(SDK::AFSDPawn* Enemy, const std::vector<SDK::USkeletalMeshComponent*>& Meshes,
-                                              const FVector& CamLoc, const FVector& Forward,
-                                              SDK::APlayerCharacter* LocalPlayer)
-    {
-        using namespace ObjectCast;
-        static constexpr float kDeg2Rad = 3.14159265f / 180.f;
-
-        WpTargetResult result;
-        FVector BestPos  = {};
-        float   BestMult = -1.f;
-        float   BestDot  = -2.f;
-
-        for (SDK::USkeletalMeshComponent* Mesh : Meshes)
-        {
-            if (!Mesh) continue;
-            auto* SkelAsset = Mesh->SkeletalMesh;
-            if (!SkelAsset) continue;
-            auto* PhysAsset = SkelAsset->PhysicsAsset;
-            if (!PhysAsset) continue;
-
-            for (int32 i = 0; i < PhysAsset->SkeletalBodySetups.Num(); ++i)
-            {
-                SDK::USkeletalBodySetup* Body = PhysAsset->SkeletalBodySetups[i];
-                if (!Body || !Body->PhysMaterial) continue;
-
-                SDK::UFSDPhysicalMaterial* FSDMat = Cast<SDK::UFSDPhysicalMaterial>(Body->PhysMaterial);
-                if (!FSDMat || !FSDMat->IsWeakPoint) continue;
-
-                result.hasWeakpoints = true;
-
-                auto WpState = Helpers::GetBreakableWpState(Enemy, Mesh, Body->BoneName, FSDMat);
-                if (WpState.isBreakable && WpState.isDestroyed) continue;
-
-                const FVector Center = Mesh->GetSocketLocation(Body->BoneName);
-                const float   R      = Helpers::GetBodyRadius(Body);
-
-                // Multipoint: try center then ±R on each world axis.
-                // First candidate visible from CamLoc wins as the aim position.
-                static const std::array<FVector, 7> kOffsets = {{
-                    {0,0,0}, {1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}
-                }};
-                FVector VisPos  = {};
-                bool    bVisible = false;
-                for (const auto& Off : kOffsets)
-                {
-                    FVector Candidate = { Center.X + Off.X*R, Center.Y + Off.Y*R, Center.Z + Off.Z*R };
-                    if (Helpers::IsWeakpointVisible(LocalPlayer, Enemy, CamLoc, Candidate, Body->BoneName))
-                        { VisPos = Candidate; bVisible = true; break; }
-                }
-                if (!bVisible) continue;
-
-                FVector Dir = VisPos - CamLoc;
-                const float Dist = std::sqrt(Dir.X*Dir.X + Dir.Y*Dir.Y + Dir.Z*Dir.Z);
-                if (Dist < 1.f) continue;
-                Dir.X /= Dist; Dir.Y /= Dist; Dir.Z /= Dist;
-
-                const float Dot  = Forward.X*Dir.X + Forward.Y*Dir.Y + Forward.Z*Dir.Z;
-                const float Mult = FSDMat->DamageMultiplier;
-
-                if (Mult > BestMult || (Mult >= BestMult && Dot > BestDot))
-                    { BestMult = Mult; BestDot = Dot; BestPos = VisPos; result.anyVisible = true; }
-            }
-        }
-
-        result.pos = result.anyVisible ? BestPos : Enemy->K2_GetActorLocation();
-        return result;
-    }
-
-    // Find best aim point. Returns the world-space position to aim at, or nullopt
-    // if no valid target is in the FOV cone. Used by the unified RCS+aimbot loop.
-    static std::optional<FVector> FindAimbotTargetPos(SDK::APlayerCharacter* LocalPlayer,
-                                                       SDK::APlayerCameraManager* CamMgr,
-                                                       const FVector& CamLoc,
-                                                       const FVector& Forward,
-                                                       float FOVDeg)
-    {
-        using namespace ObjectCast;
-        static constexpr float kDeg2Rad = 3.14159265f / 180.f;
-
-        if (IsOnSpaceRig()) return std::nullopt;
-
-        SDK::UInventoryComponent* Inventory = LocalPlayer->InventoryComponent;
-        if (!Inventory) return std::nullopt;
-
-        SDK::AItem* Equipped = Inventory->GetEquippedItem();
-        if (!Equipped) return std::nullopt;
-        
-        static std::vector<SDK::FName> IgnoredItemClasses = std::vector<SDK::FName>();
-        if(IgnoredItemClasses.empty())[[unlikely]]
-        {
-            const std::vector<SDK::UClass*> Classes = { SDK::APickaxeItem::StaticClass() ,SDK::ADoubleDrillItem::StaticClass(),SDK::AZipLineItem::StaticClass(),SDK::AGrapplingHookGun::StaticClass() };
-            for (SDK::UClass* Class : Classes)
-                if (IsValidOf<SDK::UClass>(Class))
-                    IgnoredItemClasses.push_back(Class->Name);
-            IgnoredItemClasses.push_back(SDK::FName(L"WPN_PlatformGun_C"));
-        }
-
-        for (const SDK::FName& ClassName : IgnoredItemClasses)
-            if (IsChildOfByName(Equipped, ClassName)) return std::nullopt;
-
-        Helpers::FDamageInfo DamageInfo;
-        if (SDK::UDamageComponent* DamageComponent = GetComponent<SDK::UDamageComponent>(Equipped))
-            Helpers::ExtractDamageInfo(DamageComponent, DamageInfo);
-        else
-        {
-            SDK::UProjectileLauncherComponent* Launcher = GetComponent<SDK::UProjectileLauncherComponent>(Equipped);
-            if (!Launcher) return std::nullopt;
-            if (!GetDamageInfoFromProjectileClass(Launcher->ProjectileClass, DamageInfo)) return std::nullopt;
-        }
-        if (!DamageInfo.IsValid()) return std::nullopt;
-
-        std::vector<SDK::AFSDPawn*> Enemies = GetAliveNonFriendlies();
-        if (Enemies.empty()) return std::nullopt;
-
-        const float HalfFOVCos = std::cos(FOVDeg * 0.5f * kDeg2Rad);
-
-        struct Candidate { float dot; SDK::AFSDPawn* enemy; };
-        std::vector<Candidate> candidates;
-
-        static std::vector<SDK::FName> IgnoreBaseClasses = std::vector<SDK::FName>();
-        static std::vector<SDK::FName> ForceIncludeClasses = std::vector<SDK::FName>();
-        if (IgnoreBaseClasses.empty()) [[unlikely]] 
-        {
-            IgnoreBaseClasses.reserve(32);
-            IgnoreBaseClasses.push_back(SDK::FName(L"SDK::ENE_Spider_Grunt_Base_C"));
-        }
-        if (ForceIncludeClasses.empty()) [[unlikely]]
-        {
-            ForceIncludeClasses.reserve(32);
-        }
-
-        for (SDK::AFSDPawn* Enemy : Enemies)
-        {
-            if (!IsValidOf<SDK::AFSDPawn>(Enemy)) continue;
-
-            bool forceInclude = false;
-            if (Enemy->Class) {
-                for (const SDK::FName& name : ForceIncludeClasses)
-                    if (Enemy->Class->Name == name) { forceInclude = true; break; }
-            }
-
-            if (!forceInclude) {
-                bool eliteOrBoss = Enemy->IsElite();
-                if (!eliteOrBoss)
-                    if (auto* hc = Cast<SDK::UEnemyHealthComponent>(Enemy->GetHealthComponent()))
-                        eliteOrBoss = hc->bIsBossFight;
-
-                if (!eliteOrBoss) {
-                    bool ignored = false;
-                    for (const SDK::FName& name : IgnoreBaseClasses)
-                        if (IsChildOfByName(Enemy, name)) { ignored = true; break; }
-                    if (ignored) continue;
-                }
-            }
-
-            FVector ToEnemy = Enemy->K2_GetActorLocation() - CamLoc;
-            const float Dist = std::sqrt(ToEnemy.X*ToEnemy.X + ToEnemy.Y*ToEnemy.Y + ToEnemy.Z*ToEnemy.Z);
-            if (Dist < 0.01f) continue;
-            ToEnemy.X /= Dist; ToEnemy.Y /= Dist; ToEnemy.Z /= Dist;
-            const float Dot = Forward.X*ToEnemy.X + Forward.Y*ToEnemy.Y + Forward.Z*ToEnemy.Z;
-            if (Dot >= HalfFOVCos) candidates.push_back({Dot, Enemy});
-        }
-        if (candidates.empty()) return std::nullopt;
-        std::sort(candidates.begin(), candidates.end(),
-            [](const Candidate& a, const Candidate& b) { return a.dot > b.dot; });
-
-        for (auto& c : candidates)
-        {
-            auto meshes = Helpers::GetEnemyMeshes(c.enemy);
-            if (meshes.empty()) return c.enemy->K2_GetActorLocation();
-            auto wp = GetWeakpointTarget(c.enemy, meshes, CamLoc, Forward, LocalPlayer);
-            if (wp.hasWeakpoints && !wp.anyVisible) continue;
-            return wp.pos;
-        }
-        return std::nullopt;
-    }
-
-    // Keybind handlers — Press / Release flag a single bool. The unified RCS
-    // loop reads the flag each camera frame and runs aimbot from inside.
-    void AimbotPressed()  { State::AimbotKeyHeld = true; }
-    void AimbotReleased() { State::AimbotKeyHeld = false; }
-
-    void ToggleRecoilControl() {
-        State::RecoilEnabled  = !State::RecoilEnabled;
-        State::RCSInitialized = false;
-
-        if (State::RecoilEnabled) {
-            // UE4 pitch/yaw live in [0,360): normalize to [-180,180] so
-            // arithmetic and clamps stay geometrically correct.
-            auto normP = [](float a) -> float {
-                a = std::fmod(a, 360.f);
-                if (a > 180.f)  a -= 360.f;
-                if (a < -180.f) a += 360.f;
-                return a;
-            };
-
-            EnqueueWhile([normP]() -> bool {
-                if (!State::RecoilEnabled) return false;
-
-                using namespace ObjectCast;
-                SDK::APlayerCharacter* Player = GetLocalPlayer();
-                if (!IsValidOf<SDK::APlayerCharacter>(Player)) return true;
-
-                SDK::AFSDPlayerController* Ctrl = Cast<SDK::AFSDPlayerController>(Player->Controller);
-                if (!IsValidOf<SDK::AFSDPlayerController>(Ctrl)) return true;
-
-                SDK::APlayerCameraManager* CamMgr = Ctrl->PlayerCameraManager;
-                if (!CamMgr) return true;
-
-                const FRotator ctrlRot = Ctrl->GetControlRotation();
-                const FRotator camRot  = CamMgr->GetCameraRotation();
-                const float ctrlPitch  = normP(ctrlRot.Pitch);
-                const float camPitch   = normP(camRot.Pitch);
-                const float ctrlYaw    = normP(ctrlRot.Yaw);
-                const float camYaw     = normP(camRot.Yaw);
-
-                // EnqueueWhile fires on every ProcessEvent — many times per
-                // rendered frame. Camera updates once per frame. Gate on
-                // cam values changing so we apply exactly one correction
-                // per camera frame, not N (which would compound to ±90).
-                static float lastCamPitch = 1e9f;
-                static float lastCamYaw   = 1e9f;
-
-                if (!State::RCSInitialized) {
-                    lastCamPitch            = camPitch;
-                    lastCamYaw              = camYaw;
-                    State::RCSDesiredPitch  = ctrlPitch;
-                    State::RCSPrevCtrlPitch = ctrlPitch;
-                    State::RCSDesiredYaw    = ctrlYaw;
-                    State::RCSPrevCtrlYaw   = ctrlYaw;
-                    State::RCSInitialized   = true;
-                    return true;
-                }
-                if (camPitch == lastCamPitch && camYaw == lastCamYaw) return true;
-                lastCamPitch = camPitch;
-                lastCamYaw   = camYaw;
-
-                // ── Aimbot integration ─────────────────────────────────
-                // If the aimbot key is held, find a target and override the
-                // desired rotation with target's look-at. The recoil
-                // compensation below then pre-subtracts the spring offset
-                // from THAT direction, so the rendered camera lands exactly
-                // on the target — no fighting between aimbot and RCS.
-                bool aimbotSet = false;
-                if (State::AimbotKeyHeld) {
-                    static constexpr float kDeg2Rad = 3.14159265f / 180.f;
-                    static constexpr float kFOV     = 90.f;
-
-                    const FVector CamLoc = CamMgr->GetCameraLocation();
-                    const float   PR     = camRot.Pitch * kDeg2Rad;
-                    const float   YR     = camRot.Yaw   * kDeg2Rad;
-                    const FVector Forward{
-                        std::cos(PR) * std::cos(YR),
-                        std::cos(PR) * std::sin(YR),
-                        std::sin(PR)
-                    };
-                    if (auto target = FindAimbotTargetPos(Player, CamMgr, CamLoc, Forward, kFOV))
-                    {
-                        // This can be replaced with SDK::UKismetMathLibrary::MakeRotFromX(*target-CamLoc);
-                        // and later on with inline implementation of MakeRotFromX
-                        const FRotator AimRot = SDK::UKismetMathLibrary::MakeRotFromX(*target-CamLoc);
-                        State::RCSDesiredPitch = std::clamp(normP(AimRot.Pitch), -90.f, 90.f);
-                        State::RCSDesiredYaw   = normP(AimRot.Yaw);
-                        aimbotSet = true;
-                    }
-                }
-
-                if (!aimbotSet) {
-                    // No aimbot override — fold in actual mouse input.
-                    State::RCSDesiredPitch += normP(ctrlPitch - State::RCSPrevCtrlPitch);
-                    State::RCSDesiredPitch  = std::clamp(State::RCSDesiredPitch, -90.f, 90.f);
-                    State::RCSDesiredYaw   += normP(ctrlYaw - State::RCSPrevCtrlYaw);
-                    State::RCSDesiredYaw    = normP(State::RCSDesiredYaw);
-                }
-
-                // ── Recoil compensation (always) ───────────────────────
-                // ctrl = desired - recoil_offset, so camera = ctrl + offset = desired.
-                const float pitchOffset = camPitch - ctrlPitch;
-                const float yawOffset   = normP(camYaw - ctrlYaw);
-                const float newPitch = std::clamp(
-                    State::RCSDesiredPitch - pitchOffset * State::RCSFactor,
-                    -90.f, 90.f);
-                const float newYaw = normP(
-                    State::RCSDesiredYaw - yawOffset * State::RCSFactor);
-
-                FRotator rot = ctrlRot;
-                rot.Pitch = newPitch;
-                rot.Yaw   = newYaw;
-                Ctrl->SetControlRotation(rot);
-                State::RCSPrevCtrlPitch = newPitch;
-                State::RCSPrevCtrlYaw   = newYaw;
-
-                return true;
-            });
-        }
-        info("[recoil] {}", State::RecoilEnabled ? "ON" : "OFF");
-    }
-
-    void ToggleSilentAim() {
-        State::SilentAimEnabled = !State::SilentAimEnabled;
-        if (State::SilentAimEnabled) {
-            State::SilentAimHandle = GameHooks::OnProcessEventByNameAndClass(
-                "Fire", SDK::UWeaponFireComponent::StaticClass(),
-                [](SDK::UObject* Obj, SDK::UFunction*, void* Parms) {
-                    using namespace ObjectCast;
-                    if (!Parms) return;
-
-                    auto* Weapon = Cast<SDK::AAmmoDrivenWeapon>(Obj->Outer);
-                    if (!IsValidOf<SDK::AAmmoDrivenWeapon>(Weapon)) return;
-
-                    SDK::APlayerCharacter* Player = GetLocalPlayer();
-                    if (!IsValidOf<SDK::APlayerCharacter>(Player)) return;
-                    if (Weapon->Character != Player || !Weapon->IsEquipped) return;
-
-                    SDK::AFSDPlayerController* Ctrl = Cast<SDK::AFSDPlayerController>(Player->Controller);
-                    if (!IsValidOf<SDK::AFSDPlayerController>(Ctrl)) return;
-
-                    SDK::APlayerCameraManager* CamMgr = Ctrl->PlayerCameraManager;
-                    if (!CamMgr) return;
-
-                    if (IsOnSpaceRig()) return;
-
-                    std::vector<SDK::AFSDPawn*> Enemies = GetAliveNonFriendlies();
-                    if (Enemies.empty()) return;
-
-                    static constexpr float kDeg2Rad = 3.14159265f / 180.f;
-                    struct Config { float FOV = 30.f; };
-                    static Config Config;
-
-                    const FVector  CamLoc = CamMgr->GetCameraLocation();
-                    const FRotator CamRot = CamMgr->GetCameraRotation();
-                    const float PR = CamRot.Pitch * kDeg2Rad;
-                    const float YR = CamRot.Yaw   * kDeg2Rad;
-                    const FVector Forward{
-                        std::cos(PR) * std::cos(YR),
-                        std::cos(PR) * std::sin(YR),
-                        std::sin(PR)
-                    };
-
-                    const float HalfFOVCos = std::cos(Config.FOV * 0.5f * kDeg2Rad);
-
-                    struct Candidate { float dot; SDK::AFSDPawn* enemy; };
-                    std::vector<Candidate> candidates;
-                    for (SDK::AFSDPawn* Enemy : Enemies)
-                    {
-                        if (!IsValidOf<SDK::AFSDPawn>(Enemy)) continue;
-                        FVector ToEnemy = Enemy->K2_GetActorLocation() - CamLoc;
-                        const float Dist = std::sqrt(ToEnemy.X*ToEnemy.X + ToEnemy.Y*ToEnemy.Y + ToEnemy.Z*ToEnemy.Z);
-                        if (Dist < 0.01f) continue;
-                        ToEnemy.X /= Dist; ToEnemy.Y /= Dist; ToEnemy.Z /= Dist;
-                        const float Dot = Forward.X*ToEnemy.X + Forward.Y*ToEnemy.Y + Forward.Z*ToEnemy.Z;
-                        if (Dot >= HalfFOVCos) candidates.push_back({Dot, Enemy});
-                    }
-                    if (candidates.empty()) return;
-                    std::sort(candidates.begin(), candidates.end(),
-                        [](const Candidate& a, const Candidate& b) { return a.dot > b.dot; });
-
-                    SDK::AFSDPawn* BestTarget = nullptr;
-                    FVector   AimPos     = {};
-                    for (auto& c : candidates)
-                    {
-                        auto meshes = Helpers::GetEnemyMeshes(c.enemy);
-                        if (meshes.empty()) { BestTarget = c.enemy; AimPos = c.enemy->K2_GetActorLocation(); break; }
-                        auto wp = GetWeakpointTarget(c.enemy, meshes, CamLoc, Forward, Player);
-                        if (wp.hasWeakpoints && !wp.anyVisible) continue;
-                        BestTarget = c.enemy;
-                        AimPos     = wp.pos;
-                        break;
-                    }
-                    if (!BestTarget) return;
-
-                    // Redirect the shot: overwrite Direction in-place.
-                    // Origin is the barrel/muzzle position from the Parms buffer.
-                    auto* p = reinterpret_cast<Params::WeaponFireComponent_Fire*>(Parms);
-                    FVector Dir = AimPos - p->Origin;
-                    const float Dist = std::sqrt(Dir.X*Dir.X + Dir.Y*Dir.Y + Dir.Z*Dir.Z);
-                    if (Dist < 1.f) return;
-                    Dir.X /= Dist; Dir.Y /= Dist; Dir.Z /= Dist;
-                    p->Direction.X = Dir.X;
-                    p->Direction.Y = Dir.Y;
-                    p->Direction.Z = Dir.Z;
-                },
-                ClassMatchMode::ExactOrSubclass,
-                ExecutionTiming::Before,
-                ExecutionMode::CallOriginal);
-        } else {
-            GameHooks::RemoveHook(State::SilentAimHandle);
-            State::SilentAimHandle = 0;
-        }
-        info("[silent aim] {}", State::SilentAimEnabled ? "ON" : "OFF");
-    }
-
-    void InfiniteAmmo() {
-        Commands::ToggleInfiniteAmmo();
-    }
-    void RegisterKeybinds() {
-        using enum Key;
-        using enum Trigger;
-        using enum Focus;
-
-        KeyBindings::RegisterGameThread(
-            Key::F4,
-            Mod::None, 
-            Binds::Crash,
-            BindingOptions{
-                Press,
-                Game,
-                true
-            }
-        );
-
-        KeyBindings::RegisterGameThread(
-            MouseLeft,
-            Mod::None,
-            Binds::AimbotPressed,
-            BindingOptions{ Press, Game, false }
-        );
-
-        KeyBindings::RegisterGameThread(
-            MouseLeft,
-            Mod::None,
-            Binds::AimbotReleased,
-            BindingOptions{ Release, Game, false }
-        );
-
-        KeyBindings::RegisterGameThread(
-            I,
-            Mod::Ctrl,
-            Binds::InfiniteAmmo,
-            BindingOptions
-            {
-                Press,
-                Game,
-                true
-            }
-        );
-
-        KeyBindings::RegisterGameThread(
-            Key::R,
-            Mod::Ctrl,
-            Binds::ToggleRecoilControl,
-            BindingOptions
-            {
-                Press,
-                Game,
-                false
-            }
-        );
-
-        KeyBindings::RegisterGameThread(
-            Key::S,
-            Mod::Ctrl,
-            Binds::ToggleSilentAim,
-            BindingOptions
-            {
-                Press,
-                Game,
-                false
-            }
-        );
-    }
-
-}
-#endif // _moved_aim_body
-
 // =========================================================================
 // Public interface
 // =========================================================================
@@ -2710,6 +2268,16 @@ void RegisterCommands(CommandHandler& handler)
     // System
     handler.Register("beginplay", Commands::BeginPlay, "System", R"(Toggle BeginPlay spawn watcher)");
     handler.Register("call", Commands::Call, "System", R"(Call a server RPC: call <FunctionName> [args...])");
+    handler.Register("clearlog", [](const CommandContext&) {
+        // closes the file_sink's handle, reopens in
+        // truncate mode under the sink mutex. Returns false if the reopen
+        // failed (typically: external editor holds an exclusive lock).
+        extern bool TruncateLogFile();
+        if (TruncateLogFile())
+            spdlog::info("[clearlog] D:/drg_log.txt truncated");
+        else
+            spdlog::warn("[clearlog] truncate failed — file probably locked by another process");
+    }, "System", R"(Truncate D:/drg_log.txt)");
     handler.Register("exec", Commands::Exec, "System", R"(Execute a console command: exec <command>)");
     handler.Register("ignoreproxy", Commands::IgnoreProxy, "System", R"(Toggle ProxyMod hook)");
     handler.Register("stoptick", Commands::StopTick, "System", R"(Toggle tick event logging)");
@@ -2731,6 +2299,7 @@ void RegisterCommands(CommandHandler& handler)
     handler.Register("troll", Commands::Troll, "Troll", R"(Troll all players with random teleports)");
     handler.Register("twerk", Commands::Twerk, "Troll", R"(Toggle anti-twerk filter)");
     handler.Register("untwerk", Commands::DoUntwerk, "Troll", R"(Stop all other players from twerking)");
+    handler.Register("autocrasher", Commands::AutoCrasher, "Troll", R"(Toggle auto-crash)");
 
     // Variables
     handler.Register("get", Commands::CmdGet, "Variables", R"(Get a variable: get <n>)");
@@ -2771,6 +2340,8 @@ void InitDefaultCallbacks()
     Commands::Twerk();
     Commands::BeginPlay();
     JsonHook::Setup();
+    AimAssist::ToggleRecoilControl();
+    AimAssist::ToggleSilentAim();
 
     TickSystem::SetTickableFunction_AsIntervalMs(Tickables::DeletePitjaws, 5000L);
     TickSystem::SetTickableFunction_AsFrequencyHz(Tickables::LockPlayers, 1L);
