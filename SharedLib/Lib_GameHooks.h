@@ -43,8 +43,191 @@ namespace GameHooks
     using ProcessEventCallback = std::function<void(SDK::UObject*, SDK::UFunction*, void*)>;
     using CallbackHandle       = size_t;
 
-    class ProcessEventHook
+    // =========================================================================
+    // HookBase<Derived> — CRTP base for hook singletons.
+    // Provides: singleton, lifecycle, task queue, and callback CRUD.
+    //
+    // Derived must implement (kept private, accessed via friend):
+    //   auto  CloneList() const          — copy of the current callback list
+    //   void  StoreList(CallbackList)    — commit a new list (may rebuild dispatch cache)
+    //   void  StoreEmptyState()          — fast path: store an empty state
+    //   bool  DoUninstall()              — hook-specific teardown; must call DoUninstallCommon()
+    //   void  OnBeforeHookRemoval()      — [optional] called inside DoUninstallCommon before
+    //                                      hookInstalled_ is cleared (e.g. EasyHook::Shutdown)
+    // =========================================================================
+
+    template<typename Derived>
+    class HookBase
     {
+    protected:
+        static inline std::atomic<int>     executionDepth_{ 0 };
+
+        std::atomic<bool>                  pendingUninstall_{ false };
+        std::atomic<bool>                  hookInstalled_{ false };
+        std::atomic<bool>                  hasTasks_{ false };
+        mutable std::mutex                 writeMutex_;
+        std::mutex                         taskMutex_;
+        std::vector<std::function<void()>> taskQueue_;
+        std::function<void()>              onUninstalled_;
+        CallbackHandle                     nextHandle_{ 1 };
+
+        HookBase() = default;
+
+        // Drain the task queue — call from the hooked function when depthBefore == 0.
+        void DrainTasks()
+        {
+            if (!hasTasks_.load(std::memory_order_acquire)) return;
+            std::vector<std::function<void()>> local;
+            {
+                std::lock_guard lock(taskMutex_);
+                std::swap(local, taskQueue_);
+                hasTasks_.store(false, std::memory_order_relaxed);
+            }
+            for (auto& t : local)
+            {
+                DBG_ASSERT(t, "Null task in queue");
+                try { t(); }
+                catch (const std::exception&) { DBG_ASSERT(false, "Task threw exception"); }
+            }
+        }
+
+        // Override in Derived to run hook-specific cleanup (e.g. EasyHook::Shutdown).
+        // Default is a no-op.
+        void OnBeforeHookRemoval() {}
+
+        bool DoUninstallCommon()
+        {
+            DBG_ASSERT(!hookInstalled_.load() || pendingUninstall_.load(), "Uninstall without pending flag");
+            {
+                std::lock_guard lock(writeMutex_);
+                static_cast<Derived*>(this)->StoreEmptyState();
+            }
+            DBG_ASSERT(executionDepth_.load(std::memory_order_relaxed) == 0,
+                "DoUninstall called with non-zero execution depth");
+            static_cast<Derived*>(this)->OnBeforeHookRemoval();
+            hookInstalled_.store(false);
+            DBG_ASSERT(!hookInstalled_.load(), "Failed to clear hookInstalled flag");
+            if (onUninstalled_)
+            {
+                auto cb = std::move(onUninstalled_);
+                onUninstalled_ = nullptr;
+                try { cb(); }
+                catch (const std::exception&) { DBG_ASSERT(false, "onUninstalled callback threw exception"); }
+            }
+            return true;
+        }
+
+    public:
+        static Derived& Get()
+        {
+            static Derived* inst = new Derived();
+            DBG_CHECK_PTR(inst);
+            return *inst;
+        }
+
+        bool IsInstalled() const { return hookInstalled_.load(); }
+
+        bool RequestUninstall()
+        {
+            int depth = executionDepth_.load();
+            DBG_CHECK_RANGE(depth, 0, 1000);
+            if (depth > 0) { pendingUninstall_ = true; return true; }
+            return static_cast<Derived*>(this)->DoUninstall();
+        }
+
+        void SetOnUninstalled(std::function<void()> cb)
+        {
+            DBG_ASSERT(cb, "Null callback passed to SetOnUninstalled");
+            onUninstalled_ = std::move(cb);
+        }
+
+        void Enqueue(std::function<void()> task)
+        {
+            DBG_ASSERT(task, "Null task passed to Enqueue");
+            std::lock_guard lock(taskMutex_);
+            taskQueue_.push_back(std::move(task));
+            DBG_CHECK_RANGE(taskQueue_.size(), 1, 100000);
+            hasTasks_.store(true, std::memory_order_release);
+        }
+
+        bool RemoveCallback(CallbackHandle handle)
+        {
+            DBG_ASSERT(handle > 0, "Invalid handle passed to RemoveCallback");
+            std::lock_guard lock(writeMutex_);
+            auto list = static_cast<Derived*>(this)->CloneList();
+            auto it = std::remove_if(list.begin(), list.end(),
+                [handle](const auto& e) { return e.handle == handle; });
+            if (it == list.end()) return false;
+            list.erase(it, list.end());
+            static_cast<Derived*>(this)->StoreList(std::move(list));
+            return true;
+        }
+
+        bool EnableCallback(CallbackHandle handle, bool enabled)
+        {
+            DBG_ASSERT(handle > 0, "Invalid handle passed to EnableCallback");
+            std::lock_guard lock(writeMutex_);
+            auto list = static_cast<Derived*>(this)->CloneList();
+            for (auto& e : list)
+            {
+                if (e.handle != handle) continue;
+                e.enabled = enabled;
+                static_cast<Derived*>(this)->StoreList(std::move(list));
+                return true;
+            }
+            return false;
+        }
+
+        bool SetExecutionMode(CallbackHandle handle, ExecutionMode mode)
+        {
+            DBG_ASSERT(handle > 0, "Invalid handle passed to SetExecutionMode");
+            std::lock_guard lock(writeMutex_);
+            auto list = static_cast<Derived*>(this)->CloneList();
+            for (auto& e : list)
+            {
+                if (e.handle != handle) continue;
+                e.mode = mode;
+                static_cast<Derived*>(this)->StoreList(std::move(list));
+                return true;
+            }
+            return false;
+        }
+
+        bool SetExecutionTiming(CallbackHandle handle, ExecutionTiming timing)
+        {
+            DBG_ASSERT(handle > 0, "Invalid handle passed to SetExecutionTiming");
+            std::lock_guard lock(writeMutex_);
+            auto list = static_cast<Derived*>(this)->CloneList();
+            for (auto& e : list)
+            {
+                if (e.handle != handle) continue;
+                e.timing = timing;
+                static_cast<Derived*>(this)->StoreList(std::move(list));
+                return true;
+            }
+            return false;
+        }
+
+        void ClearAllCallbacks()
+        {
+            std::lock_guard lock(writeMutex_);
+            static_cast<Derived*>(this)->StoreEmptyState();
+        }
+
+        size_t GetCallbackCount() const
+        {
+            return static_cast<const Derived*>(this)->CloneList().size();
+        }
+    };
+
+    // =========================================================================
+    // ProcessEventHook
+    // =========================================================================
+
+    class ProcessEventHook : public HookBase<ProcessEventHook>
+    {
+        friend class HookBase<ProcessEventHook>;
+
     private:
         // ── Nested types ────────────────────────────────────────────────────
 
@@ -112,25 +295,14 @@ namespace GameHooks
             }
         };
 
-        // ── Static / member data ─────────────────────────────────────────────
+        // ── Data ────────────────────────────────────────────────────────────
 
         static constexpr size_t          kMaxDispatchBuf = 32;
-
-        static ProcessEventHook*         instance;
         static void(*OriginalProcessEvent)(SDK::UObject*, SDK::UFunction*, void*);
-        static inline std::atomic<int>   executionDepth_{ 0 };
 
-        std::atomic<bool>                              pendingUninstall_{ false };
-        std::atomic<bool>                              hookInstalled_{ false };
-        std::atomic<bool>                              hasTasks_{ false };
         std::atomic<std::shared_ptr<const CallbackState>> stateOwner_{};
-        mutable std::mutex                             writeMutex_;
-        std::mutex                                     taskMutex_;
-        std::vector<std::function<void()>>             taskQueue_;
-        std::function<void()>                          onUninstalled_;
-        CallbackHandle                                 nextHandle_{ 1 };
 
-        // ── Private methods ──────────────────────────────────────────────────
+        // ── Internal helpers ─────────────────────────────────────────────────
 
         ProcessEventHook();
         void StoreState(std::shared_ptr<const CallbackState> s);
@@ -141,17 +313,17 @@ namespace GameHooks
         static void RunAfterPass (const CallbackList& list, const size_t* idx, size_t count,
                                   SDK::UObject* Object, SDK::UFunction* Function, void* Parms);
         static void __fastcall HookedProcessEvent(SDK::UObject* Object, SDK::UFunction* Function, void* Parms);
-        bool DoUninstall();
+
+        // ── CRTP interface (called by HookBase) ──────────────────────────────
+
         CallbackList CloneList() const;
+        void StoreList(CallbackList list);  // rebuilds dispatch cache then commits
+        void StoreEmptyState();
+        void OnBeforeHookRemoval();         // calls EasyHook::Shutdown
+        bool DoUninstall();
 
     public:
-        static ProcessEventHook& Get();
-
-        bool IsInstalled() const;
         bool Install();
-        bool RequestUninstall();
-        void SetOnUninstalled(std::function<void()> cb);
-        void Enqueue(std::function<void()> task);
 
         CallbackHandle AddCallback(ProcessEventCallback callback,
             const std::string& functionName = "", SDK::UClass* classFilter = nullptr,
@@ -159,13 +331,6 @@ namespace GameHooks
             ClassMatchMode classMatchMode = ClassMatchMode::ExactOrSubclass,
             ExecutionTiming timing = ExecutionTiming::Before,
             ExecutionMode mode = ExecutionMode::CallOriginal);
-
-        bool RemoveCallback    (CallbackHandle handle);
-        bool EnableCallback    (CallbackHandle handle, bool enabled);
-        bool SetExecutionMode  (CallbackHandle handle, ExecutionMode mode);
-        bool SetExecutionTiming(CallbackHandle handle, ExecutionTiming timing);
-        void   ClearAllCallbacks();
-        size_t GetCallbackCount() const;
     };
 
     // ── Free convenience functions ────────────────────────────────────────────
@@ -213,8 +378,8 @@ namespace GameHooks
 
     CallbackHandle OnProcessEventAdvanced(const CallbackParams& p, ProcessEventCallback cb);
 
-    bool RemoveHook           (CallbackHandle h);
-    bool SetHookExecutionMode (CallbackHandle h, ExecutionMode m);
+    bool RemoveHook            (CallbackHandle h);
+    bool SetHookExecutionMode  (CallbackHandle h, ExecutionMode m);
     bool SetHookExecutionTiming(CallbackHandle h, ExecutionTiming t);
 
     // =========================================================================
@@ -222,19 +387,20 @@ namespace GameHooks
     //
     //   Signature on the wire: void(UGameEngine* this, float DeltaSeconds, bool bIdleMode)
     //
-    // Unlike ProcessEventHook there are no per-callback filters (function name,
-    // class, etc.) — Tick is a single virtual on the engine, so every registered
-    // callback fires every frame at the requested timing.
+    // Unlike ProcessEventHook there are no per-callback filters — Tick is a
+    // single virtual on the engine, so every registered callback fires every
+    // frame at the requested timing.
     //
     // The vtable slot of UEngine::Tick is per-game and must be supplied to
-    // Install() by the caller — Dumper-7 doesn't emit it the way it emits
-    // SDK::Offsets::ProcessEventIdx.
+    // Install() — Dumper-7 doesn't emit it the way it emits ProcessEventIdx.
     // =========================================================================
 
     using EngineTickCallback = std::function<void(SDK::UEngine*, float, bool)>;
 
-    class EngineTickHook
+    class EngineTickHook : public HookBase<EngineTickHook>
     {
+        friend class HookBase<EngineTickHook>;
+
     private:
         struct CallbackEntry
         {
@@ -256,48 +422,30 @@ namespace GameHooks
 
         using CallbackList = std::vector<CallbackEntry>;
 
-        static EngineTickHook*           instance;
         static void(*OriginalTick)(SDK::UEngine*, float, bool);
-        static inline std::atomic<int>   executionDepth_{ 0 };
 
-        std::atomic<bool>                              pendingUninstall_{ false };
-        std::atomic<bool>                              hookInstalled_{ false };
-        std::atomic<bool>                              hasTasks_{ false };
         std::atomic<std::shared_ptr<const CallbackList>> stateOwner_{};
-        mutable std::mutex                             writeMutex_;
-        std::mutex                                     taskMutex_;
-        std::vector<std::function<void()>>             taskQueue_;
-        std::function<void()>                          onUninstalled_;
-        CallbackHandle                                 nextHandle_{ 1 };
 
         EngineTickHook();
         void StoreState(std::shared_ptr<const CallbackList> s);
         static bool RunBeforePass(const CallbackList& list, SDK::UEngine* Eng, float Dt, bool Idle);
         static void RunAfterPass (const CallbackList& list, SDK::UEngine* Eng, float Dt, bool Idle);
         static void __fastcall HookedTick(SDK::UEngine* Engine, float DeltaSeconds, bool bIdleMode);
-        bool DoUninstall();
+
+        // ── CRTP interface ───────────────────────────────────────────────────
+
         CallbackList CloneList() const;
+        void StoreList(CallbackList list);
+        void StoreEmptyState();
+        bool DoUninstall();
 
     public:
-        static EngineTickHook& Get();
-
-        bool IsInstalled() const;
         // vtableSlot: index of UEngine::Tick in the engine's vtable (per-game).
         bool Install(int32 vtableSlot);
-        bool RequestUninstall();
-        void SetOnUninstalled(std::function<void()> cb);
-        void Enqueue(std::function<void()> task);
 
         CallbackHandle AddCallback(EngineTickCallback cb,
             ExecutionTiming timing = ExecutionTiming::Before,
             ExecutionMode  mode   = ExecutionMode::CallOriginal);
-
-        bool   RemoveCallback     (CallbackHandle handle);
-        bool   EnableCallback     (CallbackHandle handle, bool enabled);
-        bool   SetExecutionMode   (CallbackHandle handle, ExecutionMode mode);
-        bool   SetExecutionTiming (CallbackHandle handle, ExecutionTiming timing);
-        void   ClearAllCallbacks();
-        size_t GetCallbackCount() const;
     };
 
     // ── Free convenience functions for the tick hook ─────────────────────────
@@ -311,14 +459,13 @@ namespace GameHooks
 } // namespace GameHooks
 
 // =========================================================================
-// EnqueueOnce — runs fn once on the game thread on the next ProcessEvent tick.
+// EnqueueOnce — runs fn once on the game thread on the next EngineTick.
 // =========================================================================
 
 void EnqueueOnce(std::function<void()> fn);
 
 // =========================================================================
 // EnqueueWhile — runs fn on the game thread every tick until fn returns false.
-//   Useful for "do something for as long as a key/condition is active".
 // =========================================================================
 
 void EnqueueWhile(std::function<bool()> fn);

@@ -42,7 +42,7 @@ namespace Internal
     }
 }
 
-using namespace Internal;
+using namespace ::Internal;
 
     // =========================================================================
     // Constructor

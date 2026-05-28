@@ -2,23 +2,23 @@
 
 namespace GameHooks
 {
-using namespace SDK;  // file-local: this TU has no math types, no leak risk
+using namespace SDK; 
 
-// ── Static data member definitions ──────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+//  ProcessEventHook
+// ═════════════════════════════════════════════════════════════════════════════
 
-ProcessEventHook* ProcessEventHook::instance                                     = nullptr;
-void(*ProcessEventHook::OriginalProcessEvent)(UObject*, UFunction*, void*)       = nullptr;
+void(*ProcessEventHook::OriginalProcessEvent)(UObject*, UFunction*, void*) = nullptr;
 
 // ── Constructor ──────────────────────────────────────────────────────────────
 
 ProcessEventHook::ProcessEventHook()
 {
-    auto e = std::make_shared<CallbackState>();
-    StoreState(e);
+    StoreEmptyState();
     DBG_ASSERT(stateOwner_.load() != nullptr, "Failed to initialize state");
 }
 
-// ── Private helpers ──────────────────────────────────────────────────────────
+// ── Internal helpers ─────────────────────────────────────────────────────────
 
 void ProcessEventHook::StoreState(std::shared_ptr<const CallbackState> s)
 {
@@ -59,6 +59,37 @@ ProcessEventHook::BuildState(CallbackList list)
     return s;
 }
 
+// ── CRTP interface ────────────────────────────────────────────────────────────
+
+ProcessEventHook::CallbackList ProcessEventHook::CloneList() const
+{
+    auto s = std::atomic_load(&stateOwner_);
+    if (s) { s->Validate(); return s->list; }
+    return CallbackList{};
+}
+
+void ProcessEventHook::StoreList(CallbackList list)
+{
+    StoreState(BuildState(std::move(list)));
+}
+
+void ProcessEventHook::StoreEmptyState()
+{
+    StoreState(std::make_shared<CallbackState>());
+}
+
+void ProcessEventHook::OnBeforeHookRemoval()
+{
+    EasyHook::Shutdown();
+}
+
+bool ProcessEventHook::DoUninstall()
+{
+    return DoUninstallCommon();
+}
+
+// ── Dispatch helpers ──────────────────────────────────────────────────────────
+
 bool ProcessEventHook::MatchesClassFilter(UObject* Object, UClass* classFilter, ClassMatchMode mode)
 {
     if (!classFilter || !Object || !Object->Class)
@@ -76,9 +107,9 @@ bool ProcessEventHook::MatchesClassFilter(UObject* Object, UClass* classFilter, 
 
     switch (mode)
     {
-    case ClassMatchMode::Exact:          return cls == classFilter;
-    case ClassMatchMode::ExactOrSubclass:return cls == classFilter || sc.IsSubclassOf(cls, classFilter);
-    case ClassMatchMode::SubclassOnly:   return cls != classFilter && sc.IsSubclassOf(cls, classFilter);
+    case ClassMatchMode::Exact:           return cls == classFilter;
+    case ClassMatchMode::ExactOrSubclass: return cls == classFilter || sc.IsSubclassOf(cls, classFilter);
+    case ClassMatchMode::SubclassOnly:    return cls != classFilter && sc.IsSubclassOf(cls, classFilter);
     default: DBG_ASSERT(false, "Unknown ClassMatchMode"); return false;
     }
 }
@@ -101,8 +132,8 @@ bool ProcessEventHook::RunBeforePass(const CallbackList& list, const size_t* idx
         DBG_ASSERT(e.handle > 0, "Invalid callback entry handle");
         DBG_ASSERT(e.callback,   "Null callback in entry");
 
-        if (!e.enabled || e.timing == ExecutionTiming::After)          continue;
-        if (e.objectFilter && e.objectFilter != Object)                 continue;
+        if (!e.enabled || e.timing == ExecutionTiming::After)            continue;
+        if (e.objectFilter && e.objectFilter != Object)                  continue;
         if (!MatchesClassFilter(Object, e.classFilter, e.classMatchMode)) continue;
 
         try { e.callback(Object, Function, Parms); }
@@ -134,8 +165,8 @@ void ProcessEventHook::RunAfterPass(const CallbackList& list, const size_t* idx,
         DBG_ASSERT(e.handle > 0, "Invalid callback entry handle");
         DBG_ASSERT(e.callback,   "Null callback in entry");
 
-        if (!e.enabled || e.timing == ExecutionTiming::Before)         continue;
-        if (e.objectFilter && e.objectFilter != Object)                 continue;
+        if (!e.enabled || e.timing == ExecutionTiming::Before)            continue;
+        if (e.objectFilter && e.objectFilter != Object)                   continue;
         if (!MatchesClassFilter(Object, e.classFilter, e.classMatchMode)) continue;
 
         try { e.callback(Object, Function, Parms); }
@@ -154,10 +185,6 @@ void __fastcall ProcessEventHook::HookedProcessEvent(UObject* Object, UFunction*
 
     // Re-entrancy guard: if a callback is already on this thread's call stack
     // (depthBefore > 0), skip all dispatch and task-drain logic entirely.
-    // Without this, any PE call made from within a callback (e.g. a
-    // BlueprintCallable like GetEquippedItem, anything inside GetLocalPlayer,
-    // etc.) re-enters RunBeforePass with the same callback list -> infinite
-    // recursion -> stack overflow (observed with the wildcard firespy hook).
     if (depthBefore > 0)
     {
         __assume(OriginalProcessEvent != nullptr);
@@ -170,22 +197,7 @@ void __fastcall ProcessEventHook::HookedProcessEvent(UObject* Object, UFunction*
     static ProcessEventHook* inst = &Get();
     DBG_CHECK_PTR(inst);
 
-    if (inst->hasTasks_.load(std::memory_order_acquire))
-    {
-        std::vector<std::function<void()>> local;
-        {
-            std::lock_guard lock(inst->taskMutex_);
-            std::swap(local, inst->taskQueue_);
-            inst->hasTasks_.store(false, std::memory_order_relaxed);
-        }
-        while (!local.empty())
-        {
-            DBG_ASSERT(local.back(), "Null task in queue");
-            try { local.back()(); }
-            catch (const std::exception&) { DBG_ASSERT(false, "Task threw exception"); }
-            local.pop_back();
-        }
-    }
+    inst->DrainTasks();
 
     auto state = std::atomic_load(&inst->stateOwner_);
     bool hasCallbacks = state && !state->list.empty();
@@ -224,10 +236,6 @@ void __fastcall ProcessEventHook::HookedProcessEvent(UObject* Object, UFunction*
     }
     else
     {
-        // No callbacks registered (or no state yet): pure passthrough.
-        // ANY OTHER PATH that doesn't call OriginalProcessEvent silently
-        // swallows every PE call — that's the bug that made RcMods freeze
-        // the game world while DrgMods worked (DRG always has callbacks).
         __assume(OriginalProcessEvent != nullptr);
         try { OriginalProcessEvent(Object, Function, Parms); }
         catch (const std::exception&) { DBG_ASSERT(false, "OriginalProcessEvent threw exception"); }
@@ -248,48 +256,7 @@ void __fastcall ProcessEventHook::HookedProcessEvent(UObject* Object, UFunction*
     }
 }
 
-bool ProcessEventHook::DoUninstall()
-{
-    DBG_ASSERT(!hookInstalled_.load() || pendingUninstall_.load(), "Uninstall without pending flag");
-
-    { std::lock_guard lock(writeMutex_); StoreState(std::make_shared<CallbackState>()); }
-
-    DBG_ASSERT(executionDepth_.load(std::memory_order_relaxed) == 0, "DoUninstall called with non-zero execution depth");
-
-    EasyHook::Shutdown();
-    hookInstalled_.store(false);
-    DBG_ASSERT(!hookInstalled_.load(), "Failed to clear hookInstalled flag");
-
-    if (onUninstalled_)
-    {
-        auto cb = std::move(onUninstalled_);
-        onUninstalled_ = nullptr;
-        try { cb(); }
-        catch (const std::exception&) { DBG_ASSERT(false, "onUninstalled callback threw exception"); }
-    }
-    return true;
-}
-
-ProcessEventHook::CallbackList ProcessEventHook::CloneList() const
-{
-    auto s = std::atomic_load(&stateOwner_);
-    if (s) { s->Validate(); return s->list; }
-    return CallbackList{};
-}
-
-// ── Public methods ───────────────────────────────────────────────────────────
-
-ProcessEventHook& ProcessEventHook::Get()
-{
-    if (!instance) instance = new ProcessEventHook();
-    DBG_CHECK_PTR(instance);
-    return *instance;
-}
-
-bool ProcessEventHook::IsInstalled() const
-{
-    return hookInstalled_.load();
-}
+// ── Public methods ────────────────────────────────────────────────────────────
 
 bool ProcessEventHook::Install()
 {
@@ -318,29 +285,6 @@ bool ProcessEventHook::Install()
     return true;
 }
 
-bool ProcessEventHook::RequestUninstall()
-{
-    int depth = executionDepth_.load();
-    DBG_CHECK_RANGE(depth, 0, 1000);
-    if (depth > 0) { pendingUninstall_ = true; return true; }
-    return DoUninstall();
-}
-
-void ProcessEventHook::SetOnUninstalled(std::function<void()> cb)
-{
-    DBG_ASSERT(cb, "Null callback passed to SetOnUninstalled");
-    onUninstalled_ = std::move(cb);
-}
-
-void ProcessEventHook::Enqueue(std::function<void()> task)
-{
-    DBG_ASSERT(task, "Null task passed to Enqueue");
-    std::lock_guard lock(taskMutex_);
-    taskQueue_.push_back(std::move(task));
-    DBG_CHECK_RANGE(taskQueue_.size(), 1, 100000);
-    hasTasks_.store(true, std::memory_order_release);
-}
-
 CallbackHandle ProcessEventHook::AddCallback(ProcessEventCallback callback,
     const std::string& functionName, UClass* classFilter,
     const UObject* objectFilter, UFunction* functionFilter,
@@ -354,83 +298,11 @@ CallbackHandle ProcessEventHook::AddCallback(ProcessEventCallback callback,
     newList.emplace_back(handle, functionName, classFilter, objectFilter,
         functionFilter, classMatchMode, timing, mode, std::move(callback));
     DBG_CHECK_RANGE(newList.size(), 1, 100000);
-    StoreState(BuildState(std::move(newList)));
+    StoreList(std::move(newList));
     return handle;
 }
 
-bool ProcessEventHook::RemoveCallback(CallbackHandle handle)
-{
-    DBG_ASSERT(handle > 0, "Invalid handle passed to RemoveCallback");
-    std::lock_guard lock(writeMutex_);
-    CallbackList newList = CloneList();
-    auto it = std::remove_if(newList.begin(), newList.end(),
-        [handle](const CallbackEntry& e) { return e.handle == handle; });
-    if (it == newList.end()) return false;
-    newList.erase(it, newList.end());
-    StoreState(BuildState(std::move(newList)));
-    return true;
-}
-
-bool ProcessEventHook::EnableCallback(CallbackHandle handle, bool enabled)
-{
-    DBG_ASSERT(handle > 0, "Invalid handle passed to EnableCallback");
-    std::lock_guard lock(writeMutex_);
-    CallbackList newList = CloneList();
-    for (auto& e : newList)
-    {
-        if (e.handle != handle) continue;
-        e.enabled = enabled;
-        StoreState(BuildState(std::move(newList)));
-        return true;
-    }
-    return false;
-}
-
-bool ProcessEventHook::SetExecutionMode(CallbackHandle handle, ExecutionMode mode)
-{
-    DBG_ASSERT(handle > 0, "Invalid handle passed to SetExecutionMode");
-    std::lock_guard lock(writeMutex_);
-    CallbackList newList = CloneList();
-    for (auto& e : newList)
-    {
-        if (e.handle != handle) continue;
-        e.mode = mode;
-        StoreState(BuildState(std::move(newList)));
-        return true;
-    }
-    return false;
-}
-
-bool ProcessEventHook::SetExecutionTiming(CallbackHandle handle, ExecutionTiming timing)
-{
-    DBG_ASSERT(handle > 0, "Invalid handle passed to SetExecutionTiming");
-    std::lock_guard lock(writeMutex_);
-    CallbackList newList = CloneList();
-    for (auto& e : newList)
-    {
-        if (e.handle != handle) continue;
-        e.timing = timing;
-        StoreState(BuildState(std::move(newList)));
-        return true;
-    }
-    return false;
-}
-
-void ProcessEventHook::ClearAllCallbacks()
-{
-    std::lock_guard lock(writeMutex_);
-    StoreState(std::make_shared<CallbackState>());
-    DBG_ASSERT(std::atomic_load(&stateOwner_)->list.empty(), "ClearAllCallbacks failed");
-}
-
-size_t ProcessEventHook::GetCallbackCount() const
-{
-    auto s = std::atomic_load(&stateOwner_);
-    if (s) { s->Validate(); return s->list.size(); }
-    return 0;
-}
-
-// ── Free convenience functions ───────────────────────────────────────────────
+// ── Free convenience functions ────────────────────────────────────────────────
 
 bool InstallProcessEventHook() { return ProcessEventHook::Get().Install(); }
 
@@ -492,22 +364,25 @@ CallbackHandle OnProcessEventAdvanced(const CallbackParams& p, ProcessEventCallb
         p.classMatchMode, p.timing, p.mode);
 }
 
-bool RemoveHook           (CallbackHandle h) { DBG_ASSERT(h > 0, "Invalid handle"); return ProcessEventHook::Get().RemoveCallback(h); }
-bool SetHookExecutionMode (CallbackHandle h, ExecutionMode m)   { DBG_ASSERT(h > 0, "Invalid handle"); return ProcessEventHook::Get().SetExecutionMode(h, m); }
+bool RemoveHook            (CallbackHandle h) { DBG_ASSERT(h > 0, "Invalid handle"); return ProcessEventHook::Get().RemoveCallback(h); }
+bool SetHookExecutionMode  (CallbackHandle h, ExecutionMode m)   { DBG_ASSERT(h > 0, "Invalid handle"); return ProcessEventHook::Get().SetExecutionMode(h, m); }
 bool SetHookExecutionTiming(CallbackHandle h, ExecutionTiming t) { DBG_ASSERT(h > 0, "Invalid handle"); return ProcessEventHook::Get().SetExecutionTiming(h, t); }
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  EngineTickHook
 // ═════════════════════════════════════════════════════════════════════════════
 
-EngineTickHook* EngineTickHook::instance                              = nullptr;
-void(*EngineTickHook::OriginalTick)(UEngine*, float, bool)            = nullptr;
+void(*EngineTickHook::OriginalTick)(UEngine*, float, bool) = nullptr;
+
+// ── Constructor ──────────────────────────────────────────────────────────────
 
 EngineTickHook::EngineTickHook()
 {
-    StoreState(std::make_shared<CallbackList>());
+    StoreEmptyState();
     DBG_ASSERT(stateOwner_.load() != nullptr, "Failed to initialize state");
 }
+
+// ── Internal helpers ─────────────────────────────────────────────────────────
 
 void EngineTickHook::StoreState(std::shared_ptr<const CallbackList> s)
 {
@@ -516,11 +391,32 @@ void EngineTickHook::StoreState(std::shared_ptr<const CallbackList> s)
     DBG_ASSERT(std::atomic_load(&stateOwner_) != nullptr, "State store failed");
 }
 
+// ── CRTP interface ────────────────────────────────────────────────────────────
+
 EngineTickHook::CallbackList EngineTickHook::CloneList() const
 {
     auto s = std::atomic_load(&stateOwner_);
     return s ? *s : CallbackList{};
 }
+
+void EngineTickHook::StoreList(CallbackList list)
+{
+    StoreState(std::make_shared<CallbackList>(std::move(list)));
+}
+
+void EngineTickHook::StoreEmptyState()
+{
+    StoreState(std::make_shared<CallbackList>());
+}
+
+bool EngineTickHook::DoUninstall()
+{
+    // NOTE: we do NOT call EasyHook::Shutdown() here — ProcessEventHook may
+    // still own a hook in the same MinHook instance. Just clear our own state.
+    return DoUninstallCommon();
+}
+
+// ── Dispatch helpers ──────────────────────────────────────────────────────────
 
 bool EngineTickHook::RunBeforePass(const CallbackList& list, UEngine* Eng, float Dt, bool Idle)
 {
@@ -568,21 +464,8 @@ void __fastcall EngineTickHook::HookedTick(UEngine* Engine, float DeltaSeconds, 
     static EngineTickHook* inst = &Get();
     DBG_CHECK_PTR(inst);
 
-    if (depthBefore == 0 && inst->hasTasks_.load(std::memory_order_acquire))
-    {
-        std::vector<std::function<void()>> local;
-        {
-            std::lock_guard lock(inst->taskMutex_);
-            std::swap(local, inst->taskQueue_);
-            inst->hasTasks_.store(false, std::memory_order_relaxed);
-        }
-        for (auto& t : local)
-        {
-            DBG_ASSERT(t, "Null task in queue");
-            try { t(); }
-            catch (const std::exception&) { DBG_ASSERT(false, "Task threw exception"); }
-        }
-    }
+    if (depthBefore == 0)
+        inst->DrainTasks();
 
     auto state = std::atomic_load(&inst->stateOwner_);
     bool hasCallbacks = state && !state->empty();
@@ -621,38 +504,7 @@ void __fastcall EngineTickHook::HookedTick(UEngine* Engine, float DeltaSeconds, 
     }
 }
 
-bool EngineTickHook::DoUninstall()
-{
-    DBG_ASSERT(!hookInstalled_.load() || pendingUninstall_.load(), "Uninstall without pending flag");
-
-    { std::lock_guard lock(writeMutex_); StoreState(std::make_shared<CallbackList>()); }
-
-    DBG_ASSERT(executionDepth_.load(std::memory_order_relaxed) == 0,
-        "DoUninstall called with non-zero execution depth");
-
-    // NOTE: we do NOT call EasyHook::Shutdown() here — ProcessEventHook may
-    // still own a hook in the same MinHook instance. Just clear our own state
-    // and let the MinHook lifecycle stay shared.
-    hookInstalled_.store(false);
-
-    if (onUninstalled_)
-    {
-        auto cb = std::move(onUninstalled_);
-        onUninstalled_ = nullptr;
-        try { cb(); }
-        catch (const std::exception&) { DBG_ASSERT(false, "onUninstalled callback threw exception"); }
-    }
-    return true;
-}
-
-EngineTickHook& EngineTickHook::Get()
-{
-    if (!instance) instance = new EngineTickHook();
-    DBG_CHECK_PTR(instance);
-    return *instance;
-}
-
-bool EngineTickHook::IsInstalled() const { return hookInstalled_.load(); }
+// ── Public methods ────────────────────────────────────────────────────────────
 
 bool EngineTickHook::Install(int32 vtableSlot)
 {
@@ -680,29 +532,6 @@ bool EngineTickHook::Install(int32 vtableSlot)
     return true;
 }
 
-bool EngineTickHook::RequestUninstall()
-{
-    int depth = executionDepth_.load();
-    DBG_CHECK_RANGE(depth, 0, 1000);
-    if (depth > 0) { pendingUninstall_ = true; return true; }
-    return DoUninstall();
-}
-
-void EngineTickHook::SetOnUninstalled(std::function<void()> cb)
-{
-    DBG_ASSERT(cb, "Null callback passed to SetOnUninstalled");
-    onUninstalled_ = std::move(cb);
-}
-
-void EngineTickHook::Enqueue(std::function<void()> task)
-{
-    DBG_ASSERT(task, "Null task passed to Enqueue");
-    std::lock_guard lock(taskMutex_);
-    taskQueue_.push_back(std::move(task));
-    DBG_CHECK_RANGE(taskQueue_.size(), 1, 100000);
-    hasTasks_.store(true, std::memory_order_release);
-}
-
 CallbackHandle EngineTickHook::AddCallback(EngineTickCallback callback,
     ExecutionTiming timing, ExecutionMode mode)
 {
@@ -712,80 +541,11 @@ CallbackHandle EngineTickHook::AddCallback(EngineTickCallback callback,
     CallbackHandle handle = nextHandle_++;
     DBG_ASSERT(handle > 0, "Invalid handle generated");
     newList.emplace_back(handle, std::move(callback), timing, mode);
-    StoreState(std::make_shared<CallbackList>(std::move(newList)));
+    StoreList(std::move(newList));
     return handle;
 }
 
-bool EngineTickHook::RemoveCallback(CallbackHandle handle)
-{
-    DBG_ASSERT(handle > 0, "Invalid handle passed to RemoveCallback");
-    std::lock_guard lock(writeMutex_);
-    CallbackList newList = CloneList();
-    auto it = std::remove_if(newList.begin(), newList.end(),
-        [handle](const CallbackEntry& e) { return e.handle == handle; });
-    if (it == newList.end()) return false;
-    newList.erase(it, newList.end());
-    StoreState(std::make_shared<CallbackList>(std::move(newList)));
-    return true;
-}
-
-bool EngineTickHook::EnableCallback(CallbackHandle handle, bool enabled)
-{
-    DBG_ASSERT(handle > 0, "Invalid handle passed to EnableCallback");
-    std::lock_guard lock(writeMutex_);
-    CallbackList newList = CloneList();
-    for (auto& e : newList)
-    {
-        if (e.handle != handle) continue;
-        e.enabled = enabled;
-        StoreState(std::make_shared<CallbackList>(std::move(newList)));
-        return true;
-    }
-    return false;
-}
-
-bool EngineTickHook::SetExecutionMode(CallbackHandle handle, ExecutionMode mode)
-{
-    DBG_ASSERT(handle > 0, "Invalid handle passed to SetExecutionMode");
-    std::lock_guard lock(writeMutex_);
-    CallbackList newList = CloneList();
-    for (auto& e : newList)
-    {
-        if (e.handle != handle) continue;
-        e.mode = mode;
-        StoreState(std::make_shared<CallbackList>(std::move(newList)));
-        return true;
-    }
-    return false;
-}
-
-bool EngineTickHook::SetExecutionTiming(CallbackHandle handle, ExecutionTiming timing)
-{
-    DBG_ASSERT(handle > 0, "Invalid handle passed to SetExecutionTiming");
-    std::lock_guard lock(writeMutex_);
-    CallbackList newList = CloneList();
-    for (auto& e : newList)
-    {
-        if (e.handle != handle) continue;
-        e.timing = timing;
-        StoreState(std::make_shared<CallbackList>(std::move(newList)));
-        return true;
-    }
-    return false;
-}
-
-void EngineTickHook::ClearAllCallbacks()
-{
-    std::lock_guard lock(writeMutex_);
-    StoreState(std::make_shared<CallbackList>());
-    DBG_ASSERT(std::atomic_load(&stateOwner_)->empty(), "ClearAllCallbacks failed");
-}
-
-size_t EngineTickHook::GetCallbackCount() const
-{
-    auto s = std::atomic_load(&stateOwner_);
-    return s ? s->size() : 0;
-}
+// ── Free convenience functions ────────────────────────────────────────────────
 
 bool InstallEngineTickHook(int32 vtableSlot)
 {
