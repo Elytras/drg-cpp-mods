@@ -133,9 +133,10 @@ namespace AimAssist
                     const float ctrlYawDelta   = normP(ctrlYaw   - RCSPrevCtrlYaw);
                     const float pitchOffset    = camPitch - ctrlPitch;
                     const float yawOffset      = normP(camYaw - ctrlYaw);
-                    if (std::abs(yawOffset)    > Config::GimbalFlipThresholdDeg ||
-                        std::abs(ctrlYawDelta) > Config::GimbalFlipThresholdDeg ||
-                        std::abs(pitchOffset)  > Config::GimbalFlipThresholdDeg)
+                    const float gimbalThresh = Config::GetGlobals().GimbalFlipThresholdDeg;
+                    if (std::abs(yawOffset)    > gimbalThresh ||
+                        std::abs(ctrlYawDelta) > gimbalThresh ||
+                        std::abs(pitchOffset)  > gimbalThresh)
                     {
                         RCSDesiredPitch  = ctrlPitch;
                         RCSDesiredYaw    = ctrlYaw;
@@ -277,6 +278,11 @@ namespace AimAssist
             [](const CommandContext&) { ToggleFireSpy(); },
             "Player",
             R"(Toggle: log every UFunction dispatched via PE on the equipped weapon. Use to find what fires during a shot.)");
+
+        handler.Register("reloadaimcfg",
+            [](const CommandContext&) { Config::ReloadGlobals(); },
+            "Player",
+            R"(Reload aimbot.yaml from disk (FOV, sampling, class lists, weapon overrides). Keybind changes need a full DLL reload.)");
     }
 
     void RegisterKeybinds()
@@ -284,14 +290,15 @@ namespace AimAssist
         using enum Trigger;
         using enum Focus;
 
-        KeyBindings::RegisterGameThread(Config::AimbotKey, Config::AimbotMod,
+        const auto& kb = Config::GetGlobals();
+        KeyBindings::RegisterGameThread(kb.AimbotKey, kb.AimbotMod,
             AimbotPressed,  BindingOptions{ Press,   Game, false });
-        KeyBindings::RegisterGameThread(Config::AimbotKey, Config::AimbotMod,
+        KeyBindings::RegisterGameThread(kb.AimbotKey, kb.AimbotMod,
             AimbotReleased, BindingOptions{ Release, Game, false });
 
-        KeyBindings::RegisterGameThread(Config::RecoilToggleKey, Config::RecoilToggleMod,
+        KeyBindings::RegisterGameThread(kb.RecoilToggleKey, kb.RecoilToggleMod,
             ToggleRecoilControl, BindingOptions{ Press, Game, false });
-        KeyBindings::RegisterGameThread(Config::SilentAimToggleKey, Config::SilentAimToggleMod,
+        KeyBindings::RegisterGameThread(kb.SilentAimToggleKey, kb.SilentAimToggleMod,
             ToggleSilentAim,     BindingOptions{ Press, Game, false });
     }
 

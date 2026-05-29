@@ -1,6 +1,8 @@
 #include "ModManager.h"
 #include "Commands.h"
 #include "Library.h"
+#include "BpModLoader.h"
+#include "Lib_NetLogConfig.h"
 
 using namespace SDK;
 
@@ -52,12 +54,17 @@ using namespace ::Internal;
         RegisterCommands(cmdHandler);
         cmdHandler.Register("retry", [this](const CommandContext&)
             {
-                GameHooks::ProcessEventHook::Get().SetOnUninstalled([this]() { LoadMods(); });
+                // EngineTick is the outermost hook and the last to be torn down —
+                // wait for it to confirm clean shutdown before reinstalling.
+                GameHooks::EngineTickHook::Get().SetOnUninstalled([this]() { LoadMods(); });
                 UnloadMods();
             }, "Reload all mods");
         cmdHandler.Register("listcmds", [this](const CommandContext& ctx) {
             SendCommandList(ctx, cmdHandler);
             }, "List all registered commands (populates CLI autocomplete)");
+        cmdHandler.Register("runcfg", [this](const CommandContext&) {
+            RunConfig(cmdHandler);
+            }, "Re-execute autorun entries from config.yaml");
     }
 
 
@@ -71,14 +78,16 @@ void ModManager::Message(const std::string& msg, uint32_t seq)
 
 void ModManager::LoadMods()
 {
-    if (!GameHooks::InstallProcessEventHook())
+    // EngineTick is the outermost hook — install it first so its task queue
+    // is live before we enqueue anything.  ProcessEvent (inner, high-frequency)
+    // is installed later from within the first tick.
+    if (!GameHooks::InstallEngineTickHook(VTableLayout::UEngine::Tick))
     {
-        error("[ModManager] ProcessEvent hook failed to install.");
+        error("[ModManager] EngineTick hook failed to install (slot {}).",
+              VTableLayout::UEngine::Tick);
         return;
     }
-    if (!GameHooks::InstallEngineTickHook(VTableLayout::UEngine::Tick))
-        error("[ModManager] EngineTick hook failed to install (slot {}).", VTableLayout::UEngine::Tick);
-    GameHooks::ProcessEventHook::Get().Enqueue([this]() { LoadModsGameThread(); });
+    GameHooks::EngineTickHook::Get().Enqueue([this]() { LoadModsGameThread(); });
 }
 
 
@@ -86,20 +95,23 @@ void ModManager::LoadModsGameThread()
 {
     info("----------------------------------------");
     info("[ModManager] Starting initialization...");
+    // ProcessEvent is the inner hook — install it here, on the game thread,
+    // after the tick hook that bootstrapped us is already live.
     if (!GameHooks::InstallProcessEventHook()) [[unlikely]]
     {
         error("[ModManager] ProcessEvent hook failed to install.");
         return;
     }
     if (!StartupInfo()) [[unlikely]] return;
+    BpModLoader::Install();
     InitDefaultCallbacks();
+    RunConfig(cmdHandler);
     if constexpr (UseThreads) {
         shouldStop.store(false);
         modThread = std::thread(&ModManager::ModThreadWorker, this);
     }
     info("[ModManager] Initialization complete.");
     info("----------------------------------------");
-
     extern HANDLE g_hDllReadyEvent;
     if (g_hDllReadyEvent) SetEvent(g_hDllReadyEvent);
 }
@@ -108,11 +120,12 @@ void ModManager::UnloadMods()
 {
     info("----------------------------------------");
     info("[ModManager] Unloading...");
+    BpModLoader::Uninstall();
     TickSystem::Reset();
     ResetCallbackHandles();
     VarSystem::Clear();
-    GameHooks::EngineTickHook::Get().RequestUninstall();
-    GameHooks::ProcessEventHook::Get().RequestUninstall();
+    GameHooks::ProcessEventHook::Get().RequestUninstall();  // inner first
+    GameHooks::EngineTickHook::Get().RequestUninstall();    // outer last — owns the task queue
     WaitForShutdown();
 
     info("----------------------------------------");
@@ -120,7 +133,7 @@ void ModManager::UnloadMods()
 
 void ModManager::Update(int DeltaTimeMs)
 {
-    GameHooks::ProcessEventHook::Get().Enqueue([this, DeltaTimeMs]()
+    GameHooks::EngineTickHook::Get().Enqueue([this, DeltaTimeMs]()
         {
             UpdateGameThread(DeltaTimeMs);
         });

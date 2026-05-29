@@ -1,6 +1,8 @@
 #pragma once
 // Lib_ObjectCast.h — UObject cast system, class flag helpers, IsValidRaw.
 
+#include <concepts>
+#include <type_traits>
 #include "Lib_Forward.h"
 
 namespace ObjectCast
@@ -11,17 +13,29 @@ namespace ObjectCast
         return (static_cast<uint64>(Obj->Class->CastFlags) & static_cast<uint64>(Flag)) != 0;
     }
 
-    template<typename T>
-    T* Cast(SDK::UObject* Obj)
+    // Cast<To>(Obj) — const-propagating.
+    //   Cast<T>(UObject*)        → T*
+    //   Cast<T>(const UObject*) → const T*
+    // From may be any UObject-derived type (pointer to a subclass is fine).
+    template<typename To, typename From>
+    requires std::derived_from<std::remove_const_t<From>, SDK::UObject>
+    std::conditional_t<std::is_const_v<From>, const To, To>*
+    Cast(From* Obj)
     {
-        return (Obj && Obj->IsA(T::StaticClass())) ? static_cast<T*>(Obj) : nullptr;
+        using RetT = std::conditional_t<std::is_const_v<From>, const To, To>;
+        return (Obj && Obj->IsA(To::StaticClass())) ? static_cast<RetT*>(Obj) : nullptr;
     }
 
-    template<typename T>
-    T* CastChecked(SDK::UObject* Obj)
+    // CastChecked<To>(Obj) — asserts the cast is valid, then returns the pointer.
+    // Preserves const the same way Cast does.
+    template<typename To, typename From>
+    requires std::derived_from<std::remove_const_t<From>, SDK::UObject>
+    std::conditional_t<std::is_const_v<From>, const To, To>*
+    CastChecked(From* Obj)
     {
-        assert(Obj && Obj->IsA(T::StaticClass()));
-        return static_cast<T*>(Obj);
+        using RetT = std::conditional_t<std::is_const_v<From>, const To, To>;
+        assert(Obj && Obj->IsA(To::StaticClass()));
+        return static_cast<RetT*>(Obj);
     }
 } // namespace ObjectCast
 

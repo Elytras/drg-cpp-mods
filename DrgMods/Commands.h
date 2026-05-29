@@ -6,6 +6,7 @@
 // Register all game commands into the handler — call once in ModManager constructor
 void RegisterCommands(CommandHandler& handler);
 
+
 // Register default-on callbacks (chat logging, anti-twerk) — call in LoadModsGameThread
 void InitDefaultCallbacks();
 

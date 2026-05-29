@@ -1,4 +1,4 @@
-#pragma once
+ #pragma once
 // Lib_CommandHandler.h — CommandContext, MutableContext, CommandHandler.
 #include <functional>
 #include <string>

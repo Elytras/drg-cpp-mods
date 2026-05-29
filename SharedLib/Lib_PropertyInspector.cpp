@@ -10,6 +10,16 @@ namespace PropertyInspector
 namespace {
     struct PendingSelection { std::vector<UObject*> candidates; std::string pendingAction, pendingProp, pendingValue; };
     std::optional<PendingSelection> g_Pending;
+
+    // Returns the component's owning actor via Outer (the UObject outer chain is
+    // always set for component instances).  Returns nullptr for non-components or
+    // when Outer is absent.  The static class lookup is cached on first call.
+    AActor* GetComponentOwner(const UObject* obj)
+    {
+        const UActorComponent* comp = ObjectCast::Cast<UActorComponent>(obj);
+        if (!comp) return nullptr;
+        return comp->GetOwner();
+    }
 }
 
 // ---------------------------------------------------------------
@@ -481,6 +491,22 @@ void ExecuteMapSetByIndex(UObject* obj, FMapProperty* mapProp, int32 index, cons
 
 void Dump(UObject* target, UClass* outerBase)
 {
+    // If this is an actor component, show its owning actor before the properties.
+    // GetComponentOwner returns nullptr for two reasons: not a component, or no
+    // Outer set.  Distinguish by checking whether it is a component first.
+    {
+        static UClass* s_compCls = UActorComponent::StaticClass();
+        if (s_compCls && target->IsA(s_compCls))
+        {
+            UObject* owner = target->Outer;
+            if (owner)
+                info("[prop] Component owner: '{}' ({})",
+                     owner->GetName(), owner->Class ? owner->Class->GetName() : "?");
+            else
+                info("[prop] Component owner: <none>");
+        }
+    }
+
     DumpItemProperties(target, outerBase);
 }
 
@@ -648,7 +674,11 @@ void DispatchCommand(const CommandContext& ctx)
         std::string label = ambiguous
             ? Kismet::Conv_SoftClassReferenceToString(Kismet::Conv_ClassToSoftClassReference(cls)).ToString()
             : (cls ? cls->GetName() : "?");
-        info("  [{}] {} ({})", i, candidates[i]->GetName(), label);
+        // For components, append the owning actor so the user can tell them apart.
+        std::string ownerSuffix;
+        if (UObject* owner = GetComponentOwner(candidates[i]))
+            ownerSuffix = " → " + owner->GetName();
+        info("  [{}] {}{} ({})", i, candidates[i]->GetName(), ownerSuffix, label);
     }
     g_Pending = PendingSelection{ candidates, action, propName, value };
 }

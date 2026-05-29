@@ -14,7 +14,6 @@
 #include "Aim.h"
 #include "Library.h"
 
-#include <array>
 #include <functional>
 #include <optional>
 #include <string>
@@ -59,77 +58,68 @@ namespace AimAssist
 
     namespace Config
     {
-        // ── FOV cones (degrees) ──────────────────────────────────────────────
-        // Aimbot snap (MouseLeft held, silent aim off) — wider since the camera
-        // moves to the target anyway.
-        inline constexpr float AimbotFOVDeg     = 0.f;
-        // Silent aim — tighter so wildly off-target shots don't get redirected.
-        inline constexpr float SilentAimFOVDeg  = 360.f;
+        // ─────────────────────────────────────────────────────────────────────
+        //  Global config — loaded from aimbot.yaml at first access.
+        //  Searched in two locations (first match wins):
+        //    1. Next to the DLL   (distribution: drop beside DrgMods.dll)
+        //    2. ../../ from DLL   (dev: solution root, next to Drgmods.sln)
+        //  Edit the file and call ReloadGlobals() (or 'reloadaimcfg' command)
+        //  to hot-reload without restarting.  Note: keybind changes only take
+        //  effect after a full DLL reload (they are registered once at startup).
+        // ─────────────────────────────────────────────────────────────────────
 
-        // ── Weakpoint sampling ───────────────────────────────────────────────
-        inline constexpr float BodyRadiusScale    = 0.75f;
-        inline constexpr float BodyRadiusFallback = 15.f;
-
-        // Tried in order; first visible candidate wins as the aim position.
-        inline const std::array<SDK::FVector, 7> WpSampleOffsets{ {
-            { 0,  0,  0},
-            { 1,  0,  0}, {-1,  0,  0},
-            { 0,  1,  0}, { 0, -1,  0},
-            { 0,  0,  1}, { 0,  0, -1},
-        } };
-
-        // ── RCS gimbal-flip threshold (degrees) ──────────────────────────────
-        inline constexpr float GimbalFlipThresholdDeg = 90.f;
-
-        // ── Silent aim: ignore weakpoint line-of-sight ───────────────────────
-        inline constexpr bool SilentAimRequireLOS = false;
-
-        // ── Keybinds ─────────────────────────────────────────────────────────
-        inline constexpr Key AimbotKey          = Key::MouseLeft;
-        inline constexpr Mod AimbotMod          = Mod::None;
-        inline constexpr Key RecoilToggleKey    = Key::R;
-        inline constexpr Mod RecoilToggleMod    = Mod::Ctrl;
-        inline constexpr Key SilentAimToggleKey = Key::F3;
-        inline constexpr Mod SilentAimToggleMod = Mod::Ctrl;
-
-        // ── Equipped-item classes that disable aimbot/silent aim ─────────────
-        inline const std::vector<SDK::FName>& IgnoredItemClasses()
+        struct GlobalConfig
         {
-            static const std::vector<SDK::FName> cache = [] {
-                std::vector<SDK::FName> v;
-                for (SDK::UClass* cls : {
-                        SDK::APickaxeItem::StaticClass(),
-                        SDK::ADoubleDrillItem::StaticClass(),
-                        SDK::AZipLineItem::StaticClass(),
-                        SDK::AGrapplingHookGun::StaticClass(),
-                        SDK::AFlareGun::StaticClass(),
-                    })
-                    if (cls) v.push_back(cls->Name);
-                v.push_back(SDK::FName(L"WPN_PlatformGun_C"));
-                return v;
-            }();
-            return cache;
-        }
+            // ── FOV cones (degrees) ──────────────────────────────────────────
+            float AimbotFOVDeg           = 0.f;     // 0 = disabled
+            float SilentAimFOVDeg        = 360.f;   // 360 = always redirect
 
-        // ── Default entries for the mutable IgnoreBaseClasses list ───────────
-        inline const std::vector<SDK::FName>& DefaultIgnoreBaseClasses()
-        {
-            static std::vector<SDK::FName> cache{};
-            if(cache.empty())
-            {
-                //We need explicit delayed FName construction here because the way FName from wchar string works
-                cache.push_back(SDK::FName(L"SDK::ENE_Spider_Grunt_Base_C"));
-            }
-            return cache;
-        }
+            // ── Weakpoint sampling ───────────────────────────────────────────
+            float BodyRadiusScale        = 0.75f;
+            float BodyRadiusFallback     = 15.f;
+            // Tried in order; first visible candidate wins as the aim position.
+            std::vector<SDK::FVector> WpSampleOffsets = {
+                { 0., 0., 0.},
+                { 1., 0., 0.}, {-1., 0., 0.},
+                { 0., 1., 0.}, { 0.,-1., 0.},
+                { 0., 0., 1.}, { 0., 0.,-1.},
+            };
+
+            // ── RCS gimbal-flip threshold (degrees) ──────────────────────────
+            float GimbalFlipThresholdDeg = 90.f;
+
+            // ── Silent aim ───────────────────────────────────────────────────
+            bool  SilentAimRequireLOS   = false;
+
+            // ── Keybinds (read once at RegisterKeybinds; reload needs restart)
+            Key   AimbotKey             = Key::MouseLeft;
+            Mod   AimbotMod             = Mod::None;
+            Key   RecoilToggleKey       = Key::R;
+            Mod   RecoilToggleMod       = Mod::Ctrl;
+            Key   SilentAimToggleKey    = Key::F3;
+            Mod   SilentAimToggleMod    = Mod::Ctrl;
+
+            // ── Class filter lists ───────────────────────────────────────────
+            // If ignored_item_classes is absent from the YAML, populated from
+            // StaticClass() lookups at load time (C++ fallback).
+            std::vector<SDK::FName> IgnoredItemClasses;
+            // If default_ignore_base_classes is absent, seeded from C++ fallback.
+            std::vector<SDK::FName> DefaultIgnoreBaseClasses;
+        };
+
+        // Returns the loaded (or default) config.  Thread-safe; loads lazily.
+        const GlobalConfig& GetGlobals();
+
+        // Re-reads aimbot.yaml from disk and replaces the live config.
+        // Safe to call from any thread (takes an internal mutex).
+        void ReloadGlobals();
 
         // ─────────────────────────────────────────────────────────────────────
         //  Per-weapon overrides
         //
         //  Resolution: weapon-class override → global default. Lists replace
-        //  the parent layer entirely (no merging). JSON file `aim_config.json`
-        //  next to the DLL augments C++ defaults. Schema:
-        //    { "weapons": { "WPN_X_C": { "AimbotFOVDeg": 45.0, ... } } }
+        //  the parent layer entirely (no merging).  Configured via the
+        //  'weapons' section of aimbot.yaml (replaces the old aim_config.json).
         // ─────────────────────────────────────────────────────────────────────
 
         struct WeaponConfigOverride

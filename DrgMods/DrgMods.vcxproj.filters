@@ -141,6 +141,9 @@
     <ClCompile Include="Aimbot_TargetSelection.cpp">
       <Filter>Source Files\DLL Impl\Aimbot</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_NetLogConfig.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Lib_Forward.h">
@@ -185,5 +188,9 @@
     <ClInclude Include="SDK\SDK\FSD_structs.hpp">
       <Filter>Header Files\SDK Headers</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(SolutionDir)aimbot.yaml" />
+    <None Include="$(SolutionDir)config.yaml" />
   </ItemGroup>
 </Project>

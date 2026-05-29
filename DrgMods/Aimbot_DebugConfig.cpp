@@ -122,15 +122,10 @@ namespace AimAssist
                     APlayerCharacter* Player = GetLocalPlayer();
                     if (!IsValidOf<APlayerCharacter>(Player)) return;
 
-                    static FName ReceiveTick      = FName();
-                    static FName GetComponentByClass = FName();
-                    static FName Flicker          = FName();
-                    static FName HeatUpdated      = FName();
-
-                    if (ReceiveTick.IsNone())         [[unlikely]] ReceiveTick         = FName(L"ReceiveTick");
-                    if (GetComponentByClass.IsNone()) [[unlikely]] GetComponentByClass = FName(L"GetComponentByClass");
-                    if (Flicker.IsNone())             [[unlikely]] Flicker             = FName(L"Flicker Brightness__UpdateFunc");
-                    if (HeatUpdated.IsNone())         [[unlikely]] HeatUpdated         = FName(L"HeatUpdated");
+                    static const FName ReceiveTick      (L"ReceiveTick");
+                    static const FName GetComponentByClass(L"GetComponentByClass");
+                    static const FName Flicker          (L"Flicker Brightness__UpdateFunc");
+                    static const FName HeatUpdated      (L"HeatUpdated");
 
                     if (AnyOf<FName>(Fn->Name, ReceiveTick, Flicker, HeatUpdated)) return;
 

@@ -80,9 +80,27 @@
   <PropertyGroup Label="UserMacros" />
   <ItemDefinitionGroup>
     <ClCompile>
-      <!-- These never run; the .cpp items below are ExcludedFromBuild. -->
+      <!-- Files are never compiled here; consumers compile them against their own SDK.
+           The settings below exist solely so VS IntelliSense has a working context
+           when editing SharedLib files inside the SharedLib project.
+           DrgMods is used as the reference project (primary consumer).
+           For RcMods context, use the Project Context dropdown in the VS editor tab. -->
       <ExcludedFromBuild>true</ExcludedFromBuild>
-      <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Release|x64'">stdcpplatest</LanguageStandard>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <AdditionalIncludeDirectories>$(SolutionDir)DrgMods;$(SolutionDir)SharedLib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>FMT_HEADER_ONLY;NOMINMAX;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <InlineFunctionExpansion Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AnySuitable</InlineFunctionExpansion>
+      <IntrinsicFunctions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</IntrinsicFunctions>
+      <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Speed</FavorSizeOrSpeed>
+      <EnableFiberSafeOptimizations Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</EnableFiberSafeOptimizations>
+      <WholeProgramOptimization Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</WholeProgramOptimization>
+      <RuntimeLibrary Condition="'$(Configuration)|$(Platform)'=='Release|x64'">MultiThreaded</RuntimeLibrary>
+      <StructMemberAlignment Condition="'$(Configuration)|$(Platform)'=='Release|x64'">16Bytes</StructMemberAlignment>
+      <FunctionLevelLinking Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</FunctionLevelLinking>
+      <EnableParallelCodeGeneration Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</EnableParallelCodeGeneration>
+      <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
+      <EnableVectorLength Condition="'$(Configuration)|$(Platform)'=='Release|x64'">VectorLength512</EnableVectorLength>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -91,6 +109,7 @@
     <ClInclude Include="Lib_GameHooks.h" />
     <ClInclude Include="Lib_Json.h" />
     <ClInclude Include="Lib_KeyBindings.h" />
+    <ClInclude Include="Lib_NetLogConfig.h" />
     <ClInclude Include="Lib_ObjectCast.h" />
     <ClInclude Include="Lib_ObjectFactory.h" />
     <ClInclude Include="Lib_Print.h" />
@@ -133,6 +152,9 @@
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="Lib_PropertyInspector.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="Lib_NetLogConfig.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="Lib_VarSystem.cpp">

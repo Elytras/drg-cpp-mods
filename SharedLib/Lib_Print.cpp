@@ -8,6 +8,52 @@
 using namespace SDK;  // file-local; no math types used in this TU
 
 // =========================================================================
+// Enum name resolution
+// =========================================================================
+
+namespace {
+// Resolve an enum value to its human-readable display name.
+//
+// Strategy (first non-empty result wins):
+//   1. UKismetNodeHelperLibrary::GetEnumeratorUserFriendlyName — reads UEnum metadata,
+//      which stores the label typed in the Blueprint editor.  This is the correct path
+//      for user-defined enums whose Names entries are mangled (e.g.
+//      "UserDefinedEnum1::NewEnumerator0").  Only safe to call when elemSize == 1
+//      because the function signature takes uint8.
+//   2. Scan UEnum::Names, stripping the "ClassName::" prefix that UE always prepends
+//      (e.g. "EFlareLaunchType::Arc" → "Arc").
+//
+// Pass elemSize = 1 for FByteProperty; pass UnderlayingProperty->ElementSize for
+// FEnumProperty (which may be > 1 for non-byte underlying types).
+std::string ResolveEnumName(const UEnum* e, int64 val, int32 elemSize)
+{
+    if (!e) return {};
+    std::string name;
+
+    if (elemSize == 1)
+    {
+        FString f = UKismetNodeHelperLibrary::GetEnumeratorUserFriendlyName(e, static_cast<uint8>(val));
+        name = f.IsValid() ? f.ToString() : "";
+    }
+
+    if (name.empty())
+    {
+        for (int32 i = 0; i < e->Names.Num(); ++i)
+        {
+            if (e->Names[i].Second == val)
+            {
+                name = e->Names[i].First.ToString();
+                if (const auto pos = name.rfind("::"); pos != std::string::npos)
+                    name = name.substr(pos + 2);
+                break;
+            }
+        }
+    }
+    return name;
+}
+} // anonymous namespace
+
+// =========================================================================
 // Class chain helpers
 // =========================================================================
 
@@ -87,9 +133,17 @@ void PrintFieldValue(uintptr_t Base, FField* Field,
             else if constexpr (std::is_same_v<T, FDoubleProperty>) info("{}{} = {:.6f}", pre, fname, *GetPropertyPtr<double>(Base, prop->Offset));
             else if constexpr (std::is_same_v<T, FByteProperty>)
             {
-                const uint8 val = *GetPropertyPtr<uint8>(Base, prop->Offset);
-                if (prop->Enum) info("{}{} = {} ({})", pre, fname, val, prop->Enum->GetName());
-                else            info("{}{} = {}", pre, fname, val);
+                const uint8 byteVal = *GetPropertyPtr<uint8>(Base, prop->Offset);
+                if (prop->Enum)
+                {
+                    const std::string enumStr = ResolveEnumName(prop->Enum, static_cast<int64>(byteVal), 1);
+                    if (enumStr.empty())
+                        info("{}{} = {}", pre, fname, byteVal);
+                    else
+                        info("{}{} = {} | {}", pre, fname, enumStr, byteVal);
+                }
+                else
+                    info("{}{} = {}", pre, fname, byteVal);
             }
             else if constexpr (std::is_same_v<T, FBoolProperty>)
                 info("{}{} = {}", pre, fname, ReadBool(fakeBase, prop));
@@ -106,7 +160,11 @@ void PrintFieldValue(uintptr_t Base, FField* Field,
             {
                 int64 enumVal = 0;
                 memcpy(&enumVal, GetPropertyPtr<void>(Base, prop->Offset), prop->UnderlayingProperty->ElementSize);
-                info("{}{} = {} ({})", pre, fname, enumVal, prop->Enum ? prop->Enum->GetName() : "?");
+                const std::string enumStr = ResolveEnumName(prop->Enum, enumVal, prop->UnderlayingProperty->ElementSize);
+                if (enumStr.empty())
+                    info("{}{} = {}", pre, fname, enumVal);
+                else
+                    info("{}{} = {} | {}", pre, fname, enumStr, enumVal);
             }
             else if constexpr (std::is_same_v<T, FClassProperty>)
             {
@@ -116,9 +174,22 @@ void PrintFieldValue(uintptr_t Base, FField* Field,
             else if constexpr (std::is_same_v<T, FObjectProperty> || std::is_same_v<T, FObjectPropertyBase>)
             {
                 auto* obj = *GetPropertyPtr<UObject*>(Base, prop->Offset);
-                info("{}{} = {} ({})", pre, fname,
-                    obj && IsValidRaw(obj) ? obj->GetName() : "null",
-                    obj && IsValidRaw(obj) ? obj->Class->GetName() : "?");
+                if (!obj || !IsValidRaw(obj))
+                {
+                    info("{}{} = null", pre, fname);
+                }
+                else
+                {
+                    // Actor component: prefix with owner actor name
+                    std::string display = obj->GetName();
+                    if (ObjectCast::Cast<UActorComponent>(obj))
+                    {
+                        auto* outerActor = ObjectCast::Cast<AActor>(obj->Outer);
+                        if (outerActor && IsValidRaw(outerActor))
+                            display = std::format("{}.{}", outerActor->GetName(), obj->GetName());
+                    }
+                    info("{}{} = {} ({})", pre, fname, display, obj->Class->GetName());
+                }
             }
             else if constexpr (std::is_same_v<T, FStructProperty>)
             {
@@ -365,7 +436,18 @@ std::string GetFieldValueAsString(uintptr_t Base, FField* Field)
             else if constexpr (std::is_same_v<T, FDoubleProperty>)
                 result = std::format("{:.6g}", *GetPropertyPtr<double>(Base, prop->Offset));
             else if constexpr (std::is_same_v<T, FByteProperty>)
-                result = std::to_string(*GetPropertyPtr<uint8>(Base, prop->Offset));
+            {
+                const uint8 byteVal = *GetPropertyPtr<uint8>(Base, prop->Offset);
+                if (prop->Enum)
+                {
+                    const std::string enumStr = ResolveEnumName(prop->Enum, static_cast<int64>(byteVal), 1);
+                    result = enumStr.empty()
+                        ? std::to_string(byteVal)
+                        : std::format("{} | {}", enumStr, byteVal);
+                }
+                else
+                    result = std::to_string(byteVal);
+            }
             else if constexpr (std::is_same_v<T, FBoolProperty>)
                 result = ReadBool(fakeBase, prop) ? "true" : "false";
             else if constexpr (std::is_same_v<T, FStrProperty>)
@@ -379,7 +461,10 @@ std::string GetFieldValueAsString(uintptr_t Base, FField* Field)
             {
                 int64 enumVal = 0;
                 memcpy(&enumVal, GetPropertyPtr<void>(Base, prop->Offset), prop->UnderlayingProperty->ElementSize);
-                result = std::to_string(enumVal);
+                const std::string enumStr = ResolveEnumName(prop->Enum, enumVal, prop->UnderlayingProperty->ElementSize);
+                result = enumStr.empty()
+                    ? std::to_string(enumVal)
+                    : std::format("{} | {}", enumStr, enumVal);
             }
             else if constexpr (std::is_same_v<T, FClassProperty>)
             {
@@ -389,7 +474,59 @@ std::string GetFieldValueAsString(uintptr_t Base, FField* Field)
             else if constexpr (std::is_same_v<T, FObjectProperty> || std::is_same_v<T, FObjectPropertyBase>)
             {
                 auto* obj = *GetPropertyPtr<UObject*>(Base, prop->Offset);
-                result = obj && IsValidRaw(obj) ? obj->GetName() : "null";
+                if (!obj || !IsValidRaw(obj))
+                {
+                    result = "null";
+                }
+                else if (ObjectCast::Cast<UActorComponent>(obj))
+                {
+                    // Actor component: "OwnerActor.ComponentName"
+                    auto* outerActor = ObjectCast::Cast<AActor>(obj->Outer);
+                    result = (outerActor && IsValidRaw(outerActor))
+                        ? std::format("{}.{}", outerActor->GetName(), obj->GetName())
+                        : obj->GetName();
+                }
+                else
+                    result = obj->GetName();
+            }
+            else if constexpr (std::is_same_v<T, FStructProperty>)
+            {
+                const std::string sn = prop->Struct ? prop->Struct->GetName() : "";
+                if (sn == "Rotator")
+                {
+                    const auto& r = *GetPropertyPtr<FRotator>(Base, prop->Offset);
+                    result = std::format("P={:.2f} Y={:.2f} R={:.2f}", r.Pitch, r.Yaw, r.Roll);
+                }
+                else if (sn == "Vector"              || sn == "Vector_NetQuantize"     ||
+                         sn == "Vector_NetQuantize10" || sn == "Vector_NetQuantize100"  ||
+                         sn == "Vector_NetQuantizeNormal")
+                {
+                    const auto& v = *GetPropertyPtr<FVector>(Base, prop->Offset);
+                    result = std::format("({:.2f}, {:.2f}, {:.2f})", v.X, v.Y, v.Z);
+                }
+                else
+                {
+                    // Generic struct: enumerate child properties up to a short cap.
+                    // Gives readable inline output for any unknown struct type
+                    // (FTransform, FQuat, FLinearColor, FGameplayTag, etc.).
+                    const uintptr_t sb = Base + prop->Offset;
+                    std::string inner;
+                    int32 shown = 0;
+                    constexpr int32 kMaxFields = 8;
+                    if (prop->Struct && prop->Struct->ChildProperties)
+                    {
+                        for (FField* f : FFieldRange(prop->Struct->ChildProperties))
+                        {
+                            if (!FieldCast::IsA<FProperty>(f)) continue;
+                            if (shown >= kMaxFields) { inner += ", ..."; break; }
+                            if (shown > 0) inner += ", ";
+                            inner += static_cast<FProperty*>(f)->Name.ToString()
+                                   + '=' + GetFieldValueAsString(sb, f);
+                            ++shown;
+                        }
+                    }
+                    result = shown > 0 ? '{' + inner + '}' : std::format("<struct:{}>", sn);
+                }
             }
             else
                 result = "<unsupported>";

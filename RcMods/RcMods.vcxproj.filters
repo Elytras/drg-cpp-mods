@@ -93,6 +93,15 @@
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectFactory.cpp">
       <Filter>External</Filter>
     </ClCompile>
+    <ClCompile Include="SDK\SDK\AssetRegistry_functions.cpp">
+      <Filter>Source Files\SDK Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="BpModLoader.cpp">
+      <Filter>Source Files\DLL Impl</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_NetLogConfig.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Common.h">
@@ -125,5 +134,17 @@
     <ClInclude Include="SDK\SDK\RogueCore_classes.hpp">
       <Filter>Header Files\SDK Headers</Filter>
     </ClInclude>
+    <ClInclude Include="BpModLoader.h">
+      <Filter>Header Files\DLL Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="NetLogConfig.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\Lib_NetLogConfig.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(SolutionDir)config.yaml" />
   </ItemGroup>
 </Project>

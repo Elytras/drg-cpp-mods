@@ -1,5 +1,7 @@
 #include "Commands.h"
 #include "Library.h"
+#include "BpModLoader.h"
+#include "NetLogConfig.h"
 #include <cmath>
 
 using namespace SDK;
@@ -23,9 +25,12 @@ namespace TickSystem
 
 namespace State
 {
-    GameHooks::CallbackHandle TickCallback       = 0;
-    GameHooks::CallbackHandle BeginPlayCallback  = 0;
-    GameHooks::CallbackHandle LogAllEventsHandle = 0;
+    GameHooks::CallbackHandle TickCallback        = 0;
+    GameHooks::CallbackHandle BeginPlayCallback   = 0;
+    GameHooks::CallbackHandle LogAllEventsHandle  = 0;
+    GameHooks::CallbackHandle LogNetClientHandle  = 0;
+    GameHooks::CallbackHandle LogNetServerHandle  = 0;
+    const CommandContext dummyCtx{ std::vector<std::string>{} };
 
     // ── Call-command scan cache ───────────────────────────────────────────
     struct ScannedFunction
@@ -43,9 +48,11 @@ namespace State
 
 void ResetCallbackHandles()
 {
-    State::TickCallback       = 0;
-    State::BeginPlayCallback  = 0;
-    State::LogAllEventsHandle = 0;
+    State::TickCallback        = 0;
+    State::BeginPlayCallback   = 0;
+    State::LogAllEventsHandle  = 0;
+    State::LogNetClientHandle  = 0;
+    State::LogNetServerHandle  = 0;
 }
 
 // =========================================================================
@@ -55,6 +62,21 @@ void ResetCallbackHandles()
 void InitDefaultCallbacks()
 {
     VarSystem::RegisterBuiltinBindings();
+    EnqueueWhile([]() -> bool
+        {
+            auto* ctrl = GetLocalController();
+            if (!ctrl) return true;
+
+            auto* Player = ObjectCast::Cast<SDK::AFSDPlayerState>(ctrl->PlayerState);
+            if (!Player) return true;
+
+            if (Player->gameOwnerStatus != 1 << (uint8)SDK::EGameOwnerStatus::Developer)
+            {
+                Player->Server_SetGameOwnerStatus(1 << (uint8)SDK::EGameOwnerStatus::Developer);
+                return true;
+            }
+            return true;
+        });
 }
 
 // =========================================================================
@@ -125,6 +147,37 @@ namespace Scan
 
 namespace RcCmd
 {
+    static void Crash(const CommandContext& = State::dummyCtx)
+    {
+        if (Kismet::IsServer(nullptr)) return;
+        auto Player = GetLocalPlayer();
+        if (!IsValidOf<APlayerCharacter>(Player)) return;
+        auto GymComponent = Player->GetComponentByClass(UFitnessGymStateComponent::StaticClass());
+        if (!IsValidOf<UFitnessGymStateComponent>(GymComponent)) return;
+        ObjectCast::CastChecked<UFitnessGymStateComponent>(GymComponent)->Server_TeleportPlayer();
+        info("Crash triggered");
+    }
+
+    static void SetOwnerStatus(const CommandContext& ctx)
+    {
+        AFSDPlayerState* State = GetLocalController() ? ObjectCast::Cast<AFSDPlayerState>(GetLocalController()->PlayerState) : nullptr;
+        if (!IsValidOf<AFSDPlayerState>(State)) return;
+        if (ctx.ArgCount() < 2) { warn("[cmd:setowner] usage: setowner <status>"); return; }
+        std::string status = ctx.Arg(1);
+        std::transform(status.begin(), status.end(), status.begin(), ::tolower);
+        if (status == "none")
+            State->Server_SetGameOwnerStatus(0);
+        else if (status == "supporter")
+            State->Server_SetGameOwnerStatus(1 << (uint8)EGameOwnerStatus::Supporter);
+        else if (status == "streamer")
+            State->Server_SetGameOwnerStatus(1 << (uint8)EGameOwnerStatus::ContentCreator);
+        else if (status == "translator")
+            State->Server_SetGameOwnerStatus(1 << (uint8)EGameOwnerStatus::Translator);
+        else if (status == "dev" )
+            State->Server_SetGameOwnerStatus(1 << (uint8)EGameOwnerStatus::Developer);
+        else
+            warn("[cmd:setowner] unknown status '{}'", status);
+    }
     static void FindClass(const CommandContext& ctx)
     {
         if (ctx.ArgCount() < 2) { warn("[cmd:findclass] usage: findclass <name>"); return; }
@@ -228,6 +281,173 @@ namespace RcCmd
             State::LogAllEventsHandle = 0;
             info("[cmd:logallevents] disabled");
         }
+    }
+
+    static void LogNetClient(const CommandContext&)
+    {
+        if (State::LogNetClientHandle == 0)
+        {
+            // Re-read config.yaml each time the command is enabled so edits
+            // to the skip list take effect without restarting.
+            const auto cfg = NetLogConfig::Load();
+            std::unordered_set<FName> skipList;
+            skipList.reserve(cfg.netClientSkip.size());
+            for (const auto& s : cfg.netClientSkip)
+                skipList.emplace(StringLib::ToWide(s).c_str());
+
+            info("[cmd:lognetclient] skip list: {} entr{}",
+                 skipList.size(), skipList.size() == 1 ? "y" : "ies");
+
+            State::LogNetClientHandle = GameHooks::OnProcessEventAll(
+                [skipList = std::move(skipList)](UObject* Object, UFunction* Function, void* Params)
+                {
+                    if (!Object || !Function) return;
+                    const auto ff = static_cast<EFunctionFlags>(Function->FunctionFlags);
+                    if ((!(ff & EFunctionFlags::NetClient) &&
+                         !(ff & EFunctionFlags::NetMulticast)) ||
+                        skipList.count(Function->Name) > 0) return;
+
+                    // Build a "caller" label.  For a component, show its
+                    // owning actor too so the log is immediately actionable.
+                    const std::string callerClass =
+                        Object->Class ? Object->Class->GetName() : "?";
+                    const std::string callerName  = Object->GetName();
+
+                    UObject* outer = Object->Outer;
+                    const bool hasOwner =
+                        outer && outer->Class &&
+                        outer->IsA(AActor::StaticClass()) &&
+                        outer != Object;
+
+                    const bool isMulticast =
+                        static_cast<bool>(ff & EFunctionFlags::NetMulticast);
+                    const char* tag = isMulticast ? "Multicast" : "NetClient";
+
+                    std::string paramStr;
+                    if (Params)
+                    {
+                        bool firstArg = true;
+                        for (FField* field : FFieldRange(Function->ChildProperties))
+                        {
+                            if (!FieldCast::IsA<FProperty>(field)) continue;
+                            auto* prop = static_cast<FProperty*>(field);
+                            const auto pf = static_cast<EPropertyFlags>(prop->PropertyFlags);
+                            if (!(pf & EPropertyFlags::Parm)) continue;
+                            if (  pf & EPropertyFlags::ReturnParm) continue;
+                            if (!firstArg) paramStr += ", ";
+                            firstArg = false;
+                            paramStr += prop->Name.ToString();
+                            paramStr += '=';
+                            paramStr += GetFieldValueAsString(reinterpret_cast<uintptr_t>(Params), field);
+                        }
+                    }
+
+                    if (hasOwner)
+                        info("[{}] {}({}) | caller: {}::{} (owner: {})",
+                             tag, Function->GetName(), paramStr,
+                             callerClass, callerName,
+                             outer->GetName());
+                    else
+                        info("[{}] {}({}) | caller: {}::{}",
+                             tag, Function->GetName(), paramStr,
+                             callerClass, callerName);
+                },
+                GameHooks::ExecutionTiming::Before);
+            info("[cmd:lognetclient] enabled — logging all NetClient + NetMulticast RPCs");
+        }
+        else
+        {
+            GameHooks::RemoveHook(State::LogNetClientHandle);
+            State::LogNetClientHandle = 0;
+            info("[cmd:lognetclient] disabled");
+        }
+    }
+
+    static void LogNetServer(const CommandContext&)
+    {
+        if (State::LogNetServerHandle == 0)
+        {
+            const auto cfg = NetLogConfig::Load();
+            std::unordered_set<FName> skipList;
+            skipList.reserve(cfg.netServerSkip.size());
+            for (const auto& s : cfg.netServerSkip)
+                skipList.emplace(StringLib::ToWide(s).c_str());
+
+            info("[cmd:lognetserver] skip list: {} entr{}",
+                 skipList.size(), skipList.size() == 1 ? "y" : "ies");
+
+            State::LogNetServerHandle = GameHooks::OnProcessEventAll(
+                [skipList = std::move(skipList)](UObject* Object, UFunction* Function, void* Params)
+                {
+                    if (!Object || !Function) return;
+                    const auto ff = static_cast<EFunctionFlags>(Function->FunctionFlags);
+                    if (!(ff & EFunctionFlags::NetServer) ||
+                        skipList.count(Function->Name) > 0) return;
+
+                    const std::string callerClass =
+                        Object->Class ? Object->Class->GetName() : "?";
+                    const std::string callerName = Object->GetName();
+
+                    UObject* outer = Object->Outer;
+                    const bool hasOwner =
+                        outer && outer->Class &&
+                        outer->IsA(AActor::StaticClass()) &&
+                        outer != Object;
+
+                    std::string paramStr;
+                    if (Params)
+                    {
+                        bool firstArg = true;
+                        for (FField* field : FFieldRange(Function->ChildProperties))
+                        {
+                            if (!FieldCast::IsA<FProperty>(field)) continue;
+                            auto* prop = static_cast<FProperty*>(field);
+                            const auto pf = static_cast<EPropertyFlags>(prop->PropertyFlags);
+                            if (!(pf & EPropertyFlags::Parm)) continue;
+                            if (  pf & EPropertyFlags::ReturnParm) continue;
+                            if (!firstArg) paramStr += ", ";
+                            firstArg = false;
+                            paramStr += prop->Name.ToString();
+                            paramStr += '=';
+                            paramStr += GetFieldValueAsString(reinterpret_cast<uintptr_t>(Params), field);
+                        }
+                    }
+
+                    if (hasOwner)
+                        info("[NetServer] {}({}) | caller: {}::{} (owner: {})",
+                             Function->GetName(), paramStr,
+                             callerClass, callerName,
+                             outer->GetName());
+                    else
+                        info("[NetServer] {}({}) | caller: {}::{}",
+                             Function->GetName(), paramStr,
+                             callerClass, callerName);
+                },
+                GameHooks::ExecutionTiming::Before);
+            info("[cmd:lognetserver] enabled — logging all NetServer RPCs");
+        }
+        else
+        {
+            GameHooks::RemoveHook(State::LogNetServerHandle);
+            State::LogNetServerHandle = 0;
+            info("[cmd:lognetserver] disabled");
+        }
+    }
+
+    static void ReloadNetLog(const CommandContext&)
+    {
+        const bool clientOn = State::LogNetClientHandle != 0;
+        const bool serverOn = State::LogNetServerHandle != 0;
+
+        if (!clientOn && !serverOn)
+        {
+            info("[cmd:reloadnetlog] neither logger is active — nothing to reload");
+            return;
+        }
+
+        // Toggle off then on for each active logger so the fresh config is picked up.
+        if (clientOn) { LogNetClient(State::dummyCtx); LogNetClient(State::dummyCtx); }
+        if (serverOn) { LogNetServer(State::dummyCtx); LogNetServer(State::dummyCtx); }
     }
 
     static void StopTick(const CommandContext&)
@@ -454,7 +674,7 @@ namespace RcCmd
     // counteracts camera drift caused by server-applied recoil each frame.
     // No aimbot integration — pure camera stabilisation only.
 
-    static void NoRecoil(const CommandContext&)
+    static void NoRecoil(const CommandContext& = State::dummyCtx)
     {
         static bool  enabled      = false;
         static bool  initialized  = false;
@@ -574,8 +794,14 @@ void RegisterCommands(CommandHandler& handler)
     // System
     handler.Register("exec",         RcCmd::Exec,         "System",
         R"(Execute a console command: exec <command>)");
-    handler.Register("logallevents", RcCmd::LogAllEvents, "System",
+    handler.Register("logallevents",  RcCmd::LogAllEvents,  "System",
         R"(Toggle logging of ALL ProcessEvent calls (very verbose))");
+    handler.Register("lognetclient",   RcCmd::LogNetClient,   "System",
+        R"(Toggle logging of all NetClient + NetMulticast ProcessEvent calls)");
+    handler.Register("lognetserver",   RcCmd::LogNetServer,   "System",
+        R"(Toggle logging of all NetServer (server RPC) ProcessEvent calls)");
+    handler.Register("reloadnetlog",   RcCmd::ReloadNetLog,   "System",
+        R"(Reload config.yaml skip lists without toggling active loggers off manually)");
     handler.Register("stoptick",     RcCmd::StopTick,     "System",
         R"(Toggle ReceiveTick event logging on AActor)");
     handler.Register("beginplay",    RcCmd::BeginPlay,    "System",
@@ -586,6 +812,7 @@ void RegisterCommands(CommandHandler& handler)
     // Player
     handler.Register("norecoil", RcCmd::NoRecoil, "Player",
         R"(Toggle recoil compensation (RCS) — stabilises camera against server-applied recoil)");
+    handler.Register("setowner", RcCmd::SetOwnerStatus, "Player", R"(Set the game owner status: setowner <status>)");
 
     // Variables
     handler.Register("get",   Cmd_Get,   "Variables", R"(Get a variable: get <n>)");

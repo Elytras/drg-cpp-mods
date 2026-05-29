@@ -53,6 +53,9 @@
     <ClInclude Include="UnrealCoreTypes.h">
       <Filter>Headers</Filter>
     </ClInclude>
+    <ClInclude Include="Lib_NetLogConfig.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Lib_CommandHandler.cpp">
@@ -89,6 +92,9 @@
       <Filter>Source</Filter>
     </ClCompile>
     <ClCompile Include="Lib_VarSystem.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="Lib_NetLogConfig.cpp">
       <Filter>Source</Filter>
     </ClCompile>
   </ItemGroup>

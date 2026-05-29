@@ -48,7 +48,7 @@ ProcessEventHook::BuildState(CallbackList list)
         else if (!e.functionNameFilter.empty())
         {
             if (e.functionNameFName.IsNone())
-                e.functionNameFName = FName(ToWide(e.functionNameFilter).c_str());
+                new (&e.functionNameFName) FName(ToWide(e.functionNameFilter).c_str());
             s->cache.byFunctionName[e.functionNameFName].push_back(i);
         }
         else
@@ -574,4 +574,31 @@ void EnqueueWhile(std::function<bool()> fn)
             if (fn()) hook.Enqueue(*task);
         };
     hook.Enqueue(*task);
+}
+
+GameHooks::CallbackHandle EnqueueEveryNTicks(
+    uint32_t                   n,
+    std::function<bool()>      fn,
+    GameHooks::ExecutionTiming timing)
+{
+    if (n == 0) n = 1;
+
+    // The handle is heap-allocated so the lambda can capture it by shared_ptr
+    // and self-remove once fn returns false — without knowing the handle value
+    // at construction time (OnEngineTick hasn't returned yet when the lambda is
+    // built, so the actual handle is written into *handle after the call).
+    auto counter = std::make_shared<uint32_t>(0);
+    auto handle  = std::make_shared<GameHooks::CallbackHandle>(0);
+
+    *handle = GameHooks::OnEngineTick(
+        [n, fn = std::move(fn), counter, handle](SDK::UEngine*, float, bool) mutable
+        {
+            if (++(*counter) < n) return;
+            *counter = 0;
+            if (!fn())
+                GameHooks::EngineTickHook::Get().RemoveCallback(*handle);
+        },
+        timing);
+
+    return *handle;
 }

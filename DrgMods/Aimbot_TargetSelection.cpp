@@ -270,7 +270,8 @@ namespace AimAssist
                 r = std::max(r, Body->AggGeom.SphereElems[i].Radius);
             for (int32 i = 0; i < Body->AggGeom.SphylElems.Num(); ++i)
                 r = std::max(r, Body->AggGeom.SphylElems[i].Radius);
-            return r > 0.f ? r * Config::BodyRadiusScale : Config::BodyRadiusFallback;
+            const auto& g = Config::GetGlobals();
+            return r > 0.f ? r * g.BodyRadiusScale : g.BodyRadiusFallback;
         }
 
         struct FDamageInfo
@@ -385,7 +386,7 @@ namespace AimAssist
                     if (RequireLOS)
                     {
                         bVisible = false;
-                        for (const auto& Off : Config::WpSampleOffsets)
+                        for (const auto& Off : Config::GetGlobals().WpSampleOffsets)
                         {
                             FVector Candidate = { Center.X + Off.X * R, Center.Y + Off.Y * R, Center.Z + Off.Z * R };
                             if (IsWeakpointVisible(LocalPlayer, Enemy, CamLoc, Candidate, Body->BoneName))
@@ -514,7 +515,7 @@ namespace AimAssist
         AItem* Equipped = Inventory->GetEquippedItem();
         if (!Equipped) return std::nullopt;
 
-        for (const FName& ClassName : Config::IgnoredItemClasses())
+        for (const FName& ClassName : Config::GetGlobals().IgnoredItemClasses)
             if (IsChildOfByName(Equipped, ClassName)) return std::nullopt;
 
         FDamageInfo DamageInfo;
@@ -533,9 +534,9 @@ namespace AimAssist
 
         const float HalfFOVCos = std::cos(FOVDeg * 0.5f * kDeg2Rad);
 
-        // Lazy default-seed for IgnoreBaseClasses.
+        // Lazy default-seed for IgnoreBaseClasses (from YAML or C++ fallback).
         if (IgnoreBaseClasses.empty()) [[unlikely]]
-            IgnoreBaseClasses = Config::DefaultIgnoreBaseClasses();
+            IgnoreBaseClasses = Config::GetGlobals().DefaultIgnoreBaseClasses;
 
         // Resolve effective ignore/force lists: a per-weapon override REPLACES
         // the global mutable list entirely (no merging).

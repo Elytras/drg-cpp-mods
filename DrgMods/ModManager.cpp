@@ -2,6 +2,7 @@
 #include "ModManager.h"
 #include "Commands.h"
 #include "Library.h"
+#include "Lib_NetLogConfig.h"
 #if USEOWNIMPL
 #include "UnrealCoreTypes.h"
 #endif
@@ -109,6 +110,9 @@ using namespace ::Internal;
         cmdHandler.Register("listcmds", [this](const CommandContext& ctx) {
             SendCommandList(ctx, cmdHandler);
             }, "List all registered commands (populates CLI autocomplete)");
+        cmdHandler.Register("runcfg", [this](const CommandContext&) {
+            RunConfig(cmdHandler);
+            }, "Re-execute autorun entries from config.yaml");
     }
 
 
@@ -149,6 +153,7 @@ void ModManager::LoadModsGameThread()
     }
     if (!StartupInfo()) [[unlikely]] return;
     InitDefaultCallbacks();
+    RunConfig(cmdHandler);
     if constexpr (UseThreads) {
         shouldStop.store(false);
         modThread = std::thread(&ModManager::ModThreadWorker, this);

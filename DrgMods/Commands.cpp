@@ -5,10 +5,11 @@
 #include "Common.h"
 #include "Aim.h"
 #include "Lib_Utils.h"
-
+#include "Lib_NetLogConfig.h"
 
 #include <array>
 #include <atomic>
+#include <unordered_set>
 #include <chrono>
 #include <optional>
 #include <random>
@@ -185,6 +186,8 @@ namespace State
     CallbackHandle ServerChatCallback = 0;
     CallbackHandle ProxyModCallback = 0;
     CallbackHandle BeginPlayCallback = 0;
+    CallbackHandle LogNetClientHandle  = 0;
+    CallbackHandle LogNetServerHandle  = 0;
 
     bool autoCrasherEnabled = false;
     bool infiniteAmmoEnabled = false;
@@ -2199,6 +2202,171 @@ namespace Commands
         }
         info("[cmd:infiniteammo] {}", State::infiniteAmmoEnabled ? "Enabled" : "Disabled");
     }
+
+    void LogNetClient(const CommandContext& = State::dummyCtx)
+    {
+        if (State::LogNetClientHandle == 0)
+        {
+            // Re-read config.yaml each time the command is enabled so edits
+            // to the skip list take effect without restarting.
+            const auto cfg = NetLogConfig::Load();
+            std::unordered_set<SDK::FName> skipList;
+            skipList.reserve(cfg.netClientSkip.size());
+            for (const auto& s : cfg.netClientSkip)
+                skipList.emplace(StringLib::ToWide(s).c_str());
+
+            info("[cmd:lognetclient] skip list: {} entr{}",
+                 skipList.size(), skipList.size() == 1 ? "y" : "ies");
+
+            State::LogNetClientHandle = GameHooks::OnProcessEventAll(
+                [skipList = std::move(skipList)](SDK::UObject* Object, SDK::UFunction* Function, void* Params)
+                {
+                    if (!Object || !Function) return;
+                    const auto ff = static_cast<SDK::EFunctionFlags>(Function->FunctionFlags);
+                    if ((!(ff & SDK::EFunctionFlags::NetClient) &&
+                         !(ff & SDK::EFunctionFlags::NetMulticast)) ||
+                        skipList.count(Function->Name) > 0) return;
+
+                    const std::string callerClass =
+                        Object->Class ? Object->Class->GetName() : "?";
+                    const std::string callerName  = Object->GetName();
+
+                    SDK::UObject* outer = Object->Outer;
+                    const bool hasOwner =
+                        outer && outer->Class &&
+                        outer->IsA(SDK::AActor::StaticClass()) &&
+                        outer != Object;
+
+                    const bool isMulticast =
+                        static_cast<bool>(ff & SDK::EFunctionFlags::NetMulticast);
+                    const char* tag = isMulticast ? "Multicast" : "NetClient";
+
+                    std::string paramStr;
+                    if (Params)
+                    {
+                        bool firstArg = true;
+                        for (SDK::FField* field : SDK::FFieldRange(Function->ChildProperties))
+                        {
+                            if (!SDK::FieldCast::IsA<SDK::FProperty>(field)) continue;
+                            auto* prop = static_cast<SDK::FProperty*>(field);
+                            const auto pf = static_cast<SDK::EPropertyFlags>(prop->PropertyFlags);
+                            if (!(pf & SDK::EPropertyFlags::Parm)) continue;
+                            if (  pf & SDK::EPropertyFlags::ReturnParm) continue;
+                            if (!firstArg) paramStr += ", ";
+                            firstArg = false;
+                            paramStr += prop->Name.ToString();
+                            paramStr += '=';
+                            paramStr += GetFieldValueAsString(reinterpret_cast<uintptr_t>(Params), field);
+                        }
+                    }
+
+                    if (hasOwner)
+                        info("[{}] {}({}) | caller: {}::{} (owner: {})",
+                             tag, Function->GetName(), paramStr,
+                             callerClass, callerName,
+                             outer->GetName());
+                    else
+                        info("[{}] {}({}) | caller: {}::{}",
+                             tag, Function->GetName(), paramStr,
+                             callerClass, callerName);
+                },
+                GameHooks::ExecutionTiming::Before);
+            info("[cmd:lognetclient] enabled — logging all NetClient + NetMulticast RPCs");
+        }
+        else
+        {
+            GameHooks::RemoveHook(State::LogNetClientHandle);
+            State::LogNetClientHandle = 0;
+            info("[cmd:lognetclient] disabled");
+        }
+    }
+
+    void LogNetServer(const CommandContext& = State::dummyCtx)
+    {
+        if (State::LogNetServerHandle == 0)
+        {
+            const auto cfg = NetLogConfig::Load();
+            std::unordered_set<SDK::FName> skipList;
+            skipList.reserve(cfg.netServerSkip.size());
+            for (const auto& s : cfg.netServerSkip)
+                skipList.emplace(StringLib::ToWide(s).c_str());
+
+            info("[cmd:lognetserver] skip list: {} entr{}",
+                 skipList.size(), skipList.size() == 1 ? "y" : "ies");
+
+            State::LogNetServerHandle = GameHooks::OnProcessEventAll(
+                [skipList = std::move(skipList)](SDK::UObject* Object, SDK::UFunction* Function, void* Params)
+                {
+                    if (!Object || !Function) return;
+                    const auto ff = static_cast<SDK::EFunctionFlags>(Function->FunctionFlags);
+                    if (!(ff & SDK::EFunctionFlags::NetServer) ||
+                        skipList.count(Function->Name) > 0) return;
+
+                    const std::string callerClass =
+                        Object->Class ? Object->Class->GetName() : "?";
+                    const std::string callerName = Object->GetName();
+
+                    SDK::UObject* outer = Object->Outer;
+                    const bool hasOwner =
+                        outer && outer->Class &&
+                        outer->IsA(SDK::AActor::StaticClass()) &&
+                        outer != Object;
+
+                    std::string paramStr;
+                    if (Params)
+                    {
+                        bool firstArg = true;
+                        for (SDK::FField* field : SDK::FFieldRange(Function->ChildProperties))
+                        {
+                            if (!SDK::FieldCast::IsA<SDK::FProperty>(field)) continue;
+                            auto* prop = static_cast<SDK::FProperty*>(field);
+                            const auto pf = static_cast<SDK::EPropertyFlags>(prop->PropertyFlags);
+                            if (!(pf & SDK::EPropertyFlags::Parm)) continue;
+                            if (  pf & SDK::EPropertyFlags::ReturnParm) continue;
+                            if (!firstArg) paramStr += ", ";
+                            firstArg = false;
+                            paramStr += prop->Name.ToString();
+                            paramStr += '=';
+                            paramStr += GetFieldValueAsString(reinterpret_cast<uintptr_t>(Params), field);
+                        }
+                    }
+
+                    if (hasOwner)
+                        info("[NetServer] {}({}) | caller: {}::{} (owner: {})",
+                             Function->GetName(), paramStr,
+                             callerClass, callerName,
+                             outer->GetName());
+                    else
+                        info("[NetServer] {}({}) | caller: {}::{}",
+                             Function->GetName(), paramStr,
+                             callerClass, callerName);
+                },
+                GameHooks::ExecutionTiming::Before);
+            info("[cmd:lognetserver] enabled — logging all NetServer RPCs");
+        }
+        else
+        {
+            GameHooks::RemoveHook(State::LogNetServerHandle);
+            State::LogNetServerHandle = 0;
+            info("[cmd:lognetserver] disabled");
+        }
+    }
+
+    void ReloadNetLog(const CommandContext& = State::dummyCtx)
+    {
+        const bool clientOn = State::LogNetClientHandle != 0;
+        const bool serverOn = State::LogNetServerHandle != 0;
+
+        if (!clientOn && !serverOn)
+        {
+            info("[cmd:reloadnetlog] neither logger is active — nothing to reload");
+            return;
+        }
+
+        // Toggle off then on for each active logger so the fresh config is picked up.
+        if (clientOn) { LogNetClient(State::dummyCtx); LogNetClient(State::dummyCtx); }
+        if (serverOn) { LogNetServer(State::dummyCtx); LogNetServer(State::dummyCtx); }
+    }
 }
 
 namespace Binds {
@@ -2266,8 +2434,11 @@ void RegisterCommands(CommandHandler& handler)
     AimAssist::RegisterCommands(handler);
 
     // System
-    handler.Register("beginplay", Commands::BeginPlay, "System", R"(Toggle BeginPlay spawn watcher)");
-    handler.Register("call", Commands::Call, "System", R"(Call a server RPC: call <FunctionName> [args...])");
+    handler.Register("beginplay",     Commands::BeginPlay,    "System", R"(Toggle BeginPlay spawn watcher)");
+    handler.Register("call",          Commands::Call,          "System", R"(Call a server RPC: call <FunctionName> [args...])");
+    handler.Register("lognetclient",  Commands::LogNetClient,  "System", R"(Toggle logging of all NetClient + NetMulticast ProcessEvent calls)");
+    handler.Register("lognetserver",  Commands::LogNetServer,  "System", R"(Toggle logging of all NetServer (server RPC) ProcessEvent calls)");
+    handler.Register("reloadnetlog",  Commands::ReloadNetLog,  "System", R"(Reload config.yaml skip lists without toggling active loggers off manually)");
     handler.Register("clearlog", [](const CommandContext&) {
         // closes the file_sink's handle, reopens in
         // truncate mode under the sink mutex. Returns false if the reopen
@@ -2358,6 +2529,8 @@ void ResetCallbackHandles()
         State::ServerChatCallback =
         State::ProxyModCallback =
         State::BeginPlayCallback =
+        State::LogNetClientHandle =
+        State::LogNetServerHandle =
         0;
 }
 

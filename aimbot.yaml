@@ -1,0 +1,106 @@
+# aimbot.yaml — AimAssist module configuration.
+#
+# Searched in two locations (first match wins):
+#   1. Next to DrgMods.dll  — place here for distribution / in-game use
+#   2. Two directories up   — place here for development (next to Drgmods.sln)
+#
+# Hot-reload: edit this file, then run 'reloadaimcfg' in the CLI.
+# Note: keybind changes only take effect after a full DLL reload (they are
+# registered once at startup).
+
+# ── Global tunables ───────────────────────────────────────────────────────────
+
+globals:
+  # FOV cone for aimbot snap (MouseLeft held, silent aim off).
+  # 0 = snap to any enemy in view; 45 = within 45° of crosshair.
+  AimbotFOVDeg: 0.0
+
+  # FOV cone for silent aim (bullet redirect on fire).
+  # 360 = redirect to any enemy regardless of crosshair angle.
+  SilentAimFOVDeg: 360.0
+
+  # Weakpoint body radius: physics-body radius × scale; fallback if no physics body.
+  BodyRadiusScale: 0.75
+  BodyRadiusFallback: 15.0
+
+  # RCS: single-frame yaw/pitch delta beyond this (degrees) is treated as a
+  # gimbal flip and skipped rather than applied as recoil compensation.
+  GimbalFlipThresholdDeg: 90.0
+
+  # Whether silent aim requires line-of-sight to the weakpoint.
+  SilentAimRequireLOS: false
+
+# ── Weakpoint sampling offsets ────────────────────────────────────────────────
+# Each entry is [x, y, z] in bone-radius units. The first visible candidate
+# from this list is used as the aim position.
+
+wp_sample_offsets:
+  - [0,  0,  0]   # bone pivot
+  - [1,  0,  0]   # right
+  - [-1, 0,  0]   # left
+  - [0,  1,  0]   # forward
+  - [0, -1,  0]   # back
+  - [0,  0,  1]   # up
+  - [0,  0, -1]   # down
+
+# ── Keybinds ──────────────────────────────────────────────────────────────────
+# Supported keys: MouseLeft, MouseRight, MouseMiddle, A–Z, F1–F12,
+#   Enter, Escape, Space, Tab, Delete, Insert, Home, End, PageUp, PageDown,
+#   Left, Right, Up, Down, Minus, Equals, Comma, Period, Slash, Grave, Quote,
+#   LeftBracket, RightBracket, Backslash, Semicolon, Num0–Num9.
+# Supported mods: None, Ctrl, Shift, Alt, Ctrl+Shift, Ctrl+Alt, Shift+Alt, etc.
+
+keybinds:
+  aimbot:
+    key: MouseLeft
+    mod: None
+  recoil_toggle:
+    key: R
+    mod: Ctrl
+  silent_aim_toggle:
+    key: F3
+    mod: Ctrl
+
+# ── Ignored item classes ──────────────────────────────────────────────────────
+# Equipped-item UE class names that disable aimbot and silent aim entirely.
+# If this section is absent, the list is built from StaticClass() at runtime
+# (game-update resilient). Present → use exactly these names.
+#
+# To find a class name: equip the item, run 'prop obj Player dump class',
+# or use 'findclass <partialname>' in the CLI.
+
+# ignored_item_classes:
+#   - WPN_PlatformGun_C
+#   - PickaxeItem_C
+#   - DoubleDrillItem_C
+#   - ZipLineItem_C
+#   - GrapplingHookGun_C
+#   - FlareGun_C
+
+# ── Default ignore base classes ───────────────────────────────────────────────
+# Enemy base-class UE names that are excluded from targeting by default.
+# If absent, the C++ fallback is used.
+
+default_ignore_base_classes:
+  - ENE_Spider_Grunt_Base_C
+
+# ── Per-weapon overrides ──────────────────────────────────────────────────────
+# Each key is a UE class name (e.g. WPN_SMG_C). Any field overrides the global
+# default for that weapon only. Lists (IgnoreBaseClasses, ForceIncludeClasses)
+# replace the global list entirely — no merging.
+#
+# Replaces the old aim_config.json file.
+
+weapons:
+  # WPN_SMG_C:
+  #   SilentAimFOVDeg: 45.0
+  # WPN_Sniper_C:
+  #   SilentAimFOVDeg: 10.0
+  #   SilentAimRequireLOS: true
+  # WPN_Shotgun_C:
+  #   AimbotFOVDeg: 20.0
+  #   IgnoreBaseClasses:
+  #     - ENE_Spider_Grunt_Base_C
+  #   ForceIncludeClasses:
+  #     - ENE_BigSomething_C
+  #   TargetSelector: closest

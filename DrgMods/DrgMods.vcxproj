@@ -189,6 +189,7 @@
       Lib_CommandHandler, Lib_VarSystem, etc).
     -->
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_CommandHandler.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\Lib_NetLogConfig.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_EasyHook.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_GameHooks.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_Json.cpp" />
@@ -224,6 +225,10 @@
     <ClInclude Include="SDK\SDK\FSD_classes.hpp" />
     <ClInclude Include="SDK\SDK\FSD_structs.hpp" />
     <ClInclude Include="SDK\UnrealContainers.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(SolutionDir)aimbot.yaml" />
+    <None Include="$(SolutionDir)config.yaml" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

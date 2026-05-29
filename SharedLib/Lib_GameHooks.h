@@ -471,6 +471,28 @@ void EnqueueOnce(std::function<void()> fn);
 void EnqueueWhile(std::function<bool()> fn);
 
 // =========================================================================
+// EnqueueEveryNTicks — runs fn on the game thread every N engine ticks until
+//   fn returns false (or the returned handle is passed to RemoveCallback).
+//
+// Unlike EnqueueOnce/EnqueueWhile (which use the task-drain queue), this
+// registers a proper named tick callback, giving full ExecutionTiming control
+// (Before / After / BeforeAndAfter) and a removable handle.
+//
+// n == 0 is treated as n == 1 (runs every tick, same as EnqueueWhile but
+// with timing and a handle).
+//
+// Example:
+//   auto h = EnqueueEveryNTicks(10, []{ DoSomething(); return true; });
+//   // later:
+//   GameHooks::EngineTickHook::Get().RemoveCallback(h);
+// =========================================================================
+
+GameHooks::CallbackHandle EnqueueEveryNTicks(
+    uint32_t                   n,
+    std::function<bool()>      fn,
+    GameHooks::ExecutionTiming timing = GameHooks::ExecutionTiming::After);
+
+// =========================================================================
 // EnqueueThrottled — schedules items one at a time on the game thread,
 //   rate-limited by interval. fn(item, index, total) returns false to stop.
 // =========================================================================
