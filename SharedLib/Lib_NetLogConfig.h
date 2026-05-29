@@ -28,8 +28,7 @@ namespace NetLogConfig
 
     struct Config
     {
-        std::vector<std::string>  netClientSkip;
-        std::vector<std::string>  netServerSkip;
+        std::vector<std::string>  netSkip;   // unified skip list for both NetClient and NetServer loggers
         std::vector<AutoRunEntry> autorun;
     };
 

@@ -4,8 +4,8 @@
 #   1. Next to the module DLL  — place here for distribution / in-game use
 #   2. Two directories up      — place here for development (next to Drgmods.sln)
 #
-# lognetclient / lognetserver changes take effect the next time a log command
-# is enabled: disable → edit file → re-enable (or run 'reloadnetlog').
+# netlog changes take effect the next time a log command is enabled:
+# disable → edit file → re-enable (or run 'reloadnetlog').
 #
 # autorun entries are executed on mod load and whenever 'runcfg' is run.
 # Each entry is either:
@@ -14,38 +14,42 @@
 #             args: [arg0, arg1, ...]   # optional
 # Args follow the same syntax as the CLI (vec:/rot: prefixes, quoted strings, etc.).
 
-lognetclient:
+netlog:
   skip:
+    - All_Kill
     - AllRagdoll
+    - All_ShowHit
+    - StartMovement
+    - Server_ShowHit
+    - Server_StopFire
+    - Server_SetUsing
+    - ServerMovePacked
+    - StopShootingSound
+    - Server_SetRunning
+    - ServerUpdateCamera
+    - Client_ReceiveData
+    - Server_StartSalute
+    - All_ShowHit_Terrain
+    - Client_MissionShout
+    - All_PlayAlertScream
+    - Server_SetIsSliding
+    - Server_UpdateTarget
+    - Server_SetJumpPressed
+    - Server_SetIsShooting
     - All_SetHomingLocation
+    - Server_SetFallVelocity # Holy fucking spam why are we delegating so much to clients??????
+    - Client_ShowDamageNumber
+    - All_DepartFadeFromBlack
     - ClientMoveResponsePacked
     - Netmulticast_GlobalBusMix
-    - Client_ReceiveParticipantCursor
-    - All_ShowHit
-    - All_ShowHit_Terrain
-
-lognetserver:
-  skip:
     - Server_SetGameOwnerStatus # Me when i spam myself
     - ServerSetSpectatorLocation
-    - ServerMovePacked
-    - Server_RecordParticipantCursor # Brother, we don't need people to know THIS often 
-    - ServerUpdateCamera
-    - Server_SetFallVelocity # Holy fucking spam why are we delegating so much to clients??????
-    - Server_UpdateTarget
+    - Server_ShotHiw_Destructible
+    - Server_SetGenerationFraction
+    - Server_RecordParticipantCursor # Brother, we don't need people to know THIS often
+    - Client_ReceiveParticipantCursor
+    - Client_ReceiveMinionDamageNumber
     - Server_SetIsPressingMovementInput
-    - Server_SetJumpPressed
-    - Server_SetIsSliding
-    - Server_SetRunning
-    - Server_StartSalute
-    - 
-    - 
-    - 
-    - 
-
-
-
-
 
 
 

@@ -48,6 +48,22 @@ public:
     SHORT SetAcHeightUnderLock(int acH);
     void  ClearAcUnderLock();
 
+    // ── Filter API (call while holding Mutex()) ───────────────────────────
+    void SetFilterUnderLock(const std::string& str);   // live-filter log pane
+    void ClearFilterUnderLock();                        // remove filter, show all
+    bool IsFilterActive()          const { return m_filterActive; }
+    const std::string& FilterStr() const { return m_filterStr; }
+
+    // ── Selection API (call while holding Mutex()) ────────────────────────
+    // rectMode = true → rectangular (box) selection; false → linear (rows)
+    void OnMouseDownUnderLock(COORD pos, bool rectMode);
+    void OnMouseDragUnderLock(COORD pos);
+    void OnMouseUpUnderLock(COORD pos);
+    // Build clipboard text for the current selection, applying the current
+    // filter.  Returns "" when nothing is selected.
+    std::string CopySelectionUnderLock() const;
+    void ClearSelectionUnderLock();
+
 private:
     // ── Layout ────────────────────────────────────────────────────────────
     void  RecalcLayout();
@@ -57,8 +73,25 @@ private:
     // ── CHAR_INFO buffer helpers ──────────────────────────────────────────
     static void FillLineInto(std::vector<CHAR_INFO>& buf, SHORT w, int row,
                               const std::string& utf8, WORD attr);
+    // tag — centred UTF-8 label; empty → plain dash line
     static void FillDividerInto(std::vector<CHAR_INFO>& buf, SHORT w, int row,
-                                 WORD attr, int scrollIndicator);
+                                 WORD attr, const std::string& tag);
+
+    // Builds the centred tag for the log divider from current filter/scroll state.
+    std::string BuildLogDivTag() const;
+
+    // ── Selection helpers ─────────────────────────────────────────────────
+    struct SelCoord {
+        int  historyIdx = -1;  // index into m_logHistory; -1 = invalid
+        int  col        = 0;   // screen column (used in rect mode)
+        bool valid() const { return historyIdx >= 0; }
+    };
+    // Map a screen COORD (absolute row, absolute col) → history-relative coord.
+    // Clamps to the nearest valid log-pane line if the click is outside.
+    SelCoord ScreenToHistory(COORD pos) const;
+    // Overlay the selection highlight onto a CHAR_INFO buffer that covers the
+    // log pane (rows 0..m_logDivRow-1, width w).
+    void ApplySelectionToBuffer(std::vector<CHAR_INFO>& buf, SHORT w) const;
 
     // ── Rendering ─────────────────────────────────────────────────────────
     void RenderAll();
@@ -85,4 +118,16 @@ private:
 
     std::deque<std::string> m_logHistory;
     std::deque<std::string> m_cliHistory;
+
+    // ── Filter state ──────────────────────────────────────────────────────
+    bool                m_filterActive  = false;
+    std::string         m_filterStr;
+    std::vector<size_t> m_filteredIndices;  // indices into m_logHistory
+
+    // ── Selection state ───────────────────────────────────────────────────
+    bool     m_selActive  = false; // LMB currently held
+    bool     m_selDone    = false; // selection completed (LMB released)
+    bool     m_selRect    = false; // true = rectangular, false = linear (full rows)
+    SelCoord m_selAnchor;          // fixed corner (mousedown position)
+    SelCoord m_selCurrent;         // moving corner (current mouse position)
 };

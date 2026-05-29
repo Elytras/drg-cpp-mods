@@ -56,6 +56,37 @@ public:
     void SetHistoryMaxLen(int n)                           { m_histMaxLen   = n; }
     void SetScrollFn(std::function<void(int)> fn)          { m_scrollFn     = std::move(fn); }
 
+    // Called (while mutex is held) on every filter string change and on clear.
+    void SetFilterCallbacks(std::function<void(const std::string&)> changeFn,
+                            std::function<void()>                   clearFn)
+    {
+        m_filterChangeFn = std::move(changeFn);
+        m_filterClearFn  = std::move(clearFn);
+    }
+
+    // Mouse-selection callbacks (all called while mutex is held).
+    //   downFn(pos, rectMode) — LMB pressed; rectMode = Shift was held
+    //   dragFn(pos)           — LMB held + mouse moved (or scroll-while-held)
+    //   upFn(pos)             — LMB released
+    //   copyFn()              — returns clipboard text for the current selection
+    void SetMouseSelectionCallbacks(
+        std::function<void(COORD, bool)> downFn,
+        std::function<void(COORD)>       dragFn,
+        std::function<void(COORD)>       upFn,
+        std::function<std::string()>     copyFn)
+    {
+        m_mouseDownFn = std::move(downFn);
+        m_mouseDragFn = std::move(dragFn);
+        m_mouseUpFn   = std::move(upFn);
+        m_copyFn      = std::move(copyFn);
+    }
+
+    // RMB clears the current selection (called while mutex is held).
+    void SetClearSelectionCallback(std::function<void()> clearFn)
+    {
+        m_selClearFn = std::move(clearFn);
+    }
+
     // Enable dedicated AC pane mode.
     //   resizeFn — called (under mutex) with desired height; returns AC pane start row
     //   clearFn  — called (under mutex) when AC is dismissed
@@ -145,17 +176,24 @@ public:
             // ── Mouse events ──────────────────────────────────────────────
             if (rec.EventType == MOUSE_EVENT)
             {
-                const MOUSE_EVENT_RECORD& me = rec.Event.MouseEvent;
+                const MOUSE_EVENT_RECORD& me     = rec.Event.MouseEvent;
+                const COORD               mpos   = me.dwMousePosition;
+                const bool                lmbNow = (me.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED) != 0;
 
+                m_lastMousePos = mpos;
+
+                // ── Wheel scroll ──────────────────────────────────────────
                 if (me.dwEventFlags & MOUSE_WHEELED)
                 {
                     SHORT delta = (SHORT)HIWORD(me.dwButtonState);
-                    // positive delta = wheel forward = scroll toward older content
                     if (m_splitMode && m_scrollFn)
                     {
                         auto lock = MakeLock();
                         m_scrollFn((delta > 0) ? +3 : -3);
-                        Redraw(prompt);  // restore cursor to correct column after scroll
+                        // Keep selection endpoint at current mouse position
+                        // so the selection extends into the newly scrolled view.
+                        if (m_lmbHeld && m_mouseDragFn) m_mouseDragFn(m_lastMousePos);
+                        RedrawActive(prompt);
                     }
                     else
                     {
@@ -172,46 +210,99 @@ public:
                             SetConsoleWindowInfo(m_hOut, TRUE, &win);
                         }
                     }
+                    continue;
                 }
-                else if ((me.dwEventFlags & MOUSE_MOVED) && !m_candRegs.empty())
+
+                // ── Mouse move ────────────────────────────────────────────
+                if (me.dwEventFlags & MOUSE_MOVED)
                 {
-                    SHORT mx = me.dwMousePosition.X;
-                    SHORT my = me.dwMousePosition.Y;
-                    int newHovered = -1;
-                    for (const auto& cr : m_candRegs)
+                    // AC candidate hover (existing behaviour).
+                    if (!m_candRegs.empty())
                     {
-                        if (my == cr.row && mx >= cr.c0 && mx < cr.c1)
-                        { newHovered = cr.idx; break; }
-                    }
-                    if (newHovered != m_hoveredCand)
-                    {
-                        auto lock = MakeLock();
-                        int oldHovered = m_hoveredCand;
-                        m_hoveredCand  = newHovered;
-                        HighlightCandidate(oldHovered, false);
-                        HighlightCandidate(newHovered, true);
-                        if (newHovered >= 0 && m_descCb)
-                            ShowTooltip(m_descCb(m_lastCandidates[newHovered]));
-                        else
-                            ClearTooltip();
-                        Redraw(m_prompt); // update ghost text for hovered candidate
-                    }
-                }
-                else if (me.dwEventFlags == 0 && (me.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED)
-                         && !m_candRegs.empty())
-                {
-                    SHORT mx = me.dwMousePosition.X;
-                    SHORT my = me.dwMousePosition.Y;
-                    for (const auto& cr : m_candRegs)
-                    {
-                        if (my == cr.row && mx >= cr.c0 && mx < cr.c1)
+                        int newHovered = -1;
+                        for (const auto& cr : m_candRegs)
+                        {
+                            if (mpos.Y == cr.row && mpos.X >= cr.c0 && mpos.X < cr.c1)
+                            { newHovered = cr.idx; break; }
+                        }
+                        if (newHovered != m_hoveredCand)
                         {
                             auto lock = MakeLock();
-                            m_buf    = m_lastCandidates[cr.idx];
-                            m_cursor = (int)m_buf.size();
-                            ClearCandidateState();
-                            Redraw(prompt);
-                            break;
+                            int oldHovered = m_hoveredCand;
+                            m_hoveredCand  = newHovered;
+                            HighlightCandidate(oldHovered, false);
+                            HighlightCandidate(newHovered, true);
+                            if (newHovered >= 0 && m_descCb)
+                                ShowTooltip(m_descCb(m_lastCandidates[newHovered]));
+                            else
+                                ClearTooltip();
+                            Redraw(m_prompt);
+                        }
+                    }
+                    // Selection drag — only while LMB is held and not over AC pane.
+                    if (lmbNow && m_lmbHeld && m_mouseDragFn && m_candRegs.empty())
+                    {
+                        auto lock = MakeLock();
+                        m_mouseDragFn(mpos);
+                        RedrawActive(prompt);
+                    }
+                    continue;
+                }
+
+                // ── Button state change ───────────────────────────────────
+                if (!me.dwEventFlags)
+                {
+                    // RMB pressed — clear selection.
+                    const bool rmbNow = (me.dwButtonState & RIGHTMOST_BUTTON_PRESSED) != 0;
+                    if (rmbNow && m_selClearFn)
+                    {
+                        auto lock = MakeLock();
+                        m_selClearFn();
+                        RedrawActive(prompt);
+                    }
+
+                    if (lmbNow && !m_lmbHeld)
+                    {
+                        // LMB just pressed.
+                        m_lmbHeld = true;
+                        const bool shift = (me.dwControlKeyState & SHIFT_PRESSED) != 0;
+
+                        // AC candidate click takes priority.
+                        bool clickedCand = false;
+                        if (!m_candRegs.empty())
+                        {
+                            for (const auto& cr : m_candRegs)
+                            {
+                                if (mpos.Y == cr.row && mpos.X >= cr.c0 && mpos.X < cr.c1)
+                                {
+                                    auto lock = MakeLock();
+                                    m_buf    = m_lastCandidates[cr.idx];
+                                    m_cursor = (int)m_buf.size();
+                                    ClearCandidateState();
+                                    RedrawActive(prompt);
+                                    clickedCand = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!clickedCand && m_mouseDownFn)
+                        {
+                            auto lock = MakeLock();
+                            ClearCandidateState();  // dismiss AC if open
+                            m_mouseDownFn(mpos, shift);
+                            RedrawActive(prompt);
+                        }
+                    }
+                    else if (!lmbNow && m_lmbHeld)
+                    {
+                        // LMB just released.
+                        m_lmbHeld = false;
+                        if (m_mouseUpFn)
+                        {
+                            auto lock = MakeLock();
+                            m_mouseUpFn(mpos);
+                            RedrawActive(prompt);
                         }
                     }
                 }
@@ -241,11 +332,66 @@ public:
             {
                 bool acWasActive = (m_acAreaStartRow >= 0);
                 ClearCandidateState();
-                if (acWasActive) Redraw(prompt);
+                if (acWasActive) RedrawActive(prompt);
+            }
+
+            // ── Ctrl+F — toggle filter mode ───────────────────────────────
+            if (ch == 0x06)
+            {
+                if (!m_filterMode)
+                {
+                    // Enter filter mode: swap command buf for filter buf.
+                    m_savedBuf    = m_buf;
+                    m_savedCursor = m_cursor;
+                    m_savedPrompt = prompt;
+                    m_buf         = m_filterBuf;
+                    m_cursor      = (int)m_filterBuf.size();
+                    m_filterMode  = true;
+                    Redraw(kFilterPrompt);
+                }
+                else
+                {
+                    // Exit filter mode: keep filter active, restore command buf.
+                    m_filterBuf  = m_buf;
+                    m_buf        = m_savedBuf;
+                    m_cursor     = m_savedCursor;
+                    m_filterMode = false;
+                    if (m_filterChangeFn) m_filterChangeFn(m_filterBuf);
+                    Redraw(m_savedPrompt);
+                }
+                continue;
+            }
+
+            // ── Ctrl+C — copy selection to clipboard ──────────────────────
+            if (ch == 0x03)
+            {
+                if (m_copyFn)
+                {
+                    std::string text = m_copyFn();
+                    if (!text.empty())
+                    {
+                        SetClipboard(text);
+                        int lines = (int)std::count(text.begin(), text.end(), '\n');
+                        if (m_splitLogFn)
+                            m_splitLogFn("[Copied " + std::to_string(lines) + " line(s) to clipboard]");
+                    }
+                }
+                continue;
             }
 
             if (vk == VK_RETURN)
             {
+                if (m_filterMode)
+                {
+                    // Commit filter, return to command mode (filter stays active).
+                    m_filterBuf  = m_buf;
+                    m_buf        = m_savedBuf;
+                    m_cursor     = m_savedCursor;
+                    m_filterMode = false;
+                    if (m_filterChangeFn) m_filterChangeFn(m_filterBuf);
+                    Redraw(m_savedPrompt);
+                    continue;
+                }
                 if (m_splitMode)
                 {
                     CONSOLE_SCREEN_BUFFER_INFO csbi{};
@@ -267,6 +413,17 @@ public:
 
             if (vk == VK_ESCAPE)
             {
+                if (m_filterMode)
+                {
+                    // Clear filter entirely, return to command mode.
+                    m_filterBuf.clear();
+                    m_buf        = m_savedBuf;
+                    m_cursor     = m_savedCursor;
+                    m_filterMode = false;
+                    if (m_filterClearFn) m_filterClearFn();
+                    Redraw(m_savedPrompt);
+                    continue;
+                }
                 m_buf.clear(); m_cursor = 0;
                 Redraw(prompt);
                 continue;
@@ -292,14 +449,16 @@ public:
                     {
                         m_buf.erase(c, m_cursor - c);
                         m_cursor = c;
-                        Redraw(prompt);
+                        RedrawActive(prompt);
+                        if (m_filterMode && m_filterChangeFn) m_filterChangeFn(m_buf);
                     }
                 }
                 else if (m_cursor > 0)
                 {
                     m_buf.erase(m_cursor - 1, 1);
                     --m_cursor;
-                    Redraw(prompt);
+                    RedrawActive(prompt);
+                    if (m_filterMode && m_filterChangeFn) m_filterChangeFn(m_buf);
                 }
                 continue;
             }
@@ -309,7 +468,8 @@ public:
                 if (m_cursor < (int)m_buf.size())
                 {
                     m_buf.erase(m_cursor, 1);
-                    Redraw(prompt);
+                    RedrawActive(prompt);
+                    if (m_filterMode && m_filterChangeFn) m_filterChangeFn(m_buf);
                 }
                 continue;
             }
@@ -322,9 +482,9 @@ public:
                     int c = m_cursor;
                     while (c > 0 && m_buf[c - 1] == ' ') --c;
                     while (c > 0 && m_buf[c - 1] != ' ') --c;
-                    if (c != m_cursor) { m_cursor = c; Redraw(prompt); }
+                    if (c != m_cursor) { m_cursor = c; RedrawActive(prompt); }
                 }
-                else if (m_cursor > 0) { --m_cursor; Redraw(prompt); }
+                else if (m_cursor > 0) { --m_cursor; RedrawActive(prompt); }
                 continue;
             }
 
@@ -336,16 +496,17 @@ public:
                     int c = m_cursor, n = (int)m_buf.size();
                     while (c < n && m_buf[c] != ' ') ++c;
                     while (c < n && m_buf[c] == ' ') ++c;
-                    if (c != m_cursor) { m_cursor = c; Redraw(prompt); }
+                    if (c != m_cursor) { m_cursor = c; RedrawActive(prompt); }
                 }
                 else if (m_cursor < (int)m_buf.size())
                 {
                     ++m_cursor;
-                    Redraw(prompt);
+                    RedrawActive(prompt);
                 }
-                else
+                else if (!m_filterMode)
                 {
                     // At end of buffer: accept inlineText ghost completion
+                    // (ghost completions are not relevant in filter mode)
                     WinHint hint = Hint();
                     if (!hint.inlineText.empty())
                     {
@@ -360,17 +521,28 @@ public:
             // No-redraw guards: skip Redraw when cursor is already at the target position
             if (vk == VK_HOME)
             {
+                if (m_filterMode)
+                {
+                    // In filter mode HOME moves the text cursor (no log scroll).
+                    if (m_cursor != 0) { m_cursor = 0; Redraw(kFilterPrompt); }
+                }
                 // Split mode: jump to oldest log entry (scroll offset = max).
                 // Otherwise: move text cursor to start of input buffer.
-                if (m_splitMode && m_scrollFn) { m_scrollFn(INT_MAX);  Redraw(prompt); }
-                else if (m_cursor != 0)        { m_cursor = 0;         Redraw(prompt); }
+                else if (m_splitMode && m_scrollFn) { m_scrollFn(INT_MAX);  Redraw(prompt); }
+                else if (m_cursor != 0)             { m_cursor = 0;         Redraw(prompt); }
                 continue;
             }
             if (vk == VK_END)
             {
+                if (m_filterMode)
+                {
+                    // In filter mode END moves the text cursor (no log scroll).
+                    int e = (int)m_buf.size();
+                    if (m_cursor != e) { m_cursor = e; Redraw(kFilterPrompt); }
+                }
                 // Split mode: jump to newest log entry (scroll offset = 0).
                 // Otherwise: move text cursor to end of input buffer.
-                if (m_splitMode && m_scrollFn)              { m_scrollFn(-INT_MAX); Redraw(prompt); }
+                else if (m_splitMode && m_scrollFn)              { m_scrollFn(-INT_MAX); Redraw(prompt); }
                 else { int e=(int)m_buf.size(); if (m_cursor != e) { m_cursor = e;  Redraw(prompt); } }
                 continue;
             }
@@ -383,23 +555,54 @@ public:
                     GetConsoleScreenBufferInfo(m_hOut, &csbi2);
                     int pageH = std::max(1, (int)(csbi2.srWindow.Bottom - csbi2.srWindow.Top + 1) / 2);
                     m_scrollFn(vk == VK_PRIOR ? +pageH : -pageH);
-                    Redraw(prompt);
+                    RedrawActive(prompt);
                 }
                 continue;
             }
 
-            if (vk == VK_UP)   { NavigateHistory(prompt, +1); continue; }
-            if (vk == VK_DOWN) { NavigateHistory(prompt, -1); continue; }
+            if (vk == VK_UP)
+            {
+                if (m_filterMode)
+                {
+                    if (m_splitMode && m_scrollFn) { m_scrollFn(+1); Redraw(kFilterPrompt); }
+                    continue;
+                }
+                NavigateHistory(prompt, +1);
+                continue;
+            }
+            if (vk == VK_DOWN)
+            {
+                if (m_filterMode)
+                {
+                    if (m_splitMode && m_scrollFn) { m_scrollFn(-1); Redraw(kFilterPrompt); }
+                    continue;
+                }
+                NavigateHistory(prompt, -1);
+                continue;
+            }
 
             // Ctrl-A / Ctrl-E / Ctrl-K / Ctrl-U with no-redraw guards
-            if (ch == 0x01) { if (m_cursor != 0)                   { m_cursor = 0;                Redraw(prompt); } continue; }
-            if (ch == 0x05) { int e=(int)m_buf.size(); if (m_cursor != e) { m_cursor = e;         Redraw(prompt); } continue; }
-            if (ch == 0x0B) { if (m_cursor < (int)m_buf.size())    { m_buf.erase(m_cursor);       Redraw(prompt); } continue; }
-            if (ch == 0x15) { m_buf.erase(0, m_cursor); m_cursor = 0;                             Redraw(prompt); continue; }
+            if (ch == 0x01) { if (m_cursor != 0)                { m_cursor = 0;          RedrawActive(prompt); } continue; }
+            if (ch == 0x05) { int e=(int)m_buf.size(); if (m_cursor != e) { m_cursor = e; RedrawActive(prompt); } continue; }
+            if (ch == 0x0B) { if (m_cursor < (int)m_buf.size()) { m_buf.erase(m_cursor); RedrawActive(prompt);
+                                  if (m_filterMode && m_filterChangeFn) m_filterChangeFn(m_buf); } continue; }
+            if (ch == 0x15) { m_buf.erase(0, m_cursor); m_cursor = 0;                    RedrawActive(prompt);
+                              if (m_filterMode && m_filterChangeFn) m_filterChangeFn(m_buf); continue; }
 
-            // Ctrl-D on empty line → EOF
+            // Ctrl-D on empty line → EOF (treat as Escape in filter mode to avoid
+            // accidentally terminating the REPL while editing a filter string)
             if (ch == 0x04 && m_buf.empty())
             {
+                if (m_filterMode)
+                {
+                    m_filterBuf.clear();
+                    m_buf        = m_savedBuf;
+                    m_cursor     = m_savedCursor;
+                    m_filterMode = false;
+                    if (m_filterClearFn) m_filterClearFn();
+                    Redraw(m_savedPrompt);
+                    continue;
+                }
                 WriteConsoleW(m_hOut, L"\r\n", 2, nullptr, nullptr);
                 result = false;
                 break;
@@ -407,6 +610,7 @@ public:
 
             if (vk == VK_TAB)
             {
+                if (m_filterMode) continue;  // no-op: completions don't apply to filters
                 if (m_hoveredCand >= 0 && m_hoveredCand < (int)m_lastCandidates.size())
                 {
                     m_buf    = m_lastCandidates[m_hoveredCand];
@@ -429,7 +633,8 @@ public:
                 {
                     m_buf.insert(m_cursor, narrow, bytes);
                     m_cursor += bytes;
-                    Redraw(prompt);
+                    RedrawActive(prompt);
+                    if (m_filterMode && m_filterChangeFn) m_filterChangeFn(m_buf);
                 }
                 continue;
             }
@@ -485,7 +690,7 @@ private:
         auto lock = MakeLock();
         m_splitInputRow = m_splitResizeFn();
         m_row = m_splitInputRow;
-        Redraw(prompt);
+        RedrawActive(prompt);
         return true;
     }
 
@@ -586,6 +791,34 @@ private:
     }
 
     // ── Redraw ────────────────────────────────────────────────────────────
+
+    static constexpr const char* kFilterPrompt = "[Filter]> ";
+
+    // Copy UTF-8 text to the Windows clipboard as CF_UNICODETEXT.
+    static void SetClipboard(const std::string& utf8)
+    {
+        if (utf8.empty()) return;
+        int n = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
+        if (n <= 0) return;
+        std::wstring wide(n, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, wide.data(), n);
+        if (!OpenClipboard(nullptr)) return;
+        EmptyClipboard();
+        if (HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (size_t)n * sizeof(wchar_t)))
+        {
+            memcpy(GlobalLock(hMem), wide.data(), (size_t)n * sizeof(wchar_t));
+            GlobalUnlock(hMem);
+            SetClipboardData(CF_UNICODETEXT, hMem);
+        }
+        CloseClipboard();
+    }
+
+    // Use instead of Redraw(prompt) for key handlers that run in filter mode:
+    // picks the filter prompt when in filter mode, command prompt otherwise.
+    void RedrawActive(const std::string& cmdPrompt)
+    {
+        Redraw(m_filterMode ? std::string(kFilterPrompt) : cmdPrompt);
+    }
 
     void Redraw(const std::string& prompt)
     {
@@ -997,6 +1230,24 @@ private:
     std::function<SHORT(int)> m_acResizeFn; // set AC pane height; returns AC start row
     std::function<void()>     m_acClearFn;  // collapse AC pane
     SHORT                     m_acAreaStartRow = -1; // tooltip row in AC pane; -1 when unused
+
+    // ── Filter mode state ─────────────────────────────────────────────────
+    bool        m_filterMode    = false;   // true while editing the filter string
+    std::string m_filterBuf;               // persists across mode toggles
+    std::string m_savedBuf;                // command buf snapshot taken on Ctrl+F enter
+    int         m_savedCursor   = 0;
+    std::string m_savedPrompt;
+    std::function<void(const std::string&)> m_filterChangeFn;
+    std::function<void()>                   m_filterClearFn;
+
+    // ── Mouse selection state ─────────────────────────────────────────────
+    bool  m_lmbHeld     = false;   // LMB currently down (tracked across events)
+    COORD m_lastMousePos{};        // last known mouse position (for scroll-while-held)
+    std::function<void(COORD, bool)> m_mouseDownFn;
+    std::function<void(COORD)>       m_mouseDragFn;
+    std::function<void(COORD)>       m_mouseUpFn;
+    std::function<std::string()>     m_copyFn;
+    std::function<void()>            m_selClearFn; // RMB — clear selection
 
     // Candidate hover tooltip state
     std::vector<CandRegion>  m_candRegs;

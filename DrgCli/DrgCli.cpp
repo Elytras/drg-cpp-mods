@@ -376,6 +376,17 @@ int main(int argc, char** argv)
         [&]() -> SHORT { return split.InputRow(); }
     );
     input.SetScrollFn([&](int d) { split.ScrollLogUnderLock(d); });
+    input.SetFilterCallbacks(
+        [&](const std::string& s) { split.SetFilterUnderLock(s);  },
+        [&]()                     { split.ClearFilterUnderLock(); }
+    );
+    input.SetMouseSelectionCallbacks(
+        [&](COORD pos, bool rect) { split.OnMouseDownUnderLock(pos, rect); },
+        [&](COORD pos)            { split.OnMouseDragUnderLock(pos); },
+        [&](COORD pos)            { split.OnMouseUpUnderLock(pos); },
+        [&]()                     { return split.CopySelectionUnderLock(); }
+    );
+    input.SetClearSelectionCallback([&]() { split.ClearSelectionUnderLock(); });
     input.SetAcMode(
         [&](int acH) -> SHORT { return split.SetAcHeightUnderLock(acH); },
         [&]()                 { split.ClearAcUnderLock(); }

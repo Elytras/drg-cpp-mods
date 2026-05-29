@@ -2211,8 +2211,8 @@ namespace Commands
             // to the skip list take effect without restarting.
             const auto cfg = NetLogConfig::Load();
             std::unordered_set<SDK::FName> skipList;
-            skipList.reserve(cfg.netClientSkip.size());
-            for (const auto& s : cfg.netClientSkip)
+            skipList.reserve(cfg.netSkip.size());
+            for (const auto& s : cfg.netSkip)
                 skipList.emplace(StringLib::ToWide(s).c_str());
 
             info("[cmd:lognetclient] skip list: {} entr{}",
@@ -2287,8 +2287,8 @@ namespace Commands
         {
             const auto cfg = NetLogConfig::Load();
             std::unordered_set<SDK::FName> skipList;
-            skipList.reserve(cfg.netServerSkip.size());
-            for (const auto& s : cfg.netServerSkip)
+            skipList.reserve(cfg.netSkip.size());
+            for (const auto& s : cfg.netSkip)
                 skipList.emplace(StringLib::ToWide(s).c_str());
 
             info("[cmd:lognetserver] skip list: {} entr{}",

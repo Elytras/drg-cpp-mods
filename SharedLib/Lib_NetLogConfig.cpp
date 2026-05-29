@@ -61,8 +61,7 @@ namespace NetLogConfig
                     out.push_back(item.as<std::string>());
         };
 
-        ExtractSkip("lognetclient", cfg.netClientSkip);
-        ExtractSkip("lognetserver", cfg.netServerSkip);
+        ExtractSkip("netlog", cfg.netSkip);
 
         // autorun section: list of commands to execute via RunConfig().
         // Each entry is either:

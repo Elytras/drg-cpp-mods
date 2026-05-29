@@ -310,6 +310,13 @@ bool InjectDLL()
                         Log("InjectDLL: DLL already mapped in target — adopting existing instance.");
                         g_hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
                         g_InjState.store(InjectionState::Active);
+                        // Snapshot the copy DLL's mtime as the injection baseline so
+                        // HotReloadThread doesn't immediately see a "newer" source and
+                        // spuriously reload.  CopyFileW preserves the source mtime, so
+                        // this is equivalent to what the normal inject path records.
+                        WIN32_FILE_ATTRIBUTE_DATA copyInfo{};
+                        if (GetFileAttributesExW(g_CopyDllPath.c_str(), GetFileExInfoStandard, &copyInfo))
+                            g_LastInjectedTime = copyInfo.ftLastWriteTime;
                         CloseHandle(hSnap);
                         return true;
                     }

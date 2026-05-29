@@ -1,6 +1,8 @@
 // SplitConsole.cpp — Windows Console API 3-pane split layout implementation.
 
 #include "SplitConsole.h"
+#include <cctype>   // ::tolower
+#include <climits>  // INT_MAX
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Constructor
@@ -94,7 +96,8 @@ void SplitConsole::RecalcLayout()
     }
 
     int logH   = m_logDivRow;
-    int maxOff = std::max(0, (int)m_logHistory.size() - logH);
+    int total  = m_filterActive ? (int)m_filteredIndices.size() : (int)m_logHistory.size();
+    int maxOff = std::max(0, total - logH);
     if (m_scrollOffset > maxOff) m_scrollOffset = maxOff;
 
     SHORT w = ConsoleWidth();
@@ -146,12 +149,11 @@ void SplitConsole::FillLineInto(std::vector<CHAR_INFO>& buf, SHORT w, int row,
 }
 
 void SplitConsole::FillDividerInto(std::vector<CHAR_INFO>& buf, SHORT w, int row,
-                                    WORD attr, int scrollIndicator)
+                                    WORD attr, const std::string& tag)
 {
     std::wstring line;
-    if (scrollIndicator > 0)
+    if (!tag.empty())
     {
-        std::string tag = " \xe2\x86\x91 +" + std::to_string(scrollIndicator) + " ";
         int wn = MultiByteToWideChar(CP_UTF8, 0, tag.c_str(), (int)tag.size(), nullptr, 0);
         std::wstring wtag(wn, L'\0');
         MultiByteToWideChar(CP_UTF8, 0, tag.c_str(), (int)tag.size(), wtag.data(), wn);
@@ -172,6 +174,29 @@ void SplitConsole::FillDividerInto(std::vector<CHAR_INFO>& buf, SHORT w, int row
     }
 }
 
+// Builds the centred label for the log divider:
+//   filter active → "[~query~]"
+//   scrolled      → "↑ +N"
+//   both          → "[~query~] ↑ +N"
+//   neither       → "" (plain dashes)
+std::string SplitConsole::BuildLogDivTag() const
+{
+    std::string tag;
+    if (m_filterActive)
+    {
+        std::string fs = m_filterStr;
+        constexpr size_t kMaxDisplay = 20;
+        if (fs.size() > kMaxDisplay) { fs.resize(kMaxDisplay - 2); fs += ".."; }
+        tag = "[~" + fs + "~]";
+    }
+    if (m_scrollOffset > 0)
+    {
+        if (!tag.empty()) tag += ' ';
+        tag += "\xe2\x86\x91 +" + std::to_string(m_scrollOffset);
+    }
+    return tag.empty() ? tag : " " + tag + " ";
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Rendering
 // ─────────────────────────────────────────────────────────────────────────────
@@ -188,21 +213,25 @@ void SplitConsole::RenderAll()
     std::vector<CHAR_INFO> buf(rows * w);
     for (auto& ci : buf) { ci.Char.UnicodeChar = L' '; ci.Attributes = attr; }
 
-    // Log pane
+    // Log pane (filter-aware)
     {
-        int logH     = m_logDivRow;
-        int total    = (int)m_logHistory.size();
-        int endIdx   = total - m_scrollOffset;
+        int logH   = m_logDivRow;
+        int total  = m_filterActive ? (int)m_filteredIndices.size() : (int)m_logHistory.size();
+        int endIdx = total - m_scrollOffset;
         if (endIdx < 0) endIdx = 0;
         int startIdx = endIdx - logH;
         if (startIdx < 0) startIdx = 0;
         int count    = endIdx - startIdx;
         int baseRow  = logH - count;
         for (int i = 0; i < count; ++i)
-            FillLineInto(buf, w, baseRow + i, m_logHistory[startIdx + i], attr);
+        {
+            int hi = m_filterActive ? (int)m_filteredIndices[startIdx + i] : (startIdx + i);
+            FillLineInto(buf, w, baseRow + i, m_logHistory[hi], attr);
+        }
+        ApplySelectionToBuffer(buf, w);
     }
 
-    FillDividerInto(buf, w, m_logDivRow, divAttr, m_scrollOffset);
+    FillDividerInto(buf, w, m_logDivRow, divAttr, BuildLogDivTag());
 
     // CLI pane
     {
@@ -221,7 +250,7 @@ void SplitConsole::RenderAll()
         }
     }
 
-    FillDividerInto(buf, w, m_cliDivRow, divAttr, 0);
+    FillDividerInto(buf, w, m_cliDivRow, divAttr, {});
 
     COORD      sz{w, rows};
     COORD      origin{0, 0};
@@ -240,8 +269,8 @@ void SplitConsole::RenderLogPane()
     SHORT w   = csbi.dwSize.X;
     WORD attr = csbi.wAttributes;
 
-    int total    = (int)m_logHistory.size();
-    int endIdx   = total - m_scrollOffset;
+    int total  = m_filterActive ? (int)m_filteredIndices.size() : (int)m_logHistory.size();
+    int endIdx = total - m_scrollOffset;
     if (endIdx < 0) endIdx = 0;
     int startIdx = endIdx - logH;
     if (startIdx < 0) startIdx = 0;
@@ -251,7 +280,11 @@ void SplitConsole::RenderLogPane()
     std::vector<CHAR_INFO> buf(logH * w);
     for (auto& ci : buf) { ci.Char.UnicodeChar = L' '; ci.Attributes = attr; }
     for (int i = 0; i < count; ++i)
-        FillLineInto(buf, w, baseRow + i, m_logHistory[startIdx + i], attr);
+    {
+        int hi = m_filterActive ? (int)m_filteredIndices[startIdx + i] : (startIdx + i);
+        FillLineInto(buf, w, baseRow + i, m_logHistory[hi], attr);
+    }
+    ApplySelectionToBuffer(buf, w);
 
     COORD      sz{w, static_cast<SHORT>(logH)};
     COORD      origin{0, 0};
@@ -296,7 +329,7 @@ void SplitConsole::DrawLogDivider()
     WORD  divAttr = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
 
     std::vector<CHAR_INFO> buf(w);
-    FillDividerInto(buf, w, 0, divAttr, m_scrollOffset);
+    FillDividerInto(buf, w, 0, divAttr, BuildLogDivTag());
 
     COORD      sz{w, 1};
     COORD      origin{0, 0};
@@ -312,8 +345,7 @@ void SplitConsole::DrawCliDivider()
     WORD  divAttr = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
 
     std::vector<CHAR_INFO> buf(w);
-    FillDividerInto(buf, w, 0, divAttr, 0);
-
+    FillDividerInto(buf, w, 0, divAttr, {});
     COORD      sz{w, 1};
     COORD      origin{0, 0};
     SMALL_RECT dest{0, m_cliDivRow, static_cast<SHORT>(w - 1), m_cliDivRow};
@@ -327,8 +359,51 @@ void SplitConsole::DrawCliDivider()
 void SplitConsole::PrintLogLocked(const std::string& line)
 {
     m_logHistory.push_back(line);
-    while (m_logHistory.size() > kLogMax) m_logHistory.pop_front();
+    bool popped = false;
+    if (m_logHistory.size() > kLogMax) { m_logHistory.pop_front(); popped = true; }
 
+    if (m_filterActive)
+    {
+        if (popped)
+        {
+            // History shifted left by one: decrement all stored indices and
+            // drop any that referenced the now-removed element (was at index 0).
+            size_t wi = 0;
+            for (size_t idx : m_filteredIndices)
+                if (idx > 0) m_filteredIndices[wi++] = idx - 1;
+            m_filteredIndices.resize(wi);
+        }
+
+        // Check whether the newly appended line matches the filter.
+        std::string lo = m_logHistory.back();
+        std::string fs = m_filterStr;
+        std::transform(lo.begin(), lo.end(), lo.begin(), ::tolower);
+        std::transform(fs.begin(), fs.end(), fs.begin(), ::tolower);
+        bool matched = lo.find(fs) != std::string::npos;
+        if (matched)
+            m_filteredIndices.push_back(m_logHistory.size() - 1);
+
+        // Scroll-pin: keep the viewport offset if the user is scrolled up.
+        if (m_scrollOffset > 0 && matched)
+        {
+            ++m_scrollOffset;
+            int maxOff = std::max(0, (int)m_filteredIndices.size() - m_logDivRow);
+            if (m_scrollOffset > maxOff) m_scrollOffset = maxOff;
+            DrawLogDivider();
+            return;
+        }
+
+        // No visible change (no match, no pop that dirtied the view).
+        if (!matched && !popped) return;
+
+        COORD cur = GetCursorPos();
+        RenderLogPane();
+        DrawLogDivider();
+        SetConsoleCursorPosition(m_hOut, cur);
+        return;
+    }
+
+    // ── Normal (unfiltered) path ──────────────────────────────────────────
     if (m_scrollOffset > 0)
     {
         ++m_scrollOffset;
@@ -356,7 +431,7 @@ void SplitConsole::PrintCmdLocked(const std::string& line)
 void SplitConsole::ScrollLogLocked(int delta)
 {
     int logH   = m_logDivRow;
-    int total  = (int)m_logHistory.size();
+    int total  = m_filterActive ? (int)m_filteredIndices.size() : (int)m_logHistory.size();
     int maxOff = std::max(0, total - logH);
 
     int newOff;
@@ -372,4 +447,233 @@ void SplitConsole::ScrollLogLocked(int delta)
     RenderLogPane();
     DrawLogDivider();
     SetConsoleCursorPosition(m_hOut, cur);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Filter API
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Rebuild the filtered index from the full history, then re-render.
+// Called under the split mutex (typically from WinInput's filterChangeFn).
+// Uses RenderLogPane + DrawLogDivider rather than RenderAll so the cursor
+// position written by WinInput::Redraw is preserved.
+void SplitConsole::SetFilterUnderLock(const std::string& str)
+{
+    m_filterStr    = str;
+    m_filterActive = !str.empty();
+    m_filteredIndices.clear();
+    m_scrollOffset = 0;
+
+    if (m_filterActive)
+    {
+        std::string lf = str;
+        std::transform(lf.begin(), lf.end(), lf.begin(), ::tolower);
+        for (size_t i = 0; i < m_logHistory.size(); ++i)
+        {
+            std::string lo = m_logHistory[i];
+            std::transform(lo.begin(), lo.end(), lo.begin(), ::tolower);
+            if (lo.find(lf) != std::string::npos)
+                m_filteredIndices.push_back(i);
+        }
+    }
+
+    COORD cur = GetCursorPos();
+    RenderLogPane();
+    DrawLogDivider();
+    SetConsoleCursorPosition(m_hOut, cur);
+}
+
+void SplitConsole::ClearFilterUnderLock()
+{
+    m_filterActive = false;
+    m_filterStr.clear();
+    m_filteredIndices.clear();
+    m_scrollOffset = 0;
+
+    COORD cur = GetCursorPos();
+    RenderLogPane();
+    DrawLogDivider();
+    SetConsoleCursorPosition(m_hOut, cur);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Selection API
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Map a screen COORD → history-relative SelCoord.
+// Row is clamped to the log pane; invalid if the log pane is empty.
+SplitConsole::SelCoord SplitConsole::ScreenToHistory(COORD pos) const
+{
+    SelCoord result;
+    int logH = m_logDivRow;
+    if (logH <= 0) return result;
+
+    int total  = m_filterActive ? (int)m_filteredIndices.size() : (int)m_logHistory.size();
+    int endIdx = total - m_scrollOffset;
+    if (endIdx < 0) endIdx = 0;
+    int startIdx = endIdx - logH;
+    if (startIdx < 0) startIdx = 0;
+    int count    = endIdx - startIdx;
+    int baseRow  = logH - count;
+
+    if (count == 0) return result;
+
+    // Clamp row to the range that has actual content.
+    int row = std::max(baseRow, std::min((int)pos.Y, logH - 1));
+    int logicalIdx = startIdx + (row - baseRow);
+    if (logicalIdx < 0 || logicalIdx >= startIdx + count) return result;
+
+    result.historyIdx = m_filterActive
+        ? (int)m_filteredIndices[logicalIdx]
+        : logicalIdx;
+    result.col = std::max(0, (int)pos.X);
+    return result;
+}
+
+// Apply selection highlight over a CHAR_INFO buffer that covers rows
+// 0 .. m_logDivRow-1 (the log pane portion, same layout as RenderLogPane).
+void SplitConsole::ApplySelectionToBuffer(std::vector<CHAR_INFO>& buf, SHORT w) const
+{
+    if (!m_selActive && !m_selDone) return;
+    if (!m_selAnchor.valid() || !m_selCurrent.valid()) return;
+
+    // Bright white text on dark blue, matching the AC hover colour.
+    constexpr WORD kSelAttr = BACKGROUND_BLUE
+                            | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE
+                            | FOREGROUND_INTENSITY;
+
+    int logH   = m_logDivRow;
+    int total  = m_filterActive ? (int)m_filteredIndices.size() : (int)m_logHistory.size();
+    int endIdx = total - m_scrollOffset;
+    if (endIdx < 0) endIdx = 0;
+    int startIdx = endIdx - logH;
+    if (startIdx < 0) startIdx = 0;
+    int count    = endIdx - startIdx;
+    int baseRow  = logH - count;
+
+    int minHist = std::min(m_selAnchor.historyIdx, m_selCurrent.historyIdx);
+    int maxHist = std::max(m_selAnchor.historyIdx, m_selCurrent.historyIdx);
+
+    // Column range for rectangular mode.
+    int minCol = m_selRect ? std::min(m_selAnchor.col, m_selCurrent.col) : 0;
+    int maxCol = m_selRect ? std::max(m_selAnchor.col, m_selCurrent.col) : (int)w - 1;
+
+    for (int i = 0; i < count; ++i)
+    {
+        int hi = m_filterActive ? (int)m_filteredIndices[startIdx + i] : (startIdx + i);
+        if (hi < minHist || hi > maxHist) continue;
+
+        int bufRow = baseRow + i;
+        int c0 = minCol;
+        int c1 = std::min(maxCol, (int)w - 1);
+        for (int c = c0; c <= c1; ++c)
+            buf[bufRow * w + c].Attributes = kSelAttr;
+    }
+}
+
+void SplitConsole::OnMouseDownUnderLock(COORD pos, bool rectMode)
+{
+    SelCoord coord = ScreenToHistory(pos);
+    if (!coord.valid()) { ClearSelectionUnderLock(); return; }
+
+    m_selAnchor  = coord;
+    m_selCurrent = coord;
+    m_selRect    = rectMode;
+    m_selActive  = true;
+    m_selDone    = false;
+
+    COORD cur = GetCursorPos();
+    RenderLogPane();
+    SetConsoleCursorPosition(m_hOut, cur);
+}
+
+void SplitConsole::OnMouseDragUnderLock(COORD pos)
+{
+    if (!m_selActive) return;
+    SelCoord coord = ScreenToHistory(pos);
+    if (!coord.valid()) return;
+
+    m_selCurrent = coord;
+
+    COORD cur = GetCursorPos();
+    RenderLogPane();
+    SetConsoleCursorPosition(m_hOut, cur);
+}
+
+void SplitConsole::OnMouseUpUnderLock(COORD pos)
+{
+    if (!m_selActive) return;
+    SelCoord coord = ScreenToHistory(pos);
+    if (coord.valid()) m_selCurrent = coord;
+
+    m_selActive = false;
+    m_selDone   = true;
+
+    COORD cur = GetCursorPos();
+    RenderLogPane();
+    SetConsoleCursorPosition(m_hOut, cur);
+}
+
+void SplitConsole::ClearSelectionUnderLock()
+{
+    if (!m_selActive && !m_selDone) return;
+    m_selActive  = false;
+    m_selDone    = false;
+    m_selAnchor  = {};
+    m_selCurrent = {};
+
+    COORD cur = GetCursorPos();
+    RenderLogPane();
+    SetConsoleCursorPosition(m_hOut, cur);
+}
+
+// Build clipboard text for the current selection, applying the current filter
+// so the filter at copy-time determines what's included, not at select-time.
+std::string SplitConsole::CopySelectionUnderLock() const
+{
+    if (!m_selActive && !m_selDone) return {};
+    if (!m_selAnchor.valid() || !m_selCurrent.valid()) return {};
+
+    int minHist = std::min(m_selAnchor.historyIdx, m_selCurrent.historyIdx);
+    int maxHist = std::max(m_selAnchor.historyIdx, m_selCurrent.historyIdx);
+
+    // Current-filter lower-case string for matching at copy time.
+    std::string lf;
+    if (m_filterActive)
+    {
+        lf = m_filterStr;
+        std::transform(lf.begin(), lf.end(), lf.begin(), ::tolower);
+    }
+
+    int minCol = m_selRect ? std::min(m_selAnchor.col, m_selCurrent.col) : 0;
+    int maxCol = m_selRect ? std::max(m_selAnchor.col, m_selCurrent.col) : INT_MAX;
+
+    std::string result;
+    for (int hi = minHist; hi <= maxHist; ++hi)
+    {
+        if (hi < 0 || hi >= (int)m_logHistory.size()) continue;
+        const std::string& line = m_logHistory[hi];
+
+        // Apply current filter.
+        if (m_filterActive)
+        {
+            std::string lo = line;
+            std::transform(lo.begin(), lo.end(), lo.begin(), ::tolower);
+            if (lo.find(lf) == std::string::npos) continue;
+        }
+
+        if (m_selRect)
+        {
+            // Extract only the column range (treat as byte columns; fine for ASCII log text).
+            int end = std::min(maxCol + 1, (int)line.size());
+            if (minCol < (int)line.size())
+                result += line.substr(minCol, end - minCol);
+            result += '\n';
+        }
+        else
+        {
+            result += line + '\n';
+        }
+    }
+    return result;
 }

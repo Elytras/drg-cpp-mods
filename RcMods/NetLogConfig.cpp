@@ -49,8 +49,7 @@ namespace NetLogConfig
                     out.push_back(item.as<std::string>());
         };
 
-        ExtractSkip("lognetclient", cfg.netClientSkip);
-        ExtractSkip("lognetserver", cfg.netServerSkip);
+        ExtractSkip("netlog", cfg.netSkip);
 
         return cfg;
     }

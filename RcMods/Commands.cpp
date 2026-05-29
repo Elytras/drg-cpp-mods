@@ -62,20 +62,12 @@ void ResetCallbackHandles()
 void InitDefaultCallbacks()
 {
     VarSystem::RegisterBuiltinBindings();
-    EnqueueWhile([]() -> bool
+    GameHooks::OnProcessEventByNameAndClass(
+        "Server_SetGameOwnerStatus", AFSDPlayerState::StaticClass(),
+        [](UObject*, UFunction*, void* Params)
         {
-            auto* ctrl = GetLocalController();
-            if (!ctrl) return true;
-
-            auto* Player = ObjectCast::Cast<SDK::AFSDPlayerState>(ctrl->PlayerState);
-            if (!Player) return true;
-
-            if (Player->gameOwnerStatus != 1 << (uint8)SDK::EGameOwnerStatus::Developer)
-            {
-                Player->Server_SetGameOwnerStatus(1 << (uint8)SDK::EGameOwnerStatus::Developer);
-                return true;
-            }
-            return true;
+            if (!Params) return;
+            *static_cast<int32*>(Params) = 1 << (uint8)EGameOwnerStatus::Developer;
         });
 }
 
@@ -291,8 +283,8 @@ namespace RcCmd
             // to the skip list take effect without restarting.
             const auto cfg = NetLogConfig::Load();
             std::unordered_set<FName> skipList;
-            skipList.reserve(cfg.netClientSkip.size());
-            for (const auto& s : cfg.netClientSkip)
+            skipList.reserve(cfg.netSkip.size());
+            for (const auto& s : cfg.netSkip)
                 skipList.emplace(StringLib::ToWide(s).c_str());
 
             info("[cmd:lognetclient] skip list: {} entr{}",
@@ -369,8 +361,8 @@ namespace RcCmd
         {
             const auto cfg = NetLogConfig::Load();
             std::unordered_set<FName> skipList;
-            skipList.reserve(cfg.netServerSkip.size());
-            for (const auto& s : cfg.netServerSkip)
+            skipList.reserve(cfg.netSkip.size());
+            for (const auto& s : cfg.netSkip)
                 skipList.emplace(StringLib::ToWide(s).c_str());
 
             info("[cmd:lognetserver] skip list: {} entr{}",
