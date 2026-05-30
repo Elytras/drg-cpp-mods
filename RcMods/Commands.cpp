@@ -695,6 +695,20 @@ namespace RcCmd
                     APlayerController* Ctrl = GetLocalController();
                     if (!IsValidOf<APlayerController>(Ctrl)) return;
 
+                    // Skip when look input is blocked by UI (menus, inventory, etc.).
+                    // No state reset — control rotation is frozen, so desired/prev stay valid.
+                    if (Ctrl->IsLookInputIgnored()) return;
+
+                    // Skip recoil compensation when not in first-person view.
+                    // Reset initialized so desired rotation re-syncs cleanly on return.
+                    APlayerCharacter* LocalChar = GetLocalPlayer();
+                    if (!IsValidOf<APlayerCharacter>(LocalChar) ||
+                        LocalChar->CameraMode != ECharacterCameraMode::FirstPerson)
+                    {
+                        initialized = false;
+                        return;
+                    }
+
                     APlayerCameraManager* CamMgr = Ctrl->PlayerCameraManager;
                     if (!CamMgr) return;
 

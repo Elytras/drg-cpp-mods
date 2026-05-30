@@ -317,6 +317,10 @@ bool InjectDLL()
                         WIN32_FILE_ATTRIBUTE_DATA copyInfo{};
                         if (GetFileAttributesExW(g_CopyDllPath.c_str(), GetFileExInfoStandard, &copyInfo))
                             g_LastInjectedTime = copyInfo.ftLastWriteTime;
+                        // The DLL's ready event was already fired and reset by the
+                        // previous CLI session.  Re-signal it so DllReadyThread
+                        // wakes up and auto-loads the command list.
+                        if (g_hDllReadyEvent) SetEvent(g_hDllReadyEvent);
                         CloseHandle(hSnap);
                         return true;
                     }
