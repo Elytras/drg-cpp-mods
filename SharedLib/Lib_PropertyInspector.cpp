@@ -147,7 +147,6 @@ std::vector<FProperty*> FindAllProps(UObject* target, const std::string& propNam
 std::vector<UObject*> FindAllInstances(const std::string& name, bool fuzzy, UClass* parentClass)
 {
     std::vector<UObject*> results;
-    static UClass* widgetCls = UObject::FindClass("Class /Script/UMG.UserWidget");
     for (int i = 0; i < UObject::GObjects->Num(); ++i)
     {
         auto* obj = UObject::GObjects->GetByIndex(i);
@@ -216,10 +215,7 @@ void WriteProperty(UObject* obj, FProperty* prop, uintptr_t writeBase,
                 else if constexpr (std::is_same_v<T, FByteProperty>)
                     *GetPropertyPtr<uint8>(writeBase, p->Offset) = static_cast<uint8>(std::stoi(valueStr));
                 else if constexpr (std::is_same_v<T, FStrProperty>)
-                {
-                    std::wstring w(valueStr.begin(), valueStr.end());
-                    *GetPropertyPtr<UC::FString>(writeBase, p->Offset) = UC::FString(w.c_str());
-                }
+                    *GetPropertyPtr<UC::FString>(writeBase, p->Offset) = UC::FString(StringLib::ToWide(valueStr).c_str());
                 else warn("[prop] set not supported for this property type");
                 info("[prop] Set '{}.{}{}' = {}", obj->GetName(), baseName,
                     hadIndex ? "[" + std::to_string(elementIndex) + "]" : "", valueStr);
@@ -455,10 +451,7 @@ void ExecuteMapSet(UObject* obj, FMapProperty* mapProp, const std::string& keySt
                 else if constexpr (std::is_same_v<T, FByteProperty>)
                     *GetPropertyPtr<uint8>(pb, p->Offset) = static_cast<uint8>(std::stoi(valueStr));
                 else if constexpr (std::is_same_v<T, FStrProperty>)
-                {
-                    std::wstring w(valueStr.begin(), valueStr.end());
-                    *GetPropertyPtr<UC::FString>(pb, p->Offset) = UC::FString(w.c_str());
-                }
+                    *GetPropertyPtr<UC::FString>(pb, p->Offset) = UC::FString(StringLib::ToWide(valueStr).c_str());
                 else warn("[prop] set not supported for value type '{}'", p->ClassPrivate->Name.ToString());
                 info("[prop] Set map '{}'{{{}}} = {}", mapProp->Name.ToString(), keyStr, valueStr);
             }

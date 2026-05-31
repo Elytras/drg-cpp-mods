@@ -48,10 +48,10 @@ void SendResponse(uint32_t cmdSeq, const std::string& msg)
     if (!g_pRespBuffer || !g_hRespEvent) return;
 
     constexpr DWORD MAX_WAIT_MS = 1000;
-    DWORD deadline = GetTickCount() + MAX_WAIT_MS;
+    ULONGLONG deadline = GetTickCount64() + MAX_WAIT_MS;
     while (g_pRespBuffer->ready.load(std::memory_order_acquire))
     {
-        if (GetTickCount() > deadline) return;
+        if (GetTickCount64() > deadline) return;
         Sleep(5);
     }
 
@@ -182,9 +182,15 @@ void CleanupSharedMemory()
 void WorkerThread()
 {
     HANDLE hDone = CreateEventW(NULL, TRUE, FALSE, EVENT_SHUTDOWN_DONE);
+    auto signalDone = [&]() {
+        if (hDone) { SetEvent(hDone); CloseHandle(hDone); hDone = nullptr; }
+    };
 
     if (!InitSharedMemory())
+    {
+        signalDone();
         return;
+    }
 
     try
     {
@@ -201,7 +207,7 @@ void WorkerThread()
         spdlog::info("RC DLL initialized{}",
             g_pRespBuffer ? " (response channel active)" : " (no response channel)");
     }
-    catch (...) { return; }
+    catch (...) { signalDone(); return; }
 
     if (g_pMetaBuffer)
         KeyBindings::SetCLIWindow(g_pMetaBuffer->cliHwnd);
@@ -251,11 +257,7 @@ void WorkerThread()
     spdlog::shutdown();
     CleanupSharedMemory();
 
-    if (hDone)
-    {
-        SetEvent(hDone);
-        CloseHandle(hDone);
-    }
+    signalDone();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

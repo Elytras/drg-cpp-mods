@@ -15,6 +15,7 @@
 #include "Library.h"
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -107,8 +108,12 @@ namespace AimAssist
             std::vector<SDK::FName> DefaultIgnoreBaseClasses;
         };
 
-        // Returns the loaded (or default) config.  Thread-safe; loads lazily.
-        const GlobalConfig& GetGlobals();
+        // Returns the live config snapshot.  Thread-safe; loads lazily.  Hold the
+        // returned shared_ptr while reading from it — a concurrent ReloadGlobals()
+        // swaps the live snapshot atomically, and your copy keeps the old one
+        // alive until you release it. Use as `GetGlobals()->Field` or bind to a
+        // local `auto cfg = GetGlobals();` (never `const auto& = GetGlobals()`).
+        std::shared_ptr<const GlobalConfig> GetGlobals();
 
         // Re-reads aimbot.yaml from disk and replaces the live config.
         // Safe to call from any thread (takes an internal mutex).
@@ -132,7 +137,9 @@ namespace AimAssist
             std::optional<std::string> TargetSelector;
         };
 
-        std::unordered_map<std::string, WeaponConfigOverride>& WeaponOverridesRef();
+        // Snapshot of the per-weapon override map. Hold the shared_ptr while
+        // reading (same atomic-swap semantics as GetGlobals()).
+        std::shared_ptr<const std::unordered_map<std::string, WeaponConfigOverride>> WeaponOverrides();
         void EnsureOverridesLoaded();
 
         float                 ResolveAimbotFOV(SDK::AItem* eq);

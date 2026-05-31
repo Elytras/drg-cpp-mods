@@ -10,7 +10,7 @@ static constexpr bool CmdIsSpace(char c) noexcept
 
 static constexpr size_t CmdSkipWS(std::string_view s, size_t pos) noexcept
 {
-    while (pos < s.size() && CmdIsSpace(s[pos])) [[likely]]
+    while (pos < s.size() && CmdIsSpace(s[pos]))
         ++pos;
     return pos;
 }
@@ -106,14 +106,14 @@ bool CommandHandler::Dispatch(const std::string& msg, uint32_t seq) const
 
     if (parts[0] == "help") {
         PrintHelp(parts.size() > 1 ? parts[1] : "");
-        SendResponse(seq, "ok");
+        if (seq != 0) SendResponse(seq, "ok");
         return true;
     }
 
     auto it = commands_.find(parts[0]);
     if (it == commands_.end()) [[unlikely]] {
         warn("[CommandHandler] Unknown command: '{}'. Type 'help' for a list.", parts[0]);
-        SendResponse(seq, "not ok");
+        if (seq != 0) SendResponse(seq, "not ok");
         return false;
     }
 
@@ -122,7 +122,10 @@ bool CommandHandler::Dispatch(const std::string& msg, uint32_t seq) const
         {
             for (size_t i = 1; i < parts.size(); ++i) {
                 auto expanded = VarSystem::Expand(parts[i]);
-                if (!expanded.isValid) [[unlikely]] continue;
+                if (!expanded.isValid) [[unlikely]] {
+                    warn("[CommandHandler] arg {} ('{}') failed to expand — passing through literally", i, parts[i]);
+                    continue;
+                }
                 if (expanded.object)
                     parts[i] = expanded.object->GetName();
                 else if (!expanded.token.empty() ||
@@ -131,7 +134,11 @@ bool CommandHandler::Dispatch(const std::string& msg, uint32_t seq) const
                     parts[i] = expanded.token;
             }
             fn(CommandContext{ parts, seq });
-            if (g_pRespBuffer && !g_pRespBuffer->ready.load(std::memory_order_acquire))
+            // seq==0 means an internal/autorun dispatch — no CLI consumer is waiting,
+            // so don't write a response.  Leaving a seq=0 "ok" in the buffer would
+            // block the next real SendResponse (which spins up to 1 s waiting for
+            // ready=false), causing listcmds to time out after DllReady fires.
+            if (seq != 0 && g_pRespBuffer && !g_pRespBuffer->ready.load(std::memory_order_acquire))
                 SendResponse(seq, "ok");
         });
     return true;

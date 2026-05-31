@@ -133,7 +133,7 @@ namespace AimAssist
                     const float ctrlYawDelta   = normP(ctrlYaw   - RCSPrevCtrlYaw);
                     const float pitchOffset    = camPitch - ctrlPitch;
                     const float yawOffset      = normP(camYaw - ctrlYaw);
-                    const float gimbalThresh = Config::GetGlobals().GimbalFlipThresholdDeg;
+                    const float gimbalThresh = Config::GetGlobals()->GimbalFlipThresholdDeg;
                     if (std::abs(yawOffset)    > gimbalThresh ||
                         std::abs(ctrlYawDelta) > gimbalThresh ||
                         std::abs(pitchOffset)  > gimbalThresh)
@@ -255,11 +255,11 @@ namespace AimAssist
 
         handler.Register("rcsfactor",
             [](const CommandContext& ctx) {
-                if (ctx.ArgCount() < 1) {
+                if (ctx.ArgCount() < 2) {
                     info("[rcsfactor] current = {:.2f}", RCSFactor);
                     return;
                 }
-                const float v = SafeStof(ctx.Arg(0));
+                const float v = SafeStof(ctx.Arg(1));
                 RCSFactor = std::clamp(v, 0.f, 2.f);
                 info("[rcsfactor] set to {:.2f}", RCSFactor);
             },
@@ -290,15 +290,15 @@ namespace AimAssist
         using enum Trigger;
         using enum Focus;
 
-        const auto& kb = Config::GetGlobals();
-        KeyBindings::RegisterGameThread(kb.AimbotKey, kb.AimbotMod,
+        auto kb = Config::GetGlobals();
+        KeyBindings::RegisterGameThread(kb->AimbotKey, kb->AimbotMod,
             AimbotPressed,  BindingOptions{ Press,   Game, false });
-        KeyBindings::RegisterGameThread(kb.AimbotKey, kb.AimbotMod,
+        KeyBindings::RegisterGameThread(kb->AimbotKey, kb->AimbotMod,
             AimbotReleased, BindingOptions{ Release, Game, false });
 
-        KeyBindings::RegisterGameThread(kb.RecoilToggleKey, kb.RecoilToggleMod,
+        KeyBindings::RegisterGameThread(kb->RecoilToggleKey, kb->RecoilToggleMod,
             ToggleRecoilControl, BindingOptions{ Press, Game, false });
-        KeyBindings::RegisterGameThread(kb.SilentAimToggleKey, kb.SilentAimToggleMod,
+        KeyBindings::RegisterGameThread(kb->SilentAimToggleKey, kb->SilentAimToggleMod,
             ToggleSilentAim,     BindingOptions{ Press, Game, false });
     }
 

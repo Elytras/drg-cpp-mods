@@ -44,12 +44,6 @@ namespace Internal
 
         return true;
     }
-    static void WaitForShutdown() {
-        return;
-        //while (GameHooks::ProcessEventHook::Get().IsInstalled())
-        //    Sleep(1);
-    }
-
     static bool TestAllocator()
     {
         constexpr uint32 size = 1024;
@@ -179,7 +173,6 @@ void ModManager::UnloadMods()
     JsonHook::Teardown(); // restore ExecFunction/flags before DLL pages are freed
     GameHooks::EngineTickHook::Get().RequestUninstall();
     GameHooks::ProcessEventHook::Get().RequestUninstall();
-    WaitForShutdown();
 
     info("----------------------------------------");
 }

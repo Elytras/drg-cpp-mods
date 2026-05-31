@@ -16,10 +16,10 @@
 //-----------------------------------------------------------------------------
 // Size helpers
 //-----------------------------------------------------------------------------
-static constexpr uint64_t KB(uint64_t x) { return x * 1024; }
-static constexpr uint64_t MB(uint64_t x) { return KB(x) * 1024; }
-static constexpr uint64_t GB(uint64_t x) { return MB(x) * 1024; }
-static constexpr uint64_t TB(uint64_t x) { return GB(x) * 1024; }
+inline constexpr uint64_t KB(uint64_t x) { return x * 1024; }
+inline constexpr uint64_t MB(uint64_t x) { return KB(x) * 1024; }
+inline constexpr uint64_t GB(uint64_t x) { return MB(x) * 1024; }
+inline constexpr uint64_t TB(uint64_t x) { return GB(x) * 1024; }
 
 //-----------------------------------------------------------------------------
 // Capacity constants

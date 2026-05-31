@@ -314,7 +314,8 @@ void DumpItemProperties(UObject* Item, UClass* OuterBase)
     for (size_t i = 0; i < chain.size(); ++i)
     {
         UStruct* level   = chain[i];
-        UClass*  asClass = static_cast<UClass*>(level);
+        UClass*  asClass = ObjectCast::Cast<UClass>(level);
+        if (!asClass) continue;  // chain tail may be a non-UClass UStruct — ClassTag reads UClass flags
 
         info("╠═ [{}] {}", Detail::ClassTag(asClass), level->GetName());
 
@@ -355,7 +356,7 @@ template void DumpItemProperties<true> (UObject*, UClass*);
 
 void DumpItemPropertiesSorted(UObject* Item, UClass* OuterBase)
 {
-    if (!Item || !IsValid(Item)) return;
+    if (!Item || !IsValidRaw(Item)) return;
 
     auto chain = BuildClassChain(Item->Class, OuterBase);
 

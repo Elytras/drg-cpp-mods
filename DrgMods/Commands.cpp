@@ -509,7 +509,7 @@ namespace Tickables
     void LockPlayers() {
         static const std::vector<std::string> playersToLock = { "29 Phantom" };
         auto Local = GetLocalPlayer();
-        if (!GetWorld() && !GetWorld()->GetName().contains("LVL_SpaceRig")) return;
+        if (!GetWorld() || !GetWorld()->GetName().contains("LVL_SpaceRig")) return;
         if (!IsValidOf<SDK::APlayerCharacter>(Local)) return;
         SDK::AReplicatedActor_C* ActualTeleporter = nullptr;
         SDK::TArray<SDK::AActor*> Teleporters{};
@@ -1316,39 +1316,9 @@ namespace Commands
 
     void ScanAllClasses(const CommandContext& = State::dummyCtx)
     {
-        int totalClasses = 0, totalFuncs = 0;
-        info("[cmd:scanall] Starting global CDO scan...");
-        for (int i = 0; i < SDK::UObject::GObjects->Num(); ++i)
-        {
-            SDK::UObject* Obj = SDK::UObject::GObjects->GetByIndex(i);
-            if (!Obj || !Obj->IsA(SDK::UClass::StaticClass())) continue;
-            SDK::UClass* Class = static_cast<SDK::UClass*>(Obj);
-            SDK::UObject* CDO = Class->ClassDefaultObject;
-            if (!CDO) continue;
-            std::vector<std::string> classFuncs;
-            for (auto* field : SDK::UFieldRange(Class->Children))
-            {
-                if (!field->IsA(SDK::UFunction::StaticClass())) continue;
-                auto* Func = static_cast<SDK::UFunction*>(field);
-                auto  flags = static_cast<SDK::EFunctionFlags>(Func->FunctionFlags);
-                if (!(flags & SDK::EFunctionFlags::Net))       continue;
-                if (!(flags & SDK::EFunctionFlags::NetServer)) continue;
-                classFuncs.push_back(Scan::BuildFuncSig(Func));
-            }
-            if (classFuncs.empty()) continue;
-            std::sort(classFuncs.begin(), classFuncs.end());
-            classFuncs.erase(std::unique(classFuncs.begin(), classFuncs.end()), classFuncs.end());
-            ++totalClasses;
-            info("╔══ Class: {}", Class->GetName());
-            info("╠═ [CDO] {} server RPCs found", classFuncs.size());
-            for (size_t j = 0; j < classFuncs.size(); ++j)
-            {
-                info("║   {} {}", j == classFuncs.size() - 1 ? "└──" : "├──", classFuncs[j]);
-                ++totalFuncs;
-            }
-            info("╚══════════════════════════");
-        }
-        info("[scanall] Done — Scanned {} classes, found {} unique server RPCs", totalClasses, totalFuncs);
+        // Delegates to the shared SharedLib implementation (Lib_Scan.cpp) — same
+        // GObjects CDO sweep for Net+NetServer RPCs that RcMods::ScanAll uses.
+        Scan::ScanAllClasses();
     }
 
     void ScanReplicated(const CommandContext& ctx)
@@ -1749,9 +1719,9 @@ namespace Commands
         bool sweep = std::erase(mutableCtx.args, "--sweep") > 0;
         bool Relative = std::erase(mutableCtx.args, "--rel") > 0;
         if (mutableCtx.ArgCount() < 3) { warn("[cmd:tp] Usage: tp <x> <y> <z> [--rel] [--sweep]"); return; }
-        FVector Dir = { std::strtof(mutableCtx.Arg(0).c_str(), nullptr),
-                        std::strtof(mutableCtx.Arg(1).c_str(), nullptr),
-                        std::strtof(mutableCtx.Arg(2).c_str(), nullptr) };
+        FVector Dir = { SafeStof(mutableCtx.Arg(0)),
+                        SafeStof(mutableCtx.Arg(1)),
+                        SafeStof(mutableCtx.Arg(2)) };
         FVector Coords = Dir;
         if (Relative)
         {
@@ -2445,10 +2415,10 @@ void RegisterCommands(CommandHandler& handler)
         // failed (typically: external editor holds an exclusive lock).
         extern bool TruncateLogFile();
         if (TruncateLogFile())
-            spdlog::info("[clearlog] D:/drg_log.txt truncated");
+            spdlog::info("[clearlog] file log truncated");
         else
             spdlog::warn("[clearlog] truncate failed — file probably locked by another process");
-    }, "System", R"(Truncate D:/drg_log.txt)");
+    }, "System", R"(Truncate the on-disk file log (next to the DLL))");
     handler.Register("exec", Commands::Exec, "System", R"(Execute a console command: exec <command>)");
     handler.Register("ignoreproxy", Commands::IgnoreProxy, "System", R"(Toggle ProxyMod hook)");
     handler.Register("stoptick", Commands::StopTick, "System", R"(Toggle tick event logging)");
@@ -2486,8 +2456,15 @@ void RegisterCommands(CommandHandler& handler)
 
 void SendCommandList(const CommandContext& ctx, const CommandHandler& handler)
 {
-    if (!g_pRespBuffer || g_pRespBuffer->ready.load(std::memory_order_acquire))
-        return;
+    if (!g_pRespBuffer || !g_hRespEvent) return;
+
+    constexpr DWORD MAX_WAIT_MS = 1000;
+    ULONGLONG deadline = GetTickCount64() + MAX_WAIT_MS;
+    while (g_pRespBuffer->ready.load(std::memory_order_acquire))
+    {
+        if (GetTickCount64() > deadline) return;
+        Sleep(5);
+    }
 
     CommandsResponse cr{};
     for (const auto& [name, entry] : handler.GetEntries())

@@ -36,7 +36,7 @@
 #include "Lib_EasyHook.h"
 #include "Common.h"
 #ifdef HOOKALIASES
-#include "Lib_VTableINfo.h"
+#include "Lib_VTableInfo.h"
 #endif
 #ifdef _DEBUG
 #define VH_ASSERT(cond, msg) assert((cond) && (msg))

@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <ctime>
+#include <random>
 
 inline const UC::TArray<SDK::APlayerCharacter*>GetAllPlayers()
 {
@@ -98,8 +99,9 @@ namespace VarSystem
             if (validPlayers.empty())
                 return BindObject(nullptr);
 
-            srand(static_cast<uint32>(time(nullptr)));
-            APlayerCharacter* randomPlayer = validPlayers[rand() % validPlayers.size()];
+            static thread_local std::mt19937 rng{ std::random_device{}() };
+            std::uniform_int_distribution<size_t> dist(0, validPlayers.size() - 1);
+            APlayerCharacter* randomPlayer = validPlayers[dist(rng)];
             return BindObject(reinterpret_cast<UObject*>(randomPlayer));
             });
     }

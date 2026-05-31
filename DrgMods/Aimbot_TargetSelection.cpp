@@ -270,8 +270,8 @@ namespace AimAssist
                 r = std::max(r, Body->AggGeom.SphereElems[i].Radius);
             for (int32 i = 0; i < Body->AggGeom.SphylElems.Num(); ++i)
                 r = std::max(r, Body->AggGeom.SphylElems[i].Radius);
-            const auto& g = Config::GetGlobals();
-            return r > 0.f ? r * g.BodyRadiusScale : g.BodyRadiusFallback;
+            auto g = Config::GetGlobals();
+            return r > 0.f ? r * g->BodyRadiusScale : g->BodyRadiusFallback;
         }
 
         struct FDamageInfo
@@ -386,7 +386,8 @@ namespace AimAssist
                     if (RequireLOS)
                     {
                         bVisible = false;
-                        for (const auto& Off : Config::GetGlobals().WpSampleOffsets)
+                        auto cfg = Config::GetGlobals();
+                        for (const auto& Off : cfg->WpSampleOffsets)
                         {
                             FVector Candidate = { Center.X + Off.X * R, Center.Y + Off.Y * R, Center.Z + Off.Z * R };
                             if (IsWeakpointVisible(LocalPlayer, Enemy, CamLoc, Candidate, Body->BoneName))
@@ -515,7 +516,8 @@ namespace AimAssist
         AItem* Equipped = Inventory->GetEquippedItem();
         if (!Equipped) return std::nullopt;
 
-        for (const FName& ClassName : Config::GetGlobals().IgnoredItemClasses)
+        auto cfgIgnore = Config::GetGlobals();
+        for (const FName& ClassName : cfgIgnore->IgnoredItemClasses)
             if (IsChildOfByName(Equipped, ClassName)) return std::nullopt;
 
         FDamageInfo DamageInfo;
@@ -536,15 +538,17 @@ namespace AimAssist
 
         // Lazy default-seed for IgnoreBaseClasses (from YAML or C++ fallback).
         if (IgnoreBaseClasses.empty()) [[unlikely]]
-            IgnoreBaseClasses = Config::GetGlobals().DefaultIgnoreBaseClasses;
+            IgnoreBaseClasses = Config::GetGlobals()->DefaultIgnoreBaseClasses;
 
         // Resolve effective ignore/force lists: a per-weapon override REPLACES
         // the global mutable list entirely (no merging).
         const std::vector<FName>* effIgnore = &IgnoreBaseClasses;
         const std::vector<FName>* effForce  = &ForceIncludeClasses;
+        // Hold the override snapshot for the rest of the function — effIgnore /
+        // effForce may point into its entries below, so it must outlive the block.
+        auto overrides = Config::WeaponOverrides();
         {
-            Config::EnsureOverridesLoaded();
-            auto& m = Config::WeaponOverridesRef();
+            auto& m = *overrides;
             auto it = Equipped->Class ? m.find(Equipped->Class->Name.ToString()) : m.end();
             if (it != m.end())
             {

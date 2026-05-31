@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <atomic>
+#include <filesystem>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -49,10 +50,10 @@ void SendResponse(uint32_t cmdSeq, const std::string& msg)
     if (!g_pRespBuffer || !g_hRespEvent) return;
 
     constexpr DWORD MAX_WAIT_MS = 1000;
-    DWORD deadline = GetTickCount() + MAX_WAIT_MS;
+    ULONGLONG deadline = GetTickCount64() + MAX_WAIT_MS;
     while (g_pRespBuffer->ready.load(std::memory_order_acquire))
     {
-        if (GetTickCount() > deadline) return;
+        if (GetTickCount64() > deadline) return;
         Sleep(5);
     }
 
@@ -243,9 +244,15 @@ void CleanupSharedMemory()
 void WorkerThread()
 {
     HANDLE hDone = CreateEventW(NULL, TRUE, FALSE, EVENT_SHUTDOWN_DONE);
+    auto signalDone = [&]() {
+        if (hDone) { SetEvent(hDone); CloseHandle(hDone); hDone = nullptr; }
+    };
 
     if (!InitSharedMemory())
+    {
+        signalDone();
         return;
+    }
 
     try
     {
@@ -253,11 +260,24 @@ void WorkerThread()
         shmem->set_pattern("%v");
         shmem->set_level(spdlog::level::trace);
 
+        // Place the file log next to the injected DLL rather than a hardcoded
+        // drive, so it works regardless of where the game/CLI live.
+        std::string logFilePath = "drg_log.txt";
+        {
+            wchar_t buf[MAX_PATH]{};
+            if (GetModuleFileNameW(g_hMe, buf, MAX_PATH))
+            {
+                std::filesystem::path p(buf);
+                p.replace_filename(L"drg_log.txt");
+                logFilePath = p.string();
+            }
+        }
+
         // Parallel file sink — custom file_sink_mt so `clearlog` can truncate
         // the file while spdlog still holds the handle (basic_file_sink_mt
         // keeps an exclusive handle and external truncate calls would fail).
         try {
-            g_FileSink = std::make_shared<file_sink_mt>("D:/drg_log.txt");
+            g_FileSink = std::make_shared<file_sink_mt>(logFilePath);
             g_FileSink->set_pattern("[%H:%M:%S.%e] %v");
             g_FileSink->set_level(spdlog::level::trace);
         } catch (...) {
@@ -274,9 +294,9 @@ void WorkerThread()
         spdlog::flush_on(spdlog::level::trace);
         spdlog::info("DLL initialized{} (file log: {})",
             g_pRespBuffer ? " (response channel active)" : " (no response channel)",
-            g_FileSink ? "D:/drg_log.txt" : "DISABLED");
+            g_FileSink ? logFilePath : std::string("DISABLED"));
     }
-    catch (...) { return; }
+    catch (...) { signalDone(); return; }
 
     if (g_pMetaBuffer)
         KeyBindings::SetCLIWindow(g_pMetaBuffer->cliHwnd);
@@ -326,11 +346,7 @@ void WorkerThread()
     spdlog::shutdown();
     CleanupSharedMemory();
 
-    if (hDone)
-    {
-        SetEvent(hDone);
-        CloseHandle(hDone);
-    }
+    signalDone();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

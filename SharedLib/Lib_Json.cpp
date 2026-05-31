@@ -420,7 +420,7 @@ namespace JsonHook {
 
     static uint8_t* StepOne(FFrame* frame, FProperty *& Out) {
         uint8_t op = *frame->Code++;
-        info("OpCode: 0x{:X}", op);
+        if constexpr (LogJson) info("OpCode: 0x{:X}", op);
         switch (op) {
         case 0x00: // EX_LocalVariable
         case 0x01: // EX_InstanceVariable
@@ -445,20 +445,22 @@ namespace JsonHook {
 
             uint8_t* valuePtr = container + prop->Offset;
 
-            info("PropName: {} | {} | Flags: {}",
-                prop->Name.ToString(),
-                prop->ClassPrivate->Name.ToString(),
-                DumpPropertyFlags(prop->PropertyFlags));
+            if constexpr (LogJson) {
+                info("PropName: {} | {} | Flags: {}",
+                    prop->Name.ToString(),
+                    prop->ClassPrivate->Name.ToString(),
+                    DumpPropertyFlags(prop->PropertyFlags));
 
-            static const FName ObjectProperty = FName(L"ObjectProperty");
-            if (prop->ClassPrivate->Name == ObjectProperty) {
-                UObject* obj = *reinterpret_cast<UObject**>(valuePtr);
-                if (obj) {
-                    __assume(obj);
-                    PropertyInspector::Dump(obj);
-                }
-                else {
-                    info(" (Object is null)");
+                static const FName ObjectProperty = FName(L"ObjectProperty");
+                if (prop->ClassPrivate->Name == ObjectProperty) {
+                    UObject* obj = *reinterpret_cast<UObject**>(valuePtr);
+                    if (obj) {
+                        __assume(obj);
+                        PropertyInspector::Dump(obj);
+                    }
+                    else {
+                        info(" (Object is null)");
+                    }
                 }
             }
 
@@ -466,7 +468,7 @@ namespace JsonHook {
         }
         case 0x17:
         {
-            info("Object: {}", frame->Object->GetName());
+            if constexpr (LogJson) info("Object: {}", frame->Object->GetName());
             return reinterpret_cast<uint8_t*>(&frame->Object);
         }
         case 0x38: return nullptr;
@@ -475,24 +477,25 @@ namespace JsonHook {
         }
     }
     static void FromStringExec(UObject* Ctx, FFrame* frame, void* Result) {
-        static uint64 totalCount = 0;
-        static uint32 sequenceCount = 0;
-        static auto lastCallTime = std::chrono::steady_clock::now();
+        if constexpr (LogJson) {
+            static uint64 totalCount = 0;
+            static uint32 sequenceCount = 0;
+            static auto lastCallTime = std::chrono::steady_clock::now();
 
-        auto now = std::chrono::steady_clock::now();
-        auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastCallTime).count();
+            auto now = std::chrono::steady_clock::now();
+            auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastCallTime).count();
 
-        if (elapsedMs > 100) {
-            info("------------------- New Sequence (Gap: {}ms) -------------------", elapsedMs);
-            sequenceCount = 0;
+            if (elapsedMs > 100) {
+                info("------------------- New Sequence (Gap: {}ms) -------------------", elapsedMs);
+                sequenceCount = 0;
+            }
+
+            lastCallTime = now;
+            totalCount++;
+            sequenceCount++;
+
+            info("[Call #{}] (Seq: {})", totalCount, sequenceCount);
         }
-
-        lastCallTime = now;
-        totalCount++;
-        sequenceCount++;
-
-        info("[Call #{}] (Seq: {})", totalCount, sequenceCount);
-        // --------------------------
 
         if (!g_Active) {
             if (Result) *reinterpret_cast<void**>(Result) = nullptr;
@@ -507,7 +510,7 @@ namespace JsonHook {
 
         if (frame->Node == g_Fn) {
 
-            info("Node == g_Fn");
+            if constexpr (LogJson) info("Node == g_Fn");
 
             auto* p = reinterpret_cast<SDK::Params::JSON_C_FromString*>(frame->Locals);
 
@@ -559,7 +562,7 @@ namespace JsonHook {
 
         JsonImpl::Parser parser(pInput->CStr(), pInput->Num() - 1, outer);
 
-        if (!outer || !Info.IndexPrivate || Info.IndexPrivate != outer->Index || Info.Name != outer->Name || LastString != *pInput || !LastJson)
+        if (!outer || !Info.IndexPrivate || Info.IndexPrivate != outer->Index || Info.Name != outer->Name || LastString != *pInput || !LastJson || !IsValidRaw(LastJson))
         {
             if constexpr (LogJson) {
                 if (!outer) info("Reparsing because outer invalid");
@@ -580,14 +583,14 @@ namespace JsonHook {
 
         }
         else {
-            info("saved a parse");
+            if constexpr (LogJson) info("saved a parse");
         }
 
         if (parser.Ok() && LastJson) {
             WriteResult(LastJson, true);
         }
         else {
-            info("!! Parse Failed at Seq {}", sequenceCount);
+            if constexpr (LogJson) info("!! Parse Failed");
             WriteResult(nullptr, false);
         }
     }

@@ -1,4 +1,4 @@
-# config.yaml — per-command skip lists and startup autorun script.
+# config.yaml — netlog skip lists and startup autorun script.
 #
 # Searched in two locations (first match wins):
 #   1. Next to the module DLL  — place here for distribution / in-game use
@@ -23,6 +23,7 @@ netlog:
     - Server_ShowHit
     - Server_StopFire
     - Server_SetUsing
+    - RPC_OnStopEvent
     - ServerMovePacked
     - StopShootingSound
     - Server_SetRunning
@@ -30,6 +31,7 @@ netlog:
     - Client_ReceiveData
     - Server_StartSalute
     - All_ShowHit_Terrain
+    - Server_ClimbLedge 
     - Client_MissionShout
     - All_PlayAlertScream
     - Server_SetIsSliding
@@ -44,6 +46,7 @@ netlog:
     - Netmulticast_GlobalBusMix
     - Server_SetGameOwnerStatus # Me when i spam myself
     - Client_ReceiveCarverSizes 
+    - All_OnCharacterUsedAirJump
     - ServerSetSpectatorLocation
     - Server_ShotHiw_Destructible
     - Server_SetGenerationFraction

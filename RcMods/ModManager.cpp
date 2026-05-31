@@ -39,9 +39,6 @@ namespace Internal
 
         return true;
     }
-    static void WaitForShutdown() {
-        return;
-    }
 }
 
 using namespace ::Internal;
@@ -126,7 +123,6 @@ void ModManager::UnloadMods()
     VarSystem::Clear();
     GameHooks::ProcessEventHook::Get().RequestUninstall();  // inner first
     GameHooks::EngineTickHook::Get().RequestUninstall();    // outer last — owns the task queue
-    WaitForShutdown();
 
     info("----------------------------------------");
 }

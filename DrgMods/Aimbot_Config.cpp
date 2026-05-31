@@ -13,9 +13,11 @@
 
 #include "Aim_Internal.h"
 
+#include <atomic>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -31,14 +33,37 @@ namespace Config {
 
 // ── Storage ───────────────────────────────────────────────────────────────────
 
-static std::mutex                                     s_mutex;
-static GlobalConfig                                   s_globals;
-static std::unordered_map<std::string, WeaponConfigOverride> s_weaponOverrides;
-static bool                                           s_loaded = false;
-
-std::unordered_map<std::string, WeaponConfigOverride>& WeaponOverridesRef()
+// Globals + per-weapon overrides are bundled into one immutable snapshot built
+// off to the side and swapped in atomically. Readers take a shared_ptr copy
+// (lock-free after the first load); ReloadGlobals() builds a fresh snapshot and
+// atomically replaces the pointer, so in-flight readers keep seeing their
+// consistent snapshot until they release it.
+struct ConfigSnapshot
 {
-    return s_weaponOverrides;
+    GlobalConfig                                          globals;
+    std::unordered_map<std::string, WeaponConfigOverride> weaponOverrides;
+};
+
+static std::mutex                                        s_loadMutex;  // serializes (re)loads
+static std::atomic<std::shared_ptr<const ConfigSnapshot>> s_snapshot;
+
+static std::shared_ptr<const ConfigSnapshot> BuildSnapshot();  // fwd decl
+
+// Returns the live snapshot, lazily building it once on first access.
+static std::shared_ptr<const ConfigSnapshot> Snapshot()
+{
+    if (auto s = s_snapshot.load(std::memory_order_acquire)) return s;
+    std::lock_guard lock(s_loadMutex);
+    auto s = s_snapshot.load(std::memory_order_acquire);
+    if (!s) { s = BuildSnapshot(); s_snapshot.store(s, std::memory_order_release); }
+    return s;
+}
+
+std::shared_ptr<const std::unordered_map<std::string, WeaponConfigOverride>> WeaponOverrides()
+{
+    auto snap = Snapshot();
+    // Aliasing shared_ptr: shares ownership with snap, points at the map member.
+    return { snap, &snap->weaponOverrides };
 }
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
@@ -197,20 +222,27 @@ static void ParseWeapons(const YAML::Node& root,
 
 // ── Core loader ───────────────────────────────────────────────────────────────
 
-// Called with s_mutex held.
-static void LoadAll()
+// Builds a fresh, immutable config snapshot from disk (or built-in defaults).
+// Touches no shared state — the caller swaps it in under s_loadMutex.
+static std::shared_ptr<const ConfigSnapshot> BuildSnapshot()
 {
     GlobalConfig cfg;        // starts from struct defaults
-    s_weaponOverrides.clear();
+    std::unordered_map<std::string, WeaponConfigOverride> weaponOverrides;
+
+    auto finalize = [&]() {
+        auto snap = std::make_shared<ConfigSnapshot>();
+        snap->globals         = std::move(cfg);
+        snap->weaponOverrides = std::move(weaponOverrides);
+        return snap;
+    };
 
     const auto path = FindConfigFile(L"aimbot.yaml");
     if (path.empty())
     {
         FallbackIgnoredItemClasses(cfg);
         FallbackDefaultIgnoreBaseClasses(cfg);
-        s_globals = std::move(cfg);
         info("[aim config] aimbot.yaml not found (checked DLL dir and ../..); using built-in defaults");
-        return;
+        return finalize();
     }
 
     YAML::Node root;
@@ -220,8 +252,7 @@ static void LoadAll()
         warn("[aim config] YAML parse error in '{}': {}", path.string(), e.what());
         FallbackIgnoredItemClasses(cfg);
         FallbackDefaultIgnoreBaseClasses(cfg);
-        s_globals = std::move(cfg);
-        return;
+        return finalize();
     }
 
     // ── globals ──────────────────────────────────────────────────────────────
@@ -282,75 +313,74 @@ static void LoadAll()
         FallbackDefaultIgnoreBaseClasses(cfg);
 
     // ── weapons ──────────────────────────────────────────────────────────────
-    ParseWeapons(root, s_weaponOverrides);
+    ParseWeapons(root, weaponOverrides);
 
-    s_globals = std::move(cfg);
     info("[aim config] loaded from '{}' ({} weapon override(s))",
-         path.string(), s_weaponOverrides.size());
+         path.string(), weaponOverrides.size());
+    return finalize();
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-const GlobalConfig& GetGlobals()
+std::shared_ptr<const GlobalConfig> GetGlobals()
 {
-    std::lock_guard lock(s_mutex);
-    if (!s_loaded) { LoadAll(); s_loaded = true; }
-    return s_globals;
+    auto snap = Snapshot();
+    // Aliasing shared_ptr: shares ownership with snap, points at the globals member.
+    return { snap, &snap->globals };
 }
 
 void ReloadGlobals()
 {
-    std::lock_guard lock(s_mutex);
-    LoadAll();
-    s_loaded = true;
+    std::lock_guard lock(s_loadMutex);
+    s_snapshot.store(BuildSnapshot(), std::memory_order_release);
     // Note: keybinds are registered once at startup via RegisterKeybinds().
     // A full DLL reload is required for keybind changes to take effect.
 }
 
-// Called by EnsureOverridesLoaded / TargetSelection — triggers initial load.
+// Triggers the initial lazy load (Resolve* / TargetSelection call this).
 void EnsureOverridesLoaded()
 {
-    GetGlobals();
+    (void)Snapshot();
 }
 
 // ── Resolve helpers ───────────────────────────────────────────────────────────
 
 float ResolveAimbotFOV(AItem* eq)
 {
-    EnsureOverridesLoaded();
+    auto snap = Snapshot();
     if (eq && eq->Class)
-        if (auto it = s_weaponOverrides.find(eq->Class->Name.ToString());
-            it != s_weaponOverrides.end() && it->second.AimbotFOVDeg)
+        if (auto it = snap->weaponOverrides.find(eq->Class->Name.ToString());
+            it != snap->weaponOverrides.end() && it->second.AimbotFOVDeg)
             return *it->second.AimbotFOVDeg;
-    return GetGlobals().AimbotFOVDeg;
+    return snap->globals.AimbotFOVDeg;
 }
 
 float ResolveSilentAimFOV(AItem* eq)
 {
-    EnsureOverridesLoaded();
+    auto snap = Snapshot();
     if (eq && eq->Class)
-        if (auto it = s_weaponOverrides.find(eq->Class->Name.ToString());
-            it != s_weaponOverrides.end() && it->second.SilentAimFOVDeg)
+        if (auto it = snap->weaponOverrides.find(eq->Class->Name.ToString());
+            it != snap->weaponOverrides.end() && it->second.SilentAimFOVDeg)
             return *it->second.SilentAimFOVDeg;
-    return GetGlobals().SilentAimFOVDeg;
+    return snap->globals.SilentAimFOVDeg;
 }
 
 bool ResolveSilentAimRequireLOS(AItem* eq)
 {
-    EnsureOverridesLoaded();
+    auto snap = Snapshot();
     if (eq && eq->Class)
-        if (auto it = s_weaponOverrides.find(eq->Class->Name.ToString());
-            it != s_weaponOverrides.end() && it->second.SilentAimRequireLOS)
+        if (auto it = snap->weaponOverrides.find(eq->Class->Name.ToString());
+            it != snap->weaponOverrides.end() && it->second.SilentAimRequireLOS)
             return *it->second.SilentAimRequireLOS;
-    return GetGlobals().SilentAimRequireLOS;
+    return snap->globals.SilentAimRequireLOS;
 }
 
 Targeting::SelectorFn ResolveTargetSelector(AItem* eq)
 {
-    EnsureOverridesLoaded();
+    auto snap = Snapshot();
     if (eq && eq->Class)
-        if (auto it = s_weaponOverrides.find(eq->Class->Name.ToString());
-            it != s_weaponOverrides.end() && it->second.TargetSelector)
+        if (auto it = snap->weaponOverrides.find(eq->Class->Name.ToString());
+            it != snap->weaponOverrides.end() && it->second.TargetSelector)
             return Targeting::Get(*it->second.TargetSelector);
     return Targeting::Get("default");
 }

@@ -191,6 +191,34 @@ namespace RcCmd
         info("[cmd:findclass] {} match(es) for '{}'", hits, needle);
     }
 
+    static void FindObjects(const CommandContext& ctx)
+    {
+        if (ctx.ArgCount() < 2) { warn("[cmd:findobjs] usage: findobjs <name> [world]"); return; }
+        const std::string& needle    = ctx.Arg(1);
+        bool               worldOnly = ctx.ArgCount() >= 3 && ctx.Arg(2) == "world";
+
+        constexpr int kMaxResults = 100;
+        int hits = 0;
+        for (int i = 0; i < UObject::GObjects->Num(); ++i)
+        {
+            auto* obj = UObject::GObjects->GetByIndex(i);
+            if (!obj) continue;
+            if (!PropertyInspector::NameMatches(obj->GetName(), needle, true)) continue;
+            if (worldOnly && !IsInActiveWorld(obj)) continue;
+
+            const std::string className = obj->Class ? obj->Class->GetName() : "?";
+            const std::string outerName = obj->Outer ? obj->Outer->GetName() : "?";
+            info("  [{}] {}  (outer: {})", className, obj->GetName(), outerName);
+            if (++hits >= kMaxResults)
+            {
+                info("  ... (capped at {} results — refine the query)", kMaxResults);
+                break;
+            }
+        }
+        info("[cmd:findobjs] {} match(es) for '{}'{}",
+            hits, needle, worldOnly ? " (world only)" : "");
+    }
+
     static void ScanAll(const CommandContext&)
     {
         Scan::ScanAllClasses();
@@ -790,6 +818,8 @@ void RegisterCommands(CommandHandler& handler)
     // Inspection
     handler.Register("findclass", RcCmd::FindClass, "Inspection",
         R"(Find classes by name (fuzzy substring))");
+    handler.Register("findobjs", RcCmd::FindObjects, "Inspection",
+        R"(Find objects by name in GObjects: findobjs <name> [world])");
     handler.Register("prop",      PropertyInspector::DispatchCommand, "Inspection",
         R"(prop <cdo|obj> <n> <dump|get|set|list> [prop] [value] [fuzzy] [class <name>])");
     handler.Register("scanall",   RcCmd::ScanAll,   "Inspection",
@@ -842,10 +872,10 @@ void SendCommandList(const CommandContext& ctx, const CommandHandler& handler)
     if (!g_pRespBuffer || !g_hRespEvent) return;
 
     constexpr DWORD MAX_WAIT_MS = 1000;
-    DWORD deadline = GetTickCount() + MAX_WAIT_MS;
+    ULONGLONG deadline = GetTickCount64() + MAX_WAIT_MS;
     while (g_pRespBuffer->ready.load(std::memory_order_acquire))
     {
-        if (GetTickCount() > deadline) return;
+        if (GetTickCount64() > deadline) return;
         Sleep(5);
     }
 
