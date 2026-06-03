@@ -25,11 +25,6 @@ namespace TickSystem
 
 namespace State
 {
-    GameHooks::CallbackHandle TickCallback        = 0;
-    GameHooks::CallbackHandle BeginPlayCallback   = 0;
-    GameHooks::CallbackHandle LogAllEventsHandle  = 0;
-    GameHooks::CallbackHandle LogNetClientHandle  = 0;
-    GameHooks::CallbackHandle LogNetServerHandle  = 0;
     const CommandContext dummyCtx{ std::vector<std::string>{} };
 
     // ── Call-command scan cache ───────────────────────────────────────────
@@ -48,11 +43,24 @@ namespace State
 
 void ResetCallbackHandles()
 {
-    State::TickCallback        = 0;
-    State::BeginPlayCallback   = 0;
-    State::LogAllEventsHandle  = 0;
-    State::LogNetClientHandle  = 0;
-    State::LogNetServerHandle  = 0;
+    // Toggles are GameHooks::HookToggle now, reset centrally by
+    // GameHooks::ResetAllToggles() (called from ModManager::UnloadMods).
+}
+
+// =========================================================================
+// Game policy hooks (called by the shared ModManager)
+// =========================================================================
+
+bool PreLoadCheck() { return true; }
+
+void OnModsLoaded()
+{
+    BpModLoader::Install();
+}
+
+void OnModsUnloading()
+{
+    BpModLoader::Uninstall();
 }
 
 // =========================================================================
@@ -281,33 +289,25 @@ namespace RcCmd
         ::Exec(cmd);
     }
 
+    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_logAllEvents{
+        [] { return GameHooks::OnProcessEventAll(
+            [](UObject* Object, UFunction* Function, void*)
+            {
+                if (!Object || !Function) return;
+                info("[PE] {}::{}",
+                    Object->Class ? Object->Class->GetName() : "?",
+                    Function->GetName());
+            }); } };
+
     static void LogAllEvents(const CommandContext&)
     {
-        if (State::LogAllEventsHandle == 0)
-        {
-            State::LogAllEventsHandle = GameHooks::OnProcessEventAll(
-                [](UObject* Object, UFunction* Function, void*)
-                {
-                    if (!Object || !Function) return;
-                    info("[PE] {}::{}",
-                        Object->Class ? Object->Class->GetName() : "?",
-                        Function->GetName());
-                });
-            info("[cmd:logallevents] enabled (every ProcessEvent will be logged)");
-        }
-        else
-        {
-            GameHooks::RemoveHook(State::LogAllEventsHandle);
-            State::LogAllEventsHandle = 0;
-            info("[cmd:logallevents] disabled");
-        }
+        info("[cmd:logallevents] {}", s_logAllEvents.Toggle()
+            ? "enabled (every ProcessEvent will be logged)" : "disabled");
     }
 
-    static void LogNetClient(const CommandContext&)
-    {
-        if (State::LogNetClientHandle == 0)
-        {
-            // Re-read config.yaml each time the command is enabled so edits
+    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_logNetClient{
+        [] {
+            // Re-read config.yaml each time the command is (re-)enabled so edits
             // to the skip list take effect without restarting.
             const auto cfg = NetLogConfig::Load();
             std::unordered_set<FName> skipList;
@@ -318,7 +318,7 @@ namespace RcCmd
             info("[cmd:lognetclient] skip list: {} entr{}",
                  skipList.size(), skipList.size() == 1 ? "y" : "ies");
 
-            State::LogNetClientHandle = GameHooks::OnProcessEventAll(
+            return GameHooks::OnProcessEventAll(
                 [skipList = std::move(skipList)](UObject* Object, UFunction* Function, void* Params)
                 {
                     if (!Object || !Function) return;
@@ -373,20 +373,17 @@ namespace RcCmd
                              callerClass, callerName);
                 },
                 GameHooks::ExecutionTiming::Before);
-            info("[cmd:lognetclient] enabled — logging all NetClient + NetMulticast RPCs");
         }
-        else
-        {
-            GameHooks::RemoveHook(State::LogNetClientHandle);
-            State::LogNetClientHandle = 0;
-            info("[cmd:lognetclient] disabled");
-        }
+    };
+
+    static void LogNetClient(const CommandContext&)
+    {
+        info("[cmd:lognetclient] {}", s_logNetClient.Toggle()
+            ? "enabled — logging all NetClient + NetMulticast RPCs" : "disabled");
     }
 
-    static void LogNetServer(const CommandContext&)
-    {
-        if (State::LogNetServerHandle == 0)
-        {
+    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_logNetServer{
+        [] {
             const auto cfg = NetLogConfig::Load();
             std::unordered_set<FName> skipList;
             skipList.reserve(cfg.netSkip.size());
@@ -396,7 +393,7 @@ namespace RcCmd
             info("[cmd:lognetserver] skip list: {} entr{}",
                  skipList.size(), skipList.size() == 1 ? "y" : "ies");
 
-            State::LogNetServerHandle = GameHooks::OnProcessEventAll(
+            return GameHooks::OnProcessEventAll(
                 [skipList = std::move(skipList)](UObject* Object, UFunction* Function, void* Params)
                 {
                     if (!Object || !Function) return;
@@ -444,20 +441,19 @@ namespace RcCmd
                              callerClass, callerName);
                 },
                 GameHooks::ExecutionTiming::Before);
-            info("[cmd:lognetserver] enabled — logging all NetServer RPCs");
         }
-        else
-        {
-            GameHooks::RemoveHook(State::LogNetServerHandle);
-            State::LogNetServerHandle = 0;
-            info("[cmd:lognetserver] disabled");
-        }
+    };
+
+    static void LogNetServer(const CommandContext&)
+    {
+        info("[cmd:lognetserver] {}", s_logNetServer.Toggle()
+            ? "enabled — logging all NetServer RPCs" : "disabled");
     }
 
     static void ReloadNetLog(const CommandContext&)
     {
-        const bool clientOn = State::LogNetClientHandle != 0;
-        const bool serverOn = State::LogNetServerHandle != 0;
+        const bool clientOn = s_logNetClient.IsEnabled();
+        const bool serverOn = s_logNetServer.IsEnabled();
 
         if (!clientOn && !serverOn)
         {
@@ -470,46 +466,34 @@ namespace RcCmd
         if (serverOn) { LogNetServer(State::dummyCtx); LogNetServer(State::dummyCtx); }
     }
 
+    // Example of the toggle wrapper: register once at the declaration; the command
+    // body is then a one-liner. Handle bookkeeping + reload reset live in HookToggle.
+    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_tickWatcher{
+        [] { return GameHooks::OnProcessEventByNameAndClass(
+            "ReceiveTick", AActor::StaticClass(),
+            [](UObject* Object, UFunction*, void*)
+            {
+                if (Object) info("[ReceiveTick] {}", Object->GetName());
+            }); } };
+
     static void StopTick(const CommandContext&)
     {
-        if (State::TickCallback == 0)
-        {
-            State::TickCallback = GameHooks::OnProcessEventByNameAndClass(
-                "ReceiveTick", AActor::StaticClass(),
-                [](UObject* Object, UFunction*, void*)
-                {
-                    if (Object) info("[ReceiveTick] {}", Object->GetName());
-                });
-            info("[cmd:stoptick] tick listener enabled");
-        }
-        else
-        {
-            GameHooks::RemoveHook(State::TickCallback);
-            State::TickCallback = 0;
-            info("[cmd:stoptick] tick listener disabled");
-        }
+        info("[cmd:stoptick] tick listener {}", s_tickWatcher.Toggle() ? "enabled" : "disabled");
     }
+
+    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_beginPlayWatcher{
+        [] { return GameHooks::OnProcessEventByNameAndClass(
+            "ReceiveBeginPlay", AActor::StaticClass(),
+            [](UObject* Object, UFunction*, void*)
+            {
+                if (!Object || !Object->Class) return;
+                info("[BeginPlay] {} spawned: {}",
+                    Object->Class->Name.ToString(), Object->Name.ToString());
+            }); } };
 
     static void BeginPlay(const CommandContext&)
     {
-        if (State::BeginPlayCallback == 0)
-        {
-            State::BeginPlayCallback = GameHooks::OnProcessEventByNameAndClass(
-                "ReceiveBeginPlay", AActor::StaticClass(),
-                [](UObject* Object, UFunction*, void*)
-                {
-                    if (!Object || !Object->Class) return;
-                    info("[BeginPlay] {} spawned: {}",
-                        Object->Class->Name.ToString(), Object->Name.ToString());
-                });
-            info("[cmd:beginplay] watcher enabled");
-        }
-        else
-        {
-            GameHooks::RemoveHook(State::BeginPlayCallback);
-            State::BeginPlayCallback = 0;
-            info("[cmd:beginplay] watcher disabled");
-        }
+        info("[cmd:beginplay] watcher {}", s_beginPlayWatcher.Toggle() ? "enabled" : "disabled");
     }
 
     // ── call ─────────────────────────────────────────────────────────────────
@@ -694,19 +678,17 @@ namespace RcCmd
     // counteracts camera drift caused by server-applied recoil each frame.
     // No aimbot integration — pure camera stabilisation only.
 
-    static void NoRecoil(const CommandContext& = State::dummyCtx)
-    {
-        static bool  enabled      = false;
-        static bool  initialized  = false;
-        static float desiredPitch = 0.f, prevCtrlPitch = 0.f;
-        static float desiredYaw   = 0.f, prevCtrlYaw   = 0.f;
-        static GameHooks::CallbackHandle handle = 0;
-
-        enabled     = !enabled;
-        initialized = false;
-
-        if (enabled)
+    // norecoil as a HookToggle: state lives in the registrar's static locals
+    // (persist across enables), re-synced on each enable. The callback only exists
+    // while enabled, so the old `if (!enabled) return;` guard is gone.
+    static GameHooks::HookToggle<GameHooks::EngineTickHook> s_noRecoil{
+        []() -> GameHooks::CallbackHandle
         {
+            static bool  initialized  = false;
+            static float desiredPitch = 0.f, prevCtrlPitch = 0.f;
+            static float desiredYaw   = 0.f, prevCtrlYaw   = 0.f;
+            initialized = false;
+
             auto normP = [](float a) -> float
             {
                 a = std::fmod(a, 360.f);
@@ -715,10 +697,9 @@ namespace RcCmd
                 return a;
             };
 
-            handle = GameHooks::OnEngineTick(
+            return GameHooks::OnEngineTick(
                 [normP](UEngine*, float, bool)
                 {
-                    if (!enabled) return;
 
                     APlayerController* Ctrl = GetLocalController();
                     if (!IsValidOf<APlayerController>(Ctrl)) return;
@@ -796,13 +777,11 @@ namespace RcCmd
                 GameHooks::ExecutionTiming::After
             );
         }
-        else if (handle != 0)
-        {
-            GameHooks::EngineTickHook::Get().RemoveCallback(handle);
-            handle = 0;
-        }
+    };
 
-        info("[norecoil] {}", enabled ? "ON" : "OFF");
+    static void NoRecoil(const CommandContext& = State::dummyCtx)
+    {
+        info("[norecoil] {}", s_noRecoil.Toggle() ? "ON" : "OFF");
     }
 
 } // namespace RcCmd

@@ -1,4 +1,6 @@
 #include "Lib_GameHooks.h"
+#include "Lib_ObjectFactory.h"   // FStaticConstructObjectParameters, ObjectFactory::GetStaticConstructObject
+#include <unordered_set>
 
 namespace GameHooks
 {
@@ -76,11 +78,6 @@ void ProcessEventHook::StoreList(CallbackList list)
 void ProcessEventHook::StoreEmptyState()
 {
     StoreState(std::make_shared<CallbackState>());
-}
-
-void ProcessEventHook::OnBeforeHookRemoval()
-{
-    EasyHook::Shutdown();
 }
 
 bool ProcessEventHook::DoUninstall()
@@ -258,6 +255,16 @@ void __fastcall ProcessEventHook::HookedProcessEvent(UObject* Object, UFunction*
 
 // ── Public methods ────────────────────────────────────────────────────────────
 
+// Block until the engine UObject is resolvable, then return it. Both hooks read
+// their target from the engine's vtable, so only the first hook installed needs
+// to wait — the engine stays up for the rest of the session.
+static UEngine* WaitForEngine()
+{
+    UEngine* engine = nullptr;
+    while (!(engine = UEngine::GetEngine())) Sleep(100);
+    return engine;
+}
+
 bool ProcessEventHook::Install()
 {
     if (hookInstalled_.load()) return true;
@@ -267,9 +274,16 @@ bool ProcessEventHook::Install()
     static void* addr = nullptr;
     if (!addr)
     {
-        UObject* engine = nullptr;
-        while (!(engine = UEngine::GetEngine())) Sleep(100);
-        DBG_CHECK_PTR(engine);
+        // ProcessEvent shares the engine's UObject vtable (slot Offsets::ProcessEventIdx).
+        // By contract this runs after the EngineTick hook has already resolved the
+        // engine (ModManager::LoadMods installs the tick hook first), so there's no
+        // need to spin-wait for the engine here.
+        UObject* engine = UEngine::GetEngine();
+        if (!engine)
+        {
+            error("[GameHooks] ProcessEvent install before engine resolved — install the EngineTick hook first");
+            return false;
+        }
         addr = Utils::GetVirtualFunction<void*>(engine, Offsets::ProcessEventIdx);
         DBG_CHECK_PTR(addr);
     }
@@ -281,6 +295,7 @@ bool ProcessEventHook::Install()
     }
 
     DBG_CHECK_PTR(OriginalProcessEvent);
+    hookAddr_ = addr;
     hookInstalled_.store(true);
     return true;
 }
@@ -411,8 +426,8 @@ void EngineTickHook::StoreEmptyState()
 
 bool EngineTickHook::DoUninstall()
 {
-    // NOTE: we do NOT call EasyHook::Shutdown() here — ProcessEventHook may
-    // still own a hook in the same MinHook instance. Just clear our own state.
+    // DoUninstallCommon removes only this hook's own MinHook target; EasyHook
+    // releases MinHook itself once the last hook is gone (reference-counted).
     return DoUninstallCommon();
 }
 
@@ -513,8 +528,7 @@ bool EngineTickHook::Install(int32 vtableSlot)
     DBG_ASSERT(vtableSlot >= 0, "vtableSlot must be a non-negative index");
     if (!EasyHook::Init()) return false;
 
-    UEngine* engine = nullptr;
-    while (!(engine = UEngine::GetEngine())) Sleep(100);
+    UEngine* engine = WaitForEngine();
     DBG_CHECK_PTR(engine);
 
     void* addr = Utils::GetVirtualFunction<void*>(engine, vtableSlot);
@@ -528,6 +542,7 @@ bool EngineTickHook::Install(int32 vtableSlot)
     }
 
     DBG_CHECK_PTR(OriginalTick);
+    hookAddr_ = addr;
     hookInstalled_.store(true);
     return true;
 }
@@ -556,6 +571,242 @@ CallbackHandle OnEngineTick(EngineTickCallback cb, ExecutionTiming t, ExecutionM
 {
     DBG_ASSERT(cb, "Null callback");
     return EngineTickHook::Get().AddCallback(std::move(cb), t, mode);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  StaticConstructObjectHook
+// ═════════════════════════════════════════════════════════════════════════════
+
+SDK::UObject* (*StaticConstructObjectHook::OriginalSCO)(FStaticConstructObjectParameters*) = nullptr;
+
+// ── Constructor ──────────────────────────────────────────────────────────────
+
+StaticConstructObjectHook::StaticConstructObjectHook()
+{
+    StoreEmptyState();
+    DBG_ASSERT(stateOwner_.load() != nullptr, "Failed to initialize state");
+}
+
+// ── Internal helpers ─────────────────────────────────────────────────────────
+
+void StaticConstructObjectHook::StoreState(std::shared_ptr<const CallbackList> s)
+{
+    DBG_CHECK_PTR(s.get());
+    std::atomic_store(&stateOwner_, std::move(s));
+    DBG_ASSERT(std::atomic_load(&stateOwner_) != nullptr, "State store failed");
+}
+
+// ── CRTP interface ────────────────────────────────────────────────────────────
+
+StaticConstructObjectHook::CallbackList StaticConstructObjectHook::CloneList() const
+{
+    auto s = std::atomic_load(&stateOwner_);
+    return s ? *s : CallbackList{};
+}
+
+void StaticConstructObjectHook::StoreList(CallbackList list)
+{
+    StoreState(std::make_shared<CallbackList>(std::move(list)));
+}
+
+void StaticConstructObjectHook::StoreEmptyState()
+{
+    StoreState(std::make_shared<CallbackList>());
+}
+
+bool StaticConstructObjectHook::DoUninstall()
+{
+    // DoUninstallCommon removes only this hook's own MinHook target; EasyHook
+    // releases MinHook itself once the last hook is gone (reference-counted).
+    return DoUninstallCommon();
+}
+
+// ── Dispatch helpers ──────────────────────────────────────────────────────────
+
+bool StaticConstructObjectHook::RunBeforePass(const CallbackList& list, FStaticConstructObjectParameters* p)
+{
+    bool ok = true;
+    bool skipFired = false;
+    int  callOriginalRan = 0;
+
+    for (const auto& e : list)
+    {
+        if (!e.enabled || e.timing == ExecutionTiming::After) continue;
+        DBG_ASSERT(e.callback, "Null callback in entry");
+        try { e.callback(p, nullptr); }
+        catch (const std::exception&) { DBG_ASSERT(false, "SCO callback threw exception"); }
+
+        if (e.mode == ExecutionMode::SkipOriginal) { ok = false; skipFired = true; }
+        else                                         ++callOriginalRan;
+    }
+
+    if (skipFired && callOriginalRan > 0)
+        warn("[StaticConstructObjectHook] SkipOriginal suppressed construction for {} CallOriginal callback(s)", callOriginalRan);
+
+    return ok;
+}
+
+void StaticConstructObjectHook::RunAfterPass(const CallbackList& list, FStaticConstructObjectParameters* p, SDK::UObject* result)
+{
+    for (const auto& e : list)
+    {
+        if (!e.enabled || e.timing == ExecutionTiming::Before) continue;
+        DBG_ASSERT(e.callback, "Null callback in entry");
+        try { e.callback(p, result); }
+        catch (const std::exception&) { DBG_ASSERT(false, "SCO callback threw exception"); }
+    }
+}
+
+SDK::UObject* StaticConstructObjectHook::HookedSCO(FStaticConstructObjectParameters* params)
+{
+    if (!OriginalSCO) return nullptr;
+
+    // Per-thread re-entrancy guard. SCO runs on multiple threads (incl. async
+    // loading), so a single global depth would yield cross-thread false
+    // positives and drop dispatches. executionDepth_ is still bumped for
+    // uninstall-safety (defer teardown until no thread is inside the trampoline).
+    static thread_local int s_reentry = 0;
+    const bool reentrant = (s_reentry++ > 0);
+    executionDepth_.fetch_add(1, std::memory_order_relaxed);
+
+    static StaticConstructObjectHook* inst = &Get();
+    DBG_CHECK_PTR(inst);
+
+    SDK::UObject* result = nullptr;
+
+    if (reentrant)
+    {
+        result = OriginalSCO(params);
+    }
+    else
+    {
+        auto state = std::atomic_load(&inst->stateOwner_);
+        const bool hasCallbacks = state && !state->empty();
+
+        if (hasCallbacks)
+        {
+            const bool callOriginal = RunBeforePass(*state, params);
+            if (callOriginal)
+            {
+                try { result = OriginalSCO(params); }
+                catch (const std::exception&) { DBG_ASSERT(false, "OriginalSCO threw exception"); }
+            }
+            RunAfterPass(*state, params, result);
+        }
+        else
+        {
+            result = OriginalSCO(params);
+        }
+    }
+
+    --s_reentry;
+    const int depthAfter = executionDepth_.fetch_sub(1, std::memory_order_acq_rel);
+    DBG_CHECK_RANGE(depthAfter, 1, 1000);
+
+    if (depthAfter == 1 && inst->pendingUninstall_.load(std::memory_order_relaxed))
+    {
+        bool expected = true;
+        if (inst->pendingUninstall_.compare_exchange_strong(expected, false))
+        {
+            try { inst->DoUninstall(); }
+            catch (const std::exception&) { DBG_ASSERT(false, "DoUninstall threw exception"); }
+        }
+    }
+
+    return result;
+}
+
+// ── Public methods ────────────────────────────────────────────────────────────
+
+bool StaticConstructObjectHook::Install()
+{
+    if (hookInstalled_.load()) return true;
+    DBG_ASSERT(!pendingUninstall_.load(), "Cannot install while uninstall pending");
+    if (!EasyHook::Init()) return false;
+
+    void* addr = reinterpret_cast<void*>(ObjectFactory::GetStaticConstructObject());
+    if (!addr)
+    {
+        // Unresolved for this game (e.g. RC until GameOffsets is filled in).
+        // ObjectFactory already logged the reason once.
+        return false;
+    }
+
+    if (!EasyHook::CreateAndEnableHook(addr, &HookedSCO, &OriginalSCO))
+    {
+        DBG_ASSERT(false, "Failed to create StaticConstructObject hook");
+        return false;
+    }
+
+    DBG_CHECK_PTR(OriginalSCO);
+    hookAddr_ = addr;
+    hookInstalled_.store(true);
+    info("[StaticConstructObjectHook] Installed @ {:p}", addr);
+    return true;
+}
+
+CallbackHandle StaticConstructObjectHook::AddCallback(StaticConstructObjectCallback callback,
+    ExecutionTiming timing, ExecutionMode mode)
+{
+    DBG_ASSERT(callback, "Null callback passed to AddCallback");
+    std::lock_guard lock(writeMutex_);
+    CallbackList newList = CloneList();
+    CallbackHandle handle = nextHandle_++;
+    DBG_ASSERT(handle > 0, "Invalid handle generated");
+    newList.emplace_back(handle, std::move(callback), timing, mode);
+    StoreList(std::move(newList));
+    return handle;
+}
+
+// ── Free convenience functions ────────────────────────────────────────────────
+
+bool InstallStaticConstructObjectHook()
+{
+    return StaticConstructObjectHook::Get().Install();
+}
+
+CallbackHandle OnStaticConstructObject(StaticConstructObjectCallback cb, ExecutionTiming t, ExecutionMode mode)
+{
+    DBG_ASSERT(cb, "Null callback");
+    return StaticConstructObjectHook::Get().AddCallback(std::move(cb), t, mode);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  HookToggle registry
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Leaked (never destroyed) so toggle destructors at process/DLL exit always find
+// a live registry — same philosophy as HookBase::Get()'s leaked singleton.
+namespace {
+    std::mutex& gToggleMutex()
+    {
+        static std::mutex* m = new std::mutex();
+        return *m;
+    }
+    std::unordered_set<ToggleBase*>& gToggleRegistry()
+    {
+        static auto* s = new std::unordered_set<ToggleBase*>();
+        return *s;
+    }
+}
+
+ToggleBase::ToggleBase()
+{
+    std::lock_guard<std::mutex> lock(gToggleMutex());
+    gToggleRegistry().insert(this);
+}
+
+ToggleBase::~ToggleBase()
+{
+    std::lock_guard<std::mutex> lock(gToggleMutex());
+    gToggleRegistry().erase(this);
+}
+
+void ResetAllToggles() noexcept
+{
+    std::lock_guard<std::mutex> lock(gToggleMutex());
+    for (auto* t : gToggleRegistry())
+        if (t) t->Reset();
 }
 
 } // namespace GameHooks

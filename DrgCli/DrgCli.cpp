@@ -264,6 +264,18 @@ static void DllReadyThread()
     while (g_Running.load(std::memory_order_relaxed))
     {
         const DWORD r = WaitForSingleObject(g_hDllReadyEvent, 500);
+
+        // Bail before doing any work if we were woken (or timed out) during a
+        // shutdown / profile switch. The switch SetEvents this event purely to
+        // wake us so we can exit; without this check we'd fall into
+        // AutoSendListCmds() and block ~5s waiting for a reply from the DLL that
+        // was just unloaded.
+        if (!g_Running.load(std::memory_order_relaxed))
+        {
+            if (g_hDllReadyEvent) ResetEvent(g_hDllReadyEvent);
+            break;
+        }
+
         if (r == WAIT_OBJECT_0)
         {
             ResetEvent(g_hDllReadyEvent);

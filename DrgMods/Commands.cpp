@@ -179,15 +179,7 @@ namespace Helpers {
 // =========================================================================
 namespace State
 {
-    CallbackHandle LogAllEventsCallback = 0;
-    CallbackHandle DanceCallback = 0;
-    CallbackHandle TickCallback = 0;
-    CallbackHandle ClientChatCallback = 0;
-    CallbackHandle ServerChatCallback = 0;
-    CallbackHandle ProxyModCallback = 0;
-    CallbackHandle BeginPlayCallback = 0;
-    CallbackHandle LogNetClientHandle  = 0;
-    CallbackHandle LogNetServerHandle  = 0;
+    CallbackHandle DanceCallback = 0;   // kept: also referenced by DanceIntercept (SetExecutionMode)
 
     bool autoCrasherEnabled = false;
     bool infiniteAmmoEnabled = false;
@@ -906,19 +898,13 @@ namespace Commands
     void MakeJSON(const CommandContext& JS)
     {}
 
+    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_logAllEvents{
+        [] { return GameHooks::OnProcessEventAll(Callbacks::LogAllProcessEvents); } };
+
     void LogProcessEvents(const CommandContext&)
     {
-        if (State::LogAllEventsCallback == 0)
-        {
-            State::LogAllEventsCallback = GameHooks::OnProcessEventAll(Callbacks::LogAllProcessEvents);
-            info("[cmd:logallevents] Logging ALL ProcessEvent calls");
-        }
-        else
-        {
-            GameHooks::RemoveHook(State::LogAllEventsCallback);
-            State::LogAllEventsCallback = 0;
-            info("[cmd:logallevents] ProcessEvent logging disabled");
-        }
+        info("[cmd:logallevents] {}", s_logAllEvents.Toggle()
+            ? "Logging ALL ProcessEvent calls" : "ProcessEvent logging disabled");
     }
 
     //void tpbars(const ctx&){
@@ -1124,25 +1110,13 @@ namespace Commands
         }
     }
 
+    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_chatLog{
+        [] { return GameHooks::OnProcessEventByNameAndClass(
+            "ClientNewMessage", SDK::AFSDGameState::StaticClass(), Callbacks::ServerMessageIntercept); } };
+
     void LogChat(const CommandContext& = State::dummyCtx)
     {
-        if (State::ServerChatCallback == 0)
-        {
-            //State::ClientChatCallback = GameHooks::OnProcessEventByNameAndClass(
-            //    "Server_NewMessage", SDK::APlayerController::StaticClass(), Callbacks::MessageIntercept);
-            //if(!Kismet::IsServer(nullptr))
-            State::ServerChatCallback = GameHooks::OnProcessEventByNameAndClass(
-                "ClientNewMessage", SDK::AFSDGameState::StaticClass(), Callbacks::ServerMessageIntercept);
-            info("[cmd:logchat] Chat logging enabled");
-        }
-        else
-        {
-            //GameHooks::RemoveHook(State::ClientChatCallback);
-            //if (!Kismet::IsServer(nullptr))
-            GameHooks::RemoveHook(State::ServerChatCallback);
-            /* State::ClientChatCallback = */State::ServerChatCallback = 0;
-            info("[cmd:logchat] Chat logging disabled");
-        }
+        info("[cmd:logchat] Chat logging {}", s_chatLog.Toggle() ? "enabled" : "disabled");
     }
 
     void SixSeven(const CommandContext& = State::dummyCtx)
@@ -1240,25 +1214,21 @@ namespace Commands
         }
     }
 
-    void IgnoreProxy(const CommandContext& = State::dummyCtx)
-    {
-        if (State::ProxyModCallback == 0)
+    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_ignoreProxy{
+        []() -> GameHooks::CallbackHandle
         {
             SDK::UClass* ProxyMod = SDK::BasicFilesImpleUtils::FindClassByName("ProxyMod_C", false);
             if (!ProxyMod || !Kismet::IsValidClass(ProxyMod))
             {
-                error("[cmd:ignoreproxy] Failed to find class 'ProxyMod_C'."); return;
+                error("[cmd:ignoreproxy] Failed to find class 'ProxyMod_C'.");
+                return 0;
             }
-            State::ProxyModCallback = GameHooks::OnProcessEventByNameAndClass(
-                "Init", ProxyMod, Callbacks::ProxyModHook);
-            info("[cmd:ignoreproxy] ProxyMod hook enabled");
-        }
-        else
-        {
-            GameHooks::RemoveHook(State::ProxyModCallback);
-            State::ProxyModCallback = 0;
-            info("[cmd:ignoreproxy] ProxyMod hook disabled");
-        }
+            return GameHooks::OnProcessEventByNameAndClass("Init", ProxyMod, Callbacks::ProxyModHook);
+        } };
+
+    void IgnoreProxy(const CommandContext& = State::dummyCtx)
+    {
+        info("[cmd:ignoreproxy] ProxyMod hook {}", s_ignoreProxy.Toggle() ? "enabled" : "disabled");
     }
 
     void Prop(const CommandContext& ctx) { PropertyInspector::DispatchCommand(ctx); }
@@ -1271,47 +1241,33 @@ namespace Commands
         ::Exec(cmd);
     }
 
+    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_tickListener{
+        [] { return GameHooks::OnProcessEventByNameAndClass(
+            "ReceiveTick", SDK::AActor::StaticClass(), Callbacks::TickListener); } };
+
     void StopTick(const CommandContext& = State::dummyCtx)
     {
-        if (State::TickCallback == 0)
-        {
-            State::TickCallback = GameHooks::OnProcessEventByNameAndClass(
-                "ReceiveTick", SDK::AActor::StaticClass(), Callbacks::TickListener);
-            info("[cmd:stoptick] tick listener enabled");
-        }
-        else
-        {
-            GameHooks::RemoveHook(State::TickCallback);
-            State::TickCallback = 0;
-            info("[cmd:stoptick] tick listener disabled");
-        }
+        info("[cmd:stoptick] tick listener {}", s_tickListener.Toggle() ? "enabled" : "disabled");
     }
+
+    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_beginPlayWatcher{
+        [] { return GameHooks::OnProcessEventByNameAndClass(
+            "ReceiveBeginPlay", SDK::AActor::StaticClass(),
+            [](SDK::UObject* object, SDK::UFunction*, void*)
+            {
+                if (!object || !object->Class) return;
+                for (const wchar_t* name : { L"Core_C", L"NoVines_C", L"TickManager_C" })
+                    if (IsChildOfByName(object, name))
+                    {
+                        info("[BeginPlay] {} spawned: {}",
+                            object->Class->Name.ToString(), object->Name.ToString());
+                        break;
+                    }
+            }); } };
 
     void BeginPlay(const CommandContext& = State::dummyCtx)
     {
-        if (State::BeginPlayCallback == 0)
-        {
-            State::BeginPlayCallback = GameHooks::OnProcessEventByNameAndClass(
-                "ReceiveBeginPlay", SDK::AActor::StaticClass(),
-                [](SDK::UObject* object, SDK::UFunction*, void*)
-                {
-                    if (!object || !object->Class) return;
-                    for (const wchar_t* name : { L"Core_C", L"NoVines_C", L"TickManager_C" })
-                        if (IsChildOfByName(object, name))
-                        {
-                            info("[BeginPlay] {} spawned: {}",
-                                object->Class->Name.ToString(), object->Name.ToString());
-                            break;
-                        }
-                });
-            info("[beginplay] Watcher registered");
-        }
-        else
-        {
-            GameHooks::RemoveHook(State::BeginPlayCallback);
-            State::BeginPlayCallback = 0;
-            info("[beginplay] disabled");
-        }
+        info("[beginplay] {}", s_beginPlayWatcher.Toggle() ? "Watcher registered" : "disabled");
     }
 
     void ScanAllClasses(const CommandContext& = State::dummyCtx)
@@ -2173,11 +2129,9 @@ namespace Commands
         info("[cmd:infiniteammo] {}", State::infiniteAmmoEnabled ? "Enabled" : "Disabled");
     }
 
-    void LogNetClient(const CommandContext& = State::dummyCtx)
-    {
-        if (State::LogNetClientHandle == 0)
-        {
-            // Re-read config.yaml each time the command is enabled so edits
+    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_logNetClient{
+        [] {
+            // Re-read config.yaml each time the command is (re-)enabled so edits
             // to the skip list take effect without restarting.
             const auto cfg = NetLogConfig::Load();
             std::unordered_set<SDK::FName> skipList;
@@ -2188,7 +2142,7 @@ namespace Commands
             info("[cmd:lognetclient] skip list: {} entr{}",
                  skipList.size(), skipList.size() == 1 ? "y" : "ies");
 
-            State::LogNetClientHandle = GameHooks::OnProcessEventAll(
+            return GameHooks::OnProcessEventAll(
                 [skipList = std::move(skipList)](SDK::UObject* Object, SDK::UFunction* Function, void* Params)
                 {
                     if (!Object || !Function) return;
@@ -2241,20 +2195,17 @@ namespace Commands
                              callerClass, callerName);
                 },
                 GameHooks::ExecutionTiming::Before);
-            info("[cmd:lognetclient] enabled — logging all NetClient + NetMulticast RPCs");
         }
-        else
-        {
-            GameHooks::RemoveHook(State::LogNetClientHandle);
-            State::LogNetClientHandle = 0;
-            info("[cmd:lognetclient] disabled");
-        }
+    };
+
+    void LogNetClient(const CommandContext& = State::dummyCtx)
+    {
+        info("[cmd:lognetclient] {}", s_logNetClient.Toggle()
+            ? "enabled — logging all NetClient + NetMulticast RPCs" : "disabled");
     }
 
-    void LogNetServer(const CommandContext& = State::dummyCtx)
-    {
-        if (State::LogNetServerHandle == 0)
-        {
+    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_logNetServer{
+        [] {
             const auto cfg = NetLogConfig::Load();
             std::unordered_set<SDK::FName> skipList;
             skipList.reserve(cfg.netSkip.size());
@@ -2264,7 +2215,7 @@ namespace Commands
             info("[cmd:lognetserver] skip list: {} entr{}",
                  skipList.size(), skipList.size() == 1 ? "y" : "ies");
 
-            State::LogNetServerHandle = GameHooks::OnProcessEventAll(
+            return GameHooks::OnProcessEventAll(
                 [skipList = std::move(skipList)](SDK::UObject* Object, SDK::UFunction* Function, void* Params)
                 {
                     if (!Object || !Function) return;
@@ -2312,20 +2263,19 @@ namespace Commands
                              callerClass, callerName);
                 },
                 GameHooks::ExecutionTiming::Before);
-            info("[cmd:lognetserver] enabled — logging all NetServer RPCs");
         }
-        else
-        {
-            GameHooks::RemoveHook(State::LogNetServerHandle);
-            State::LogNetServerHandle = 0;
-            info("[cmd:lognetserver] disabled");
-        }
+    };
+
+    void LogNetServer(const CommandContext& = State::dummyCtx)
+    {
+        info("[cmd:lognetserver] {}", s_logNetServer.Toggle()
+            ? "enabled — logging all NetServer RPCs" : "disabled");
     }
 
     void ReloadNetLog(const CommandContext& = State::dummyCtx)
     {
-        const bool clientOn = State::LogNetClientHandle != 0;
-        const bool serverOn = State::LogNetServerHandle != 0;
+        const bool clientOn = s_logNetClient.IsEnabled();
+        const bool serverOn = s_logNetServer.IsEnabled();
 
         if (!clientOn && !serverOn)
         {
@@ -2500,15 +2450,76 @@ void InitDefaultCallbacks()
 
 void ResetCallbackHandles()
 {
-    State::DanceCallback =
-        State::TickCallback =
-        State::ClientChatCallback =
-        State::ServerChatCallback =
-        State::ProxyModCallback =
-        State::BeginPlayCallback =
-        State::LogNetClientHandle =
-        State::LogNetServerHandle =
-        0;
+    // HookToggle callbacks reset centrally via GameHooks::ResetAllToggles()
+    // (called from ModManager::UnloadMods). DanceCallback is still a manual handle.
+    State::DanceCallback = 0;
+}
+
+// =========================================================================
+// Game policy hooks (called by the shared ModManager)
+// =========================================================================
+
+// GMalloc sanity check — verifies UnrealAllocator is reachable and functional
+// before we install hooks. Moved here from ModManager (DRG-specific).
+static bool TestAllocator()
+{
+    constexpr uint32 size = 1024;
+    constexpr const char* testStr = "Hello from GMalloc!\0";
+
+    SDK::UnrealAllocator* allocator = SDK::UnrealAllocator::Get(true);
+    if (!allocator)
+    {
+        error("[ModManager] UnrealAllocator is null");
+        return false;
+    }
+    info("[ModManager] Found GMalloc at {:p} ({})",
+        static_cast<const void*>(allocator),
+        FString(allocator->GetDescriptiveName()).ToString());
+    info("[ModManager] Testing GMalloc...");
+
+    void* mem = SDK::FMemory::Malloc(size);
+    if (!mem)
+    {
+        error("[ModManager] GMalloc allocation failed.");
+        return false;
+    }
+
+    SDK::FMemory::Memcpy(mem, testStr, 21);
+
+    uint64 actualSize = 0;
+    if (!SDK::FMemory::GetAllocSize(mem, actualSize) || actualSize < size)
+    {
+        error("[ModManager] Allocation size validation failed (got {}).", actualSize);
+        SDK::FMemory::Free(mem);
+        return false;
+    }
+
+    info("[ModManager] GMalloc allocation successful.");
+    info("[ModManager] Allocated size: {} bytes", actualSize);
+    info("[ModManager] Test allocation address: {:p}", mem);
+    info("[ModManager] Is Allocator Internally Thread Safe? {}", allocator->IsInternallyThreadSafe() ? "Yes" : "No");
+    info("[ModManager] Test allocation content: {}", std::string(static_cast<char*>(mem), 21));
+    info("[ModManager] Test allocation content validity: {}", std::string(static_cast<char*>(mem)) == testStr ? "Valid" : "Invalid");
+    info("[ModManager] GMalloc test passed.");
+    SDK::FMemory::Free(mem);
+    return true;
+}
+
+bool PreLoadCheck()
+{
+    if (!TestAllocator())
+    {
+        error("[ModManager] Issue with allocator instance (how did we not crash yet?)");
+        return false;
+    }
+    return true;
+}
+
+void OnModsLoaded() {}
+
+void OnModsUnloading()
+{
+    JsonHook::Teardown();  // restore ExecFunction/flags before DLL pages are freed
 }
 
 #pragma pop_macro("EOF")

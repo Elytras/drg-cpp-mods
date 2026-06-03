@@ -57,13 +57,14 @@ namespace EasyHook
 
     bool HookManager::RemoveHook(void* target)
     {
-        if (!initialized_) throw std::runtime_error("HookManager not initialized.");
-        if (MH_RemoveHook(target) == MH_OK)
-        {
-            activeHooks_.erase(target);
-            return true;
-        }
-        return false;
+        if (!initialized_) return false;  // nothing to remove; tolerate post-teardown calls
+        const bool ok = (MH_RemoveHook(target) == MH_OK);
+        if (ok) activeHooks_.erase(target);
+        // Reference-counted lifecycle: once the last hook is gone, release MinHook
+        // entirely. No single hook "owns" global teardown.
+        if (activeHooks_.empty())
+            Uninitialize();
+        return ok;
     }
 
     bool HookManager::IsInitialized() const { return initialized_; }

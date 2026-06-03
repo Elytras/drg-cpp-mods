@@ -1,17 +1,20 @@
-﻿#define USEOWNIMPL 0
+// ModManager.cpp — shared mod-load orchestration for both games.
+//
+// Compiled once per consumer (DrgMods / RcMods) against that game's Library.h,
+// like the other SharedLib *.cpp. The few per-game differences are expressed
+// through the policy hooks declared in Commands.h (PreLoadCheck / OnModsLoaded /
+// OnModsUnloading), implemented in each game's Commands.cpp.
 #include "ModManager.h"
 #include "Commands.h"
 #include "Library.h"
 #include "Lib_NetLogConfig.h"
-#if USEOWNIMPL
-#include "UnrealCoreTypes.h"
-#endif
 
 // File-local SDK pollution: this TU does not use math wrappers (FVector etc.),
 // so unqualified SDK type lookup here is unambiguous.
 using namespace SDK;
 
 static inline const constexpr bool UseThreads = false;
+
 namespace Internal
 {
     static bool StartupInfo() {
@@ -44,71 +47,30 @@ namespace Internal
 
         return true;
     }
-    static bool TestAllocator()
-    {
-        constexpr uint32 size = 1024;
-        constexpr const char* testStr = "Hello from GMalloc!\0";
-
-        SDK::UnrealAllocator* allocator = SDK::UnrealAllocator::Get(true);
-        if (!allocator)
-        {
-            error("[ModManager] UnrealAllocator is null");
-            return false;
-        }
-        info("[ModManager] Found GMalloc at {:p} ({})",
-            static_cast<const void*>(allocator),
-            FString(allocator->GetDescriptiveName()).ToString());
-        info("[ModManager] Testing GMalloc...");
-
-        void* mem = SDK::FMemory::Malloc(size);
-        if (!mem)
-        {
-            error("[ModManager] GMalloc allocation failed.");
-            return false;
-        }
-
-        SDK::FMemory::Memcpy(mem, testStr, 21);
-
-        uint64 actualSize = 0;
-        if (!SDK::FMemory::GetAllocSize(mem, actualSize) || actualSize < size)
-        {
-            error("[ModManager] Allocation size validation failed (got {}).", actualSize);
-            SDK::FMemory::Free(mem);
-            return false;
-        }
-
-        info("[ModManager] GMalloc allocation successful.");
-        info("[ModManager] Allocated size: {} bytes", actualSize);
-        info("[ModManager] Test allocation address: {:p}", mem);
-        info("[ModManager] Is Allocator Internally Thread Safe? {}", allocator->IsInternallyThreadSafe() ? "Yes" : "No");
-        info("[ModManager] Test allocation content: {}", std::string(static_cast<char*>(mem), 21));
-        info("[ModManager] Test allocation content validity: {}", std::string(static_cast<char*>(mem)) == testStr ? "Valid" : "Invalid");
-        info("[ModManager] GMalloc test passed.");
-        SDK::FMemory::Free(mem);
-        return true;
-    }
 }
 
 using namespace ::Internal;
-    // =========================================================================
-    // Constructor
-    // =========================================================================
-    ModManager::ModManager()
-    {
-        RegisterCommands(cmdHandler);
-        cmdHandler.Register("retry", [this](const CommandContext&)
-            {
-                GameHooks::ProcessEventHook::Get().SetOnUninstalled([this]() { LoadMods(); });
-                UnloadMods();
-            }, "Reload all mods");
-        cmdHandler.Register("listcmds", [this](const CommandContext& ctx) {
-            SendCommandList(ctx, cmdHandler);
-            }, "List all registered commands (populates CLI autocomplete)");
-        cmdHandler.Register("runcfg", [this](const CommandContext&) {
-            RunConfig(cmdHandler);
-            }, "Re-execute autorun entries from config.yaml");
-    }
 
+// =========================================================================
+// Constructor
+// =========================================================================
+ModManager::ModManager()
+{
+    RegisterCommands(cmdHandler);
+    cmdHandler.Register("retry", [this](const CommandContext&)
+        {
+            // EngineTick is the outermost hook and the last to be torn down —
+            // wait for it to confirm clean shutdown before reinstalling.
+            GameHooks::EngineTickHook::Get().SetOnUninstalled([this]() { LoadMods(); });
+            UnloadMods();
+        }, "Reload all mods");
+    cmdHandler.Register("listcmds", [this](const CommandContext& ctx) {
+        SendCommandList(ctx, cmdHandler);
+        }, "List all registered commands (populates CLI autocomplete)");
+    cmdHandler.Register("runcfg", [this](const CommandContext&) {
+        RunConfig(cmdHandler);
+        }, "Re-execute autorun entries from config.yaml");
+}
 
 // =========================================================================
 // ModManager interface
@@ -120,32 +82,40 @@ void ModManager::Message(const std::string& msg, uint32_t seq)
 
 void ModManager::LoadMods()
 {
-    if (!TestAllocator()) 
+    // Game-specific pre-flight check (DRG: GMalloc sanity test; RC: no-op).
+    if (!PreLoadCheck())
     {
-        error("[ModManager] Issue with allocator instance (how did we not crash yet?)");
+        error("[ModManager] Pre-load check failed. Aborting.");
         return;
     }
+
+    // EngineTick is the outer hook — install it first so its task queue is live
+    // before we enqueue anything. Installing it resolves (and waits for) the
+    // engine UObject.
+    if (!GameHooks::InstallEngineTickHook(VTableLayout::UEngine::Tick))
+    {
+        error("[ModManager] EngineTick hook failed to install (slot {}).",
+              VTableLayout::UEngine::Tick);
+        return;
+    }
+
+    // ProcessEvent (inner) lives at another slot in the SAME engine vtable, so it
+    // can be installed right here now that the engine is resolved — no wait.
     if (!GameHooks::InstallProcessEventHook())
     {
         error("[ModManager] ProcessEvent hook failed to install.");
         return;
     }
-    if (!GameHooks::InstallEngineTickHook(VTableLayout::UEngine::Tick))
-        error("[ModManager] EngineTick hook failed to install (slot {}).", VTableLayout::UEngine::Tick);
-    GameHooks::ProcessEventHook::Get().Enqueue([this]() { LoadModsGameThread(); });
-}
 
+    GameHooks::EngineTickHook::Get().Enqueue([this]() { LoadModsGameThread(); });
+}
 
 void ModManager::LoadModsGameThread()
 {
     info("----------------------------------------");
     info("[ModManager] Starting initialization...");
-    if (!GameHooks::InstallProcessEventHook()) [[unlikely]]
-    {
-        error("[ModManager] ProcessEvent hook failed to install.");
-        return;
-    }
     if (!StartupInfo()) [[unlikely]] return;
+    OnModsLoaded();             // game-specific (RC: BpModLoader::Install)
     InitDefaultCallbacks();
     RunConfig(cmdHandler);
     if constexpr (UseThreads) {
@@ -167,19 +137,25 @@ void ModManager::UnloadMods()
 {
     info("----------------------------------------");
     info("[ModManager] Unloading...");
+    OnModsUnloading();          // game-specific (DRG: JsonHook::Teardown; RC: BpModLoader::Uninstall)
     TickSystem::Reset();
     ResetCallbackHandles();
+    GameHooks::ResetAllToggles();   // forget all HookToggle handles before the hooks tear down
     VarSystem::Clear();
-    JsonHook::Teardown(); // restore ExecFunction/flags before DLL pages are freed
-    GameHooks::EngineTickHook::Get().RequestUninstall();
-    GameHooks::ProcessEventHook::Get().RequestUninstall();
+    // SCO hook is opt-in (installed on demand). Tear it down explicitly so its
+    // trampoline is gone before the DLL unloads and so a reload can re-install it.
+    // Each hook now removes its own MinHook target; EasyHook releases MinHook once
+    // the last hook is gone. Safe no-op if SCO was never installed.
+    GameHooks::StaticConstructObjectHook::Get().RequestUninstall();
+    GameHooks::ProcessEventHook::Get().RequestUninstall();  // inner first
+    GameHooks::EngineTickHook::Get().RequestUninstall();    // outer last — owns the task queue
 
     info("----------------------------------------");
 }
 
 void ModManager::Update(int DeltaTimeMs)
 {
-    GameHooks::ProcessEventHook::Get().Enqueue([this, DeltaTimeMs]()
+    GameHooks::EngineTickHook::Get().Enqueue([this, DeltaTimeMs]()
         {
             UpdateGameThread(DeltaTimeMs);
         });

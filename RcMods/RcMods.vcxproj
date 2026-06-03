@@ -166,9 +166,6 @@
     <ClCompile Include="Main.cpp">
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
-    <ClCompile Include="ModManager.cpp">
-      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
-    </ClCompile>
     <!--
       SharedLib .cpp files compiled INTO RcMods.dll.
 
@@ -200,6 +197,7 @@
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyInspector.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_Scan.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_VarSystem.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\ModManager.cpp" />
     <ClCompile Include="SDK\SDK\Basic.cpp">
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpplatest</LanguageStandard>
     </ClCompile>
@@ -218,7 +216,7 @@
     <ClInclude Include="Library.h" />
     <ClInclude Include="Lib_Utils.h" />
     <ClInclude Include="Lib_VTableInfo.h" />
-    <ClInclude Include="ModManager.h" />
+    <ClInclude Include="$(SolutionDir)SharedLib\ModManager.h" />
     <ClInclude Include="SDK\SDK\Basic.hpp" />
     <ClInclude Include="SDK\SDK\RogueCore_classes.hpp" />
     <ClInclude Include="SDK\UnrealContainers.hpp" />

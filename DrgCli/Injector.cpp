@@ -647,11 +647,24 @@ void DllLogThread(LogBuffer* pLog, HANDLE hLogEvent)
     }
 }
 
+// Sleep up to `ms`, but return early (within ~50ms) once g_Running clears, so a
+// profile switch — which join()s these poll threads — isn't stalled for a full
+// poll interval. Identical total delay to Sleep(ms) during normal operation.
+static void InterruptibleSleep(DWORD ms)
+{
+    constexpr DWORD step = 50;
+    for (DWORD elapsed = 0; elapsed < ms && g_Running.load(std::memory_order_relaxed); elapsed += step)
+    {
+        const DWORD chunk = (ms - elapsed < step) ? (ms - elapsed) : step;
+        Sleep(chunk);
+    }
+}
+
 void HotReloadThread()
 {
     while (g_Running)
     {
-        Sleep(kWatchPollMs);
+        InterruptibleSleep(kWatchPollMs);
         if (!DllActive() || g_SourceDllPath.empty()) continue;
 
         if (SourceDllUpdated())
@@ -668,7 +681,7 @@ void ProcessWatcherThread()
 {
     while (g_Running)
     {
-        Sleep(kWatchPollMs);
+        InterruptibleSleep(kWatchPollMs);
 
         InjectionState state = g_InjState.load();
 

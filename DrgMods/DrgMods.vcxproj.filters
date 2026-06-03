@@ -63,7 +63,7 @@
     <ClCompile Include="Main.cpp">
       <Filter>Source Files\DLL Impl</Filter>
     </ClCompile>
-    <ClCompile Include="ModManager.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\ModManager.cpp">
       <Filter>Source Files\DLL Impl</Filter>
     </ClCompile>
     <ClCompile Include="Commands.cpp">
@@ -161,7 +161,7 @@
     <ClInclude Include="Library.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
-    <ClInclude Include="ModManager.h">
+    <ClInclude Include="$(SolutionDir)SharedLib\ModManager.h">
       <Filter>Header Files\DLL Headers</Filter>
     </ClInclude>
     <ClInclude Include="Commands.h">

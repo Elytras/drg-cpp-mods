@@ -117,6 +117,7 @@
     <ClInclude Include="Lib_PropertyInspector.h" />
     <ClInclude Include="Lib_VarSystem.h" />
     <ClInclude Include="Lib_VTableHook.h" />
+    <ClInclude Include="ModManager.h" />
     <ClInclude Include="StringLib.h" />
     <ClInclude Include="UnrealCoreTypes.h" />
   </ItemGroup>
@@ -158,6 +159,9 @@
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="Lib_VarSystem.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="ModManager.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
   </ItemGroup>

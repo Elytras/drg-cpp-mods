@@ -13,6 +13,14 @@ void InitDefaultCallbacks();
 // Zero all callback handles — call in UnloadMods before RequestUninstall
 void ResetCallbackHandles();
 
+// ── Game policy hooks — called by the shared ModManager ──────────────────────
+// PreLoadCheck:    worker thread, before any hook install; return false to abort.
+// OnModsLoaded:    game thread, after hooks installed, before InitDefaultCallbacks.
+// OnModsUnloading: start of UnloadMods, before hook teardown.
+bool PreLoadCheck();
+void OnModsLoaded();
+void OnModsUnloading();
+
 // Send the list of registered commands and their descriptions back to the CLI for help display and autocompletion.
 void SendCommandList(const CommandContext& ctx, const CommandHandler& handler);
 

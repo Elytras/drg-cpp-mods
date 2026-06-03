@@ -34,6 +34,11 @@ extern ResponseBuffer* g_pRespBuffer;
 extern HANDLE          g_hRespEvent;
 extern void SendResponse(uint32_t cmdSeq, const std::string& msg);
 
+// Defined in Lib_ObjectFactory.h (pulled in before this header via Library.h).
+// Forward-declared here so the SCO hook's callback signature compiles without
+// making this widely-included header depend on ObjectFactory.
+struct FStaticConstructObjectParameters;
+
 namespace GameHooks
 {
     enum class ExecutionTiming  { Before, After, BeforeAndAfter };
@@ -52,8 +57,6 @@ namespace GameHooks
     //   void  StoreList(CallbackList)    — commit a new list (may rebuild dispatch cache)
     //   void  StoreEmptyState()          — fast path: store an empty state
     //   bool  DoUninstall()              — hook-specific teardown; must call DoUninstallCommon()
-    //   void  OnBeforeHookRemoval()      — [optional] called inside DoUninstallCommon before
-    //                                      hookInstalled_ is cleared (e.g. EasyHook::Shutdown)
     // =========================================================================
 
     template<typename Derived>
@@ -70,6 +73,7 @@ namespace GameHooks
         std::vector<std::function<void()>> taskQueue_;
         std::function<void()>              onUninstalled_;
         CallbackHandle                     nextHandle_{ 1 };
+        void*                              hookAddr_{ nullptr };  // MinHook target; set by Derived::Install, removed on uninstall
 
         HookBase() = default;
 
@@ -91,10 +95,6 @@ namespace GameHooks
             }
         }
 
-        // Override in Derived to run hook-specific cleanup (e.g. EasyHook::Shutdown).
-        // Default is a no-op.
-        void OnBeforeHookRemoval() {}
-
         bool DoUninstallCommon()
         {
             DBG_ASSERT(!hookInstalled_.load() || pendingUninstall_.load(), "Uninstall without pending flag");
@@ -104,7 +104,15 @@ namespace GameHooks
             }
             DBG_ASSERT(executionDepth_.load(std::memory_order_relaxed) == 0,
                 "DoUninstall called with non-zero execution depth");
-            static_cast<Derived*>(this)->OnBeforeHookRemoval();
+            // Reference-counted teardown: each hook removes only ITS OWN MinHook
+            // target. EasyHook releases MinHook once the last hook is gone, so no
+            // hook "owns" global teardown. The executionDepth_ assert above
+            // guarantees no thread is inside this hook's trampoline right now.
+            if (hookAddr_)
+            {
+                EasyHook::HookManager::Get().RemoveHook(hookAddr_);
+                hookAddr_ = nullptr;
+            }
             hookInstalled_.store(false);
             DBG_ASSERT(!hookInstalled_.load(), "Failed to clear hookInstalled flag");
             if (onUninstalled_)
@@ -319,7 +327,6 @@ namespace GameHooks
         CallbackList CloneList() const;
         void StoreList(CallbackList list);  // rebuilds dispatch cache then commits
         void StoreEmptyState();
-        void OnBeforeHookRemoval();         // calls EasyHook::Shutdown
         bool DoUninstall();
 
     public:
@@ -455,6 +462,151 @@ namespace GameHooks
     CallbackHandle OnEngineTick(EngineTickCallback cb,
         ExecutionTiming t = ExecutionTiming::Before,
         ExecutionMode mode = ExecutionMode::CallOriginal);
+
+    // =========================================================================
+    // StaticConstructObjectHook — hook on StaticConstructObject_Internal.
+    //
+    //   UObject* StaticConstructObject_Internal(FStaticConstructObjectParameters&)
+    //
+    // Fires on (almost) every UObject construction, so it is a HOT path and may
+    // run on non-game threads (async loading constructs objects too). Keep
+    // callbacks cheap and filter early on params->Class. Re-entrancy is guarded
+    // per-thread, so constructing objects inside a callback is safe — the nested
+    // construction simply won't re-dispatch.
+    //
+    // No per-callback filters (like EngineTickHook): every registered callback
+    // fires for every construction at the requested timing.
+    //   Before: params populated, result == nullptr (not constructed yet).
+    //   After:  params populated, result == the freshly constructed object.
+    //
+    // The target address comes from ObjectFactory::GetStaticConstructObject()
+    // (per-game RVA / call-site signature in GameOffsets.h). Install() returns
+    // false and logs once when the address is unresolved for this game (e.g. RC
+    // until its offset is filled in) — every other hook keeps working.
+    // =========================================================================
+
+    using StaticConstructObjectCallback =
+        std::function<void(FStaticConstructObjectParameters*, SDK::UObject*)>;
+
+    class StaticConstructObjectHook : public HookBase<StaticConstructObjectHook>
+    {
+        friend class HookBase<StaticConstructObjectHook>;
+
+    private:
+        struct CallbackEntry
+        {
+            CallbackHandle                handle;
+            StaticConstructObjectCallback callback;
+            ExecutionTiming               timing;
+            ExecutionMode                 mode;
+            bool                          enabled;
+
+            CallbackEntry(CallbackHandle h, StaticConstructObjectCallback cb,
+                          ExecutionTiming tim, ExecutionMode mod)
+                : handle(h), callback(std::move(cb))
+                , timing(tim), mode(mod), enabled(true)
+            {
+                DBG_ASSERT(h > 0,    "Invalid callback handle");
+                DBG_ASSERT(callback, "Callback function is null");
+            }
+        };
+
+        using CallbackList = std::vector<CallbackEntry>;
+
+        static SDK::UObject* (*OriginalSCO)(FStaticConstructObjectParameters*);
+
+        std::atomic<std::shared_ptr<const CallbackList>> stateOwner_{};
+
+        StaticConstructObjectHook();
+        void StoreState(std::shared_ptr<const CallbackList> s);
+        static bool RunBeforePass(const CallbackList& list, FStaticConstructObjectParameters* p);
+        static void RunAfterPass (const CallbackList& list, FStaticConstructObjectParameters* p, SDK::UObject* result);
+        static SDK::UObject* HookedSCO(FStaticConstructObjectParameters* params);
+
+        // ── CRTP interface ───────────────────────────────────────────────────
+        CallbackList CloneList() const;
+        void StoreList(CallbackList list);
+        void StoreEmptyState();
+        bool DoUninstall();
+
+    public:
+        bool Install();
+
+        CallbackHandle AddCallback(StaticConstructObjectCallback cb,
+            ExecutionTiming timing = ExecutionTiming::After,
+            ExecutionMode  mode   = ExecutionMode::CallOriginal);
+    };
+
+    // ── Free convenience functions for the SCO hook ──────────────────────────
+
+    bool InstallStaticConstructObjectHook();
+
+    CallbackHandle OnStaticConstructObject(StaticConstructObjectCallback cb,
+        ExecutionTiming t = ExecutionTiming::After,
+        ExecutionMode mode = ExecutionMode::CallOriginal);
+
+    // =========================================================================
+    // HookToggle<Hook> — a toggleable hook-callback registration.
+    //
+    // Wraps the "store a CallbackHandle; register on enable, remove on disable"
+    // dance repeated all over Commands.cpp. Bind it to a hook type and give it a
+    // registrar that returns a handle:
+    //
+    //   static HookToggle<ProcessEventHook> g_tick{
+    //       [] { return OnProcessEventByName("ReceiveTick", &OnTick); } };
+    //   ...
+    //   g_tick.Toggle();          // flips, returns the resulting enabled state
+    //   g_tick.Enable();  g_tick.Disable();  g_tick.Set(on);  g_tick.IsEnabled();
+    //
+    // Disable() removes via Hook::Get().RemoveCallback(); the handle resets to 0 so
+    // Enable() re-registers cleanly. Every live toggle is reset by ResetAllToggles()
+    // (called from ModManager::UnloadMods), so you no longer hand-zero handles.
+    // =========================================================================
+
+    class ToggleBase
+    {
+    public:
+        // Forget the current handle WITHOUT removing the callback (the hook
+        // teardown that follows clears it). After this, IsEnabled() == false.
+        virtual void Reset() noexcept = 0;
+    protected:
+        ToggleBase();
+        ~ToggleBase();
+        ToggleBase(const ToggleBase&)            = delete;
+        ToggleBase& operator=(const ToggleBase&) = delete;
+    };
+
+    // Reset every live HookToggle (forget handles). Called on hook teardown/reload.
+    void ResetAllToggles() noexcept;
+
+    template<typename Hook>
+    class HookToggle : public ToggleBase
+    {
+        CallbackHandle                  handle_ = 0;
+        std::function<CallbackHandle()> register_;
+
+    public:
+        explicit HookToggle(std::function<CallbackHandle()> registrar)
+            : register_(std::move(registrar)) {}
+
+        bool IsEnabled() const noexcept { return handle_ != 0; }
+
+        // Each returns the resulting enabled state.
+        bool Enable()
+        {
+            if (!handle_ && register_) handle_ = register_();
+            return handle_ != 0;
+        }
+        bool Disable()
+        {
+            if (handle_) { Hook::Get().RemoveCallback(handle_); handle_ = 0; }
+            return false;
+        }
+        bool Set(bool on) { return on ? Enable() : Disable(); }
+        bool Toggle()     { return handle_ ? Disable() : Enable(); }
+
+        void Reset() noexcept override { handle_ = 0; }
+    };
 
 } // namespace GameHooks
 
