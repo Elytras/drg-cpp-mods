@@ -20,6 +20,10 @@ bool PreLoadCheck();
 void OnModsLoaded();
 void OnModsUnloading();
 
+// OnWorldChanged: game thread, called by the shared world-watcher whenever the
+// active UWorld pointer changes. Invalidate world-scoped caches here.
+void OnWorldChanged();
+
 // Send the list of registered commands and their descriptions back to the CLI for help display and autocompletion.
 void SendCommandList(const CommandContext& ctx, const CommandHandler& handler);
 

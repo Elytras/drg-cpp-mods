@@ -464,56 +464,81 @@ void UnloadDLL(bool suppress)
     }
 
     std::wstring copyFilename = std::filesystem::path(g_CopyDllPath).filename().wstring();
-    HMODULE      hRemoteModule = NULL;
-    HANDLE       hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
 
-    if (hSnap != INVALID_HANDLE_VALUE)
+    // Drain *all* references to the copy module. FreeLibrary only drops a
+    // single reference per call. If the copy DLL was ever loaded more than once
+    // (a watcher inject racing a manual 'load', or a hot-reload window), the
+    // module's refcount is >= 2, so one FreeLibrary leaves it still mapped —
+    // which keeps the *_copy.dll file locked. The next injection then can't
+    // overwrite the copy (err 32) and may load a stale/half-written image
+    // (Bad Image 0xc000012f). Loop until the module is no longer present.
+    constexpr int kMaxFreePasses = 16;
+    bool   stillMapped = true;
+    int    passes      = 0;
+    for (; passes < kMaxFreePasses; ++passes)
     {
-        MODULEENTRY32W entry{ .dwSize = sizeof(entry) };
-        if (Module32FirstW(hSnap, &entry))
+        HMODULE hRemoteModule = NULL;
+        HANDLE  hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+        if (hSnap != INVALID_HANDLE_VALUE)
         {
-            do {
-                if (!_wcsicmp(entry.szModule, copyFilename.c_str()))
-                {
-                    hRemoteModule = entry.hModule;
-                    break;
-                }
-            } while (Module32NextW(hSnap, &entry));
+            MODULEENTRY32W entry{ .dwSize = sizeof(entry) };
+            if (Module32FirstW(hSnap, &entry))
+            {
+                do {
+                    if (!_wcsicmp(entry.szModule, copyFilename.c_str()))
+                    {
+                        hRemoteModule = entry.hModule;
+                        break;
+                    }
+                } while (Module32NextW(hSnap, &entry));
+            }
+            CloseHandle(hSnap);
         }
-        CloseHandle(hSnap);
-    }
 
-    if (!hRemoteModule)
-    {
-        Log("UnloadDLL: DLL copy not found in target — already unloaded?");
-        CloseHandle(g_hProcess); g_hProcess = NULL;
-        g_InjState.store(suppress ? InjectionState::Suppressed : InjectionState::Watching);
-        return;
-    }
-
-    HANDLE hThread = CreateRemoteThread(g_hProcess, nullptr, 0,
-        reinterpret_cast<LPTHREAD_START_ROUTINE>(FreeLibrary),
-        hRemoteModule, 0, nullptr);
-
-    if (!hThread)
-    {
-        Log("UnloadDLL: CreateRemoteThread failed: " + std::to_string(GetLastError()));
-    }
-    else
-    {
-        DWORD w = WaitForSingleObject(hThread, 5000);
-        if (w == WAIT_OBJECT_0)
+        if (!hRemoteModule)
         {
-            DWORD ec = 0;
-            GetExitCodeThread(hThread, &ec);
-            Log(ec ? "UnloadDLL: FreeLibrary succeeded." : "UnloadDLL: FreeLibrary returned FALSE.");
+            stillMapped = false;
+            if (passes == 0)
+                Log("UnloadDLL: DLL copy not found in target — already unloaded?");
+            else
+                Log("UnloadDLL: copy fully unmapped after " + std::to_string(passes) +
+                    (passes == 1 ? " pass." : " passes."));
+            break;
         }
-        else if (w == WAIT_TIMEOUT)
+
+        HANDLE hThread = CreateRemoteThread(g_hProcess, nullptr, 0,
+            reinterpret_cast<LPTHREAD_START_ROUTINE>(FreeLibrary),
+            hRemoteModule, 0, nullptr);
+        if (!hThread)
+        {
+            Log("UnloadDLL: CreateRemoteThread failed: " + std::to_string(GetLastError()));
+            break;
+        }
+
+        DWORD w  = WaitForSingleObject(hThread, 5000);
+        DWORD ec = 0;
+        if (w == WAIT_OBJECT_0) GetExitCodeThread(hThread, &ec);
+        CloseHandle(hThread);
+
+        if (w == WAIT_TIMEOUT)
         {
             Log("UnloadDLL: FreeLibrary thread timed out.");
+            break;
         }
-        CloseHandle(hThread);
+        if (!ec)
+        {
+            // FreeLibrary returned FALSE — module handle no longer valid; treat as gone.
+            Log("UnloadDLL: FreeLibrary returned FALSE — assuming unmapped.");
+            stillMapped = false;
+            break;
+        }
+        Log("UnloadDLL: FreeLibrary succeeded (pass " + std::to_string(passes + 1) + ").");
+        Sleep(50); // let the loader finish unmapping before re-checking
     }
+
+    if (stillMapped)
+        Log("UnloadDLL: WARNING — copy module still mapped after " +
+            std::to_string(passes) + " free passes; reinjection may fail until it unloads.");
 
     CloseHandle(g_hProcess); g_hProcess = NULL;
     g_InjState.store(suppress ? InjectionState::Suppressed : InjectionState::Watching);
@@ -613,6 +638,50 @@ bool UnloadDumper7()
 // ─────────────────────────────────────────────────────────────────────────────
 //  Background threads
 // ─────────────────────────────────────────────────────────────────────────────
+
+bool LaunchGame()
+{
+    if (!g_Profile->exePath || g_Profile->exePath[0] == L'\0')
+    {
+        Log("Launch: no exe path configured for this profile.");
+        return false;
+    }
+    if (GetProcId(g_Profile->targetProcess))
+    {
+        Log("Launch: game already running — use 'load' to inject.");
+        return false;
+    }
+
+    // Working dir = the exe's folder so the game's steam_appid.txt (placed next to
+    // the exe) is read and Steam initialises on a direct launch.
+    const std::wstring workDir =
+        std::filesystem::path(g_Profile->exePath).parent_path().wstring();
+
+    // CreateProcessW needs a mutable command line:  "exe" [args]
+    std::wstring cmdline = L"\"";
+    cmdline += g_Profile->exePath;
+    cmdline += L"\"";
+    if (g_Profile->launchArgs && g_Profile->launchArgs[0] != L'\0')
+    {
+        cmdline += L' ';
+        cmdline += g_Profile->launchArgs;
+    }
+    std::vector<wchar_t> mutableCmd(cmdline.begin(), cmdline.end());
+    mutableCmd.push_back(L'\0');
+
+    STARTUPINFOW        si{ sizeof(si) };
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(g_Profile->exePath, mutableCmd.data(), nullptr, nullptr,
+                        FALSE, 0, nullptr, workDir.c_str(), &si, &pi))
+    {
+        Log("Launch: CreateProcess failed (err " + std::to_string(GetLastError()) + ").");
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    Log("Launched " + std::string(g_Profile->targetProcessNarrow) + " — watcher will auto-inject.");
+    return true;
+}
 
 void DllLogThread(LogBuffer* pLog, HANDLE hLogEvent)
 {

@@ -6,6 +6,7 @@
 #include "Aim.h"
 #include "Lib_Utils.h"
 #include "Lib_NetLogConfig.h"
+#include "SharedCommands.h"
 
 #include <array>
 #include <atomic>
@@ -718,12 +719,18 @@ namespace Scan
 
     void DoScan()
     {
+        // Clear up-front so any early return leaves an empty (not stale) cache —
+        // stale UObject*/UFunction* from a previous world are a crash risk.
+        State::ScannedFunctions.clear();
+        State::ScannedFunctionVariantsByName.clear();
+
+        SDK::UWorld* world = GetWorld();
+        if (!world) { warn("[scan] No world (transitioning?) — skipping scan."); return; }
+
         SDK::APlayerCharacter* Local = GetLocalPlayer();
         if (!Local) { warn("[scan] No local player."); return; }
         SDK::TArray<SDK::AActor*> AllActors;
-        SDK::UGameplayStatics::GetAllActorsOfClass(GetWorld(), SDK::AActor::StaticClass(), &AllActors);
-        State::ScannedFunctions.clear();
-        State::ScannedFunctionVariantsByName.clear();
+        SDK::UGameplayStatics::GetAllActorsOfClass(world, SDK::AActor::StaticClass(), &AllActors);
         int inserted = 0;
         auto TryScanObject = [&](SDK::UObject* Obj)
             {
@@ -776,30 +783,6 @@ namespace Scan
 // =========================================================================
 namespace Callbacks
 {
-    void LogAllProcessEvents(SDK::UObject* Object, SDK::UFunction* Function, void*)
-    {
-        if (!Object)
-        {
-            trace("[ProcessEvent] SDK::UObject=nullptr, Function={}",
-                Function ? Function->GetName() : "nullptr");
-            return;
-        }
-
-        std::string objectName = Object->GetName();
-        std::string objectClassName = Object->Class ? Object->Class->GetName() : "?";
-        std::string functionName = Function ? Function->GetName() : "nullptr";
-
-        trace("[ProcessEvent] {}::{} -> {}", objectClassName, objectName, functionName);
-    }
-
-    void TickListener(SDK::UObject* Object, SDK::UFunction* Function, void*)
-    {
-        static SDK::UObject* TrackedObject = nullptr;
-        if (!TrackedObject || !IsValidRaw(TrackedObject)) TrackedObject = Object;
-        if (Object != TrackedObject) return;
-        info("Tick: {} -> {}", Object->GetName(), Function ? Function->GetName() : "None");
-    }
-
     void DanceIntercept(SDK::UObject* Object, SDK::UFunction*, void* Params)
     {
         auto* Args = static_cast<SDK::Params::PlayerCharacter_Server_SetIsDancing*>(Params);
@@ -878,34 +861,9 @@ namespace Callbacks
 // =========================================================================
 namespace Commands
 {
-    void CmdSet(const ctx& ctx) {
-        using namespace VarSystem;
-        Cmd_Set(ctx);
-    }
-    void CmdGet(const ctx& ctx) {
-        using namespace VarSystem;
-        Cmd_Get(ctx);
-    }
-    void CmdVars(const ctx& ctx) {
-        using namespace VarSystem;
-        Cmd_Vars(ctx);
-    }
-    void CmdUnset(const ctx& ctx) {
-        using namespace VarSystem;
-        Cmd_Unset(ctx);
-    }
 
     void MakeJSON(const CommandContext& JS)
     {}
-
-    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_logAllEvents{
-        [] { return GameHooks::OnProcessEventAll(Callbacks::LogAllProcessEvents); } };
-
-    void LogProcessEvents(const CommandContext&)
-    {
-        info("[cmd:logallevents] {}", s_logAllEvents.Toggle()
-            ? "Logging ALL ProcessEvent calls" : "ProcessEvent logging disabled");
-    }
 
     //void tpbars(const ctx&){
     //    if (!IsValidOf<SDK::APlayerCharacter>(GetLocalPlayer())) return;
@@ -1185,21 +1143,6 @@ namespace Commands
         for (auto* player : Players) if (player != Local) Untwerk(player);
     }
 
-    void FindClass(const CommandContext& ctx)
-    {
-        const std::string needle = ctx.Arg(1);
-        for (int i = 0; i < SDK::UObject::GObjects->Num(); ++i)
-        {
-            auto* obj = SDK::UObject::GObjects->GetByIndex(i);
-            if (!obj || !obj->IsA(SDK::UClass::StaticClass())) continue;
-            std::string n = obj->GetName();
-            if (PropertyInspector::NameMatches(n, needle, true))
-                info("  [class] {} -> CDO: {}", n,
-                    static_cast<SDK::UClass*>(obj)->ClassDefaultObject
-                    ? static_cast<SDK::UClass*>(obj)->ClassDefaultObject->GetName() : "null");
-        }
-    }
-
     void Inventory(const CommandContext& = State::dummyCtx)
     {
         auto* Player = GetLocalPlayer();
@@ -1232,50 +1175,6 @@ namespace Commands
     }
 
     void Prop(const CommandContext& ctx) { PropertyInspector::DispatchCommand(ctx); }
-
-    void Exec(const CommandContext& ctx)
-    {
-        if (ctx.ArgCount() < 2) { warn("[cmd:exec] Usage: exec <command>"); return; }
-        std::string cmd;
-        for (size_t i = 1; i < ctx.args.size(); ++i) { if (i > 1) cmd += ' '; cmd += ctx.args[i]; }
-        ::Exec(cmd);
-    }
-
-    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_tickListener{
-        [] { return GameHooks::OnProcessEventByNameAndClass(
-            "ReceiveTick", SDK::AActor::StaticClass(), Callbacks::TickListener); } };
-
-    void StopTick(const CommandContext& = State::dummyCtx)
-    {
-        info("[cmd:stoptick] tick listener {}", s_tickListener.Toggle() ? "enabled" : "disabled");
-    }
-
-    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_beginPlayWatcher{
-        [] { return GameHooks::OnProcessEventByNameAndClass(
-            "ReceiveBeginPlay", SDK::AActor::StaticClass(),
-            [](SDK::UObject* object, SDK::UFunction*, void*)
-            {
-                if (!object || !object->Class) return;
-                for (const wchar_t* name : { L"Core_C", L"NoVines_C", L"TickManager_C" })
-                    if (IsChildOfByName(object, name))
-                    {
-                        info("[BeginPlay] {} spawned: {}",
-                            object->Class->Name.ToString(), object->Name.ToString());
-                        break;
-                    }
-            }); } };
-
-    void BeginPlay(const CommandContext& = State::dummyCtx)
-    {
-        info("[beginplay] {}", s_beginPlayWatcher.Toggle() ? "Watcher registered" : "disabled");
-    }
-
-    void ScanAllClasses(const CommandContext& = State::dummyCtx)
-    {
-        // Delegates to the shared SharedLib implementation (Lib_Scan.cpp) — same
-        // GObjects CDO sweep for Net+NetServer RPCs that RcMods::ScanAll uses.
-        Scan::ScanAllClasses();
-    }
 
     void ScanReplicated(const CommandContext& ctx)
     {
@@ -1381,6 +1280,9 @@ namespace Commands
             for (auto it = rest.begin(); it != sep; ++it) { if (!funcName.empty()) funcName += ' '; funcName += *it; }
             rawArgs = { sep + 1, rest.end() };
         }
+        // Rescan only on a cache miss. A world change clears the cache via
+        // OnWorldChanged(), so the next call misses and rebinds live owners; the
+        // IsUsable gate below catches any residual staleness before ProcessEvent.
         if (!State::ScannedFunctions.contains(funcName) &&
             !State::ScannedFunctionVariantsByName.contains(funcName))
         {
@@ -1417,34 +1319,38 @@ namespace Commands
                         return ResolveUniqueVariant(vit->second[0]);
                     };
 
+                // A cached target is only safe to call if BOTH the owner object and
+                // the UFunction are still live. Raw pointers can dangle after a world
+                // change (and the freed slot may be reused), so validate before use.
+                auto IsUsable = [](State::ScannedFunction* c) -> bool
+                {
+                    return c && c->Owner && IsValidRaw(c->Owner) && IsValid(c->Owner)
+                        && IsInActiveWorld(c->Owner) && IsValidOf<SDK::UFunction>(c->Func);
+                };
+
                 State::ScannedFunction* candidate = ResolveUniqueVariant(funcName);
                 if (!candidate)
                     candidate = ResolveByBaseName(funcName);
                 if (!candidate) return nullptr;
 
-                auto& [Func, Owner, FunctionName, OwnerName, OwnerClassName, ExplicitName] = *candidate;
-                if (!Owner || !IsValidRaw(Owner) || !IsValid(Owner) || !IsInActiveWorld(Owner))
+                if (!IsUsable(candidate))
                 {
-                    const std::string explicitName = ExplicitName;
-                    const std::string functionName = FunctionName;
-                    warn("[cmd:call] Owner stale or from old world for '{}'; rescanning.", funcName);
-                    Scan::DoScan();
-                    candidate = ResolveUniqueVariant(explicitName);
-                    if (!candidate)
-                        candidate = ResolveByBaseName(functionName);
-                    if (!candidate) return nullptr;
-                }
-
-                if (!IsValidOf<SDK::UFunction>(candidate->Func))
-                {
+                    // Copy lookup keys before DoScan() clears/rebuilds the map and
+                    // invalidates `candidate` (a pointer into it).
                     const std::string explicitName = candidate->ExplicitName;
                     const std::string functionName = candidate->FunctionName;
-                    warn("[cmd:call] SDK::UFunction stale for '{}'; rescanning.", funcName);
+                    warn("[cmd:call] cached target stale for '{}' (world change?); rescanning.", funcName);
                     Scan::DoScan();
                     candidate = ResolveUniqueVariant(explicitName);
                     if (!candidate)
                         candidate = ResolveByBaseName(functionName);
-                    if (!candidate) return nullptr;
+                }
+
+                // Final gate: never hand back a target we cannot safely ProcessEvent on.
+                if (!IsUsable(candidate))
+                {
+                    warn("[cmd:call] '{}' could not be resolved to a live object; aborting.", funcName);
+                    return nullptr;
                 }
 
                 return candidate;
@@ -2129,164 +2035,6 @@ namespace Commands
         info("[cmd:infiniteammo] {}", State::infiniteAmmoEnabled ? "Enabled" : "Disabled");
     }
 
-    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_logNetClient{
-        [] {
-            // Re-read config.yaml each time the command is (re-)enabled so edits
-            // to the skip list take effect without restarting.
-            const auto cfg = NetLogConfig::Load();
-            std::unordered_set<SDK::FName> skipList;
-            skipList.reserve(cfg.netSkip.size());
-            for (const auto& s : cfg.netSkip)
-                skipList.emplace(StringLib::ToWide(s).c_str());
-
-            info("[cmd:lognetclient] skip list: {} entr{}",
-                 skipList.size(), skipList.size() == 1 ? "y" : "ies");
-
-            return GameHooks::OnProcessEventAll(
-                [skipList = std::move(skipList)](SDK::UObject* Object, SDK::UFunction* Function, void* Params)
-                {
-                    if (!Object || !Function) return;
-                    const auto ff = static_cast<SDK::EFunctionFlags>(Function->FunctionFlags);
-                    if ((!(ff & SDK::EFunctionFlags::NetClient) &&
-                         !(ff & SDK::EFunctionFlags::NetMulticast)) ||
-                        skipList.count(Function->Name) > 0) return;
-
-                    const std::string callerClass =
-                        Object->Class ? Object->Class->GetName() : "?";
-                    const std::string callerName  = Object->GetName();
-
-                    SDK::UObject* outer = Object->Outer;
-                    const bool hasOwner =
-                        outer && outer->Class &&
-                        outer->IsA(SDK::AActor::StaticClass()) &&
-                        outer != Object;
-
-                    const bool isMulticast =
-                        static_cast<bool>(ff & SDK::EFunctionFlags::NetMulticast);
-                    const char* tag = isMulticast ? "Multicast" : "NetClient";
-
-                    std::string paramStr;
-                    if (Params)
-                    {
-                        bool firstArg = true;
-                        for (SDK::FField* field : SDK::FFieldRange(Function->ChildProperties))
-                        {
-                            if (!SDK::FieldCast::IsA<SDK::FProperty>(field)) continue;
-                            auto* prop = static_cast<SDK::FProperty*>(field);
-                            const auto pf = static_cast<SDK::EPropertyFlags>(prop->PropertyFlags);
-                            if (!(pf & SDK::EPropertyFlags::Parm)) continue;
-                            if (  pf & SDK::EPropertyFlags::ReturnParm) continue;
-                            if (!firstArg) paramStr += ", ";
-                            firstArg = false;
-                            paramStr += prop->Name.ToString();
-                            paramStr += '=';
-                            paramStr += GetFieldValueAsString(reinterpret_cast<uintptr_t>(Params), field);
-                        }
-                    }
-
-                    if (hasOwner)
-                        info("[{}] {}({}) | caller: {}::{} (owner: {})",
-                             tag, Function->GetName(), paramStr,
-                             callerClass, callerName,
-                             outer->GetName());
-                    else
-                        info("[{}] {}({}) | caller: {}::{}",
-                             tag, Function->GetName(), paramStr,
-                             callerClass, callerName);
-                },
-                GameHooks::ExecutionTiming::Before);
-        }
-    };
-
-    void LogNetClient(const CommandContext& = State::dummyCtx)
-    {
-        info("[cmd:lognetclient] {}", s_logNetClient.Toggle()
-            ? "enabled — logging all NetClient + NetMulticast RPCs" : "disabled");
-    }
-
-    static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_logNetServer{
-        [] {
-            const auto cfg = NetLogConfig::Load();
-            std::unordered_set<SDK::FName> skipList;
-            skipList.reserve(cfg.netSkip.size());
-            for (const auto& s : cfg.netSkip)
-                skipList.emplace(StringLib::ToWide(s).c_str());
-
-            info("[cmd:lognetserver] skip list: {} entr{}",
-                 skipList.size(), skipList.size() == 1 ? "y" : "ies");
-
-            return GameHooks::OnProcessEventAll(
-                [skipList = std::move(skipList)](SDK::UObject* Object, SDK::UFunction* Function, void* Params)
-                {
-                    if (!Object || !Function) return;
-                    const auto ff = static_cast<SDK::EFunctionFlags>(Function->FunctionFlags);
-                    if (!(ff & SDK::EFunctionFlags::NetServer) ||
-                        skipList.count(Function->Name) > 0) return;
-
-                    const std::string callerClass =
-                        Object->Class ? Object->Class->GetName() : "?";
-                    const std::string callerName = Object->GetName();
-
-                    SDK::UObject* outer = Object->Outer;
-                    const bool hasOwner =
-                        outer && outer->Class &&
-                        outer->IsA(SDK::AActor::StaticClass()) &&
-                        outer != Object;
-
-                    std::string paramStr;
-                    if (Params)
-                    {
-                        bool firstArg = true;
-                        for (SDK::FField* field : SDK::FFieldRange(Function->ChildProperties))
-                        {
-                            if (!SDK::FieldCast::IsA<SDK::FProperty>(field)) continue;
-                            auto* prop = static_cast<SDK::FProperty*>(field);
-                            const auto pf = static_cast<SDK::EPropertyFlags>(prop->PropertyFlags);
-                            if (!(pf & SDK::EPropertyFlags::Parm)) continue;
-                            if (  pf & SDK::EPropertyFlags::ReturnParm) continue;
-                            if (!firstArg) paramStr += ", ";
-                            firstArg = false;
-                            paramStr += prop->Name.ToString();
-                            paramStr += '=';
-                            paramStr += GetFieldValueAsString(reinterpret_cast<uintptr_t>(Params), field);
-                        }
-                    }
-
-                    if (hasOwner)
-                        info("[NetServer] {}({}) | caller: {}::{} (owner: {})",
-                             Function->GetName(), paramStr,
-                             callerClass, callerName,
-                             outer->GetName());
-                    else
-                        info("[NetServer] {}({}) | caller: {}::{}",
-                             Function->GetName(), paramStr,
-                             callerClass, callerName);
-                },
-                GameHooks::ExecutionTiming::Before);
-        }
-    };
-
-    void LogNetServer(const CommandContext& = State::dummyCtx)
-    {
-        info("[cmd:lognetserver] {}", s_logNetServer.Toggle()
-            ? "enabled — logging all NetServer RPCs" : "disabled");
-    }
-
-    void ReloadNetLog(const CommandContext& = State::dummyCtx)
-    {
-        const bool clientOn = s_logNetClient.IsEnabled();
-        const bool serverOn = s_logNetServer.IsEnabled();
-
-        if (!clientOn && !serverOn)
-        {
-            info("[cmd:reloadnetlog] neither logger is active — nothing to reload");
-            return;
-        }
-
-        // Toggle off then on for each active logger so the fresh config is picked up.
-        if (clientOn) { LogNetClient(State::dummyCtx); LogNetClient(State::dummyCtx); }
-        if (serverOn) { LogNetServer(State::dummyCtx); LogNetServer(State::dummyCtx); }
-    }
 }
 
 namespace Binds {
@@ -2324,6 +2072,10 @@ void RegisterCommands(CommandHandler& handler)
 {
     using namespace VarSystem;
 
+    // Shared, game-agnostic commands: lognet*, reloadnetlog, exec, scanall, findclass,
+    // logallevents, stoptick, get/set/unset/vars.
+    RegisterSharedCommands(handler);
+
     // Chat
     handler.Register("logchat", Commands::LogChat, "Chat", R"(Toggle chat message logging)");
     handler.Register("say", Commands::Say, "Chat", R"(Send message to chat: say [sender] <message>)");
@@ -2336,10 +2088,8 @@ void RegisterCommands(CommandHandler& handler)
     handler.Register("spawnmatdump", Commands::SpawnAndDumpMaterials, "Enemies", R"(Dump material names for all enemy descriptors x biomes: spawnmatdump [delay_ms])");
 
     // Inspection
-    handler.Register("findclass", Commands::FindClass, "Inspection", R"(Find classes by name)");
     handler.Register("inventory", Commands::Inventory, "Inspection", R"(Dump local player inventory)");
     handler.Register("prop", Commands::Prop, "Inspection", R"(prop <cdo|obj> <name> <dump|get|set|list> [...])");
-    handler.Register("scanall", Commands::ScanAllClasses, "Inspection", R"(Scan all classes for server RPCs and log them)");
     handler.Register("scandmg", Commands::ScanDamageMeeterMod, "Inspection", R"(Scan damage meeter mod for usable actors)");
     handler.Register("scanfuncs", Commands::ScanReplicated, "Inspection", R"(Scan for usable replicated functions)");
 
@@ -2354,11 +2104,7 @@ void RegisterCommands(CommandHandler& handler)
     AimAssist::RegisterCommands(handler);
 
     // System
-    handler.Register("beginplay",     Commands::BeginPlay,    "System", R"(Toggle BeginPlay spawn watcher)");
     handler.Register("call",          Commands::Call,          "System", R"(Call a server RPC: call <FunctionName> [args...])");
-    handler.Register("lognetclient",  Commands::LogNetClient,  "System", R"(Toggle logging of all NetClient + NetMulticast ProcessEvent calls)");
-    handler.Register("lognetserver",  Commands::LogNetServer,  "System", R"(Toggle logging of all NetServer (server RPC) ProcessEvent calls)");
-    handler.Register("reloadnetlog",  Commands::ReloadNetLog,  "System", R"(Reload config.yaml skip lists without toggling active loggers off manually)");
     handler.Register("clearlog", [](const CommandContext&) {
         // closes the file_sink's handle, reopens in
         // truncate mode under the sink mutex. Returns false if the reopen
@@ -2369,10 +2115,7 @@ void RegisterCommands(CommandHandler& handler)
         else
             spdlog::warn("[clearlog] truncate failed — file probably locked by another process");
     }, "System", R"(Truncate the on-disk file log (next to the DLL))");
-    handler.Register("exec", Commands::Exec, "System", R"(Execute a console command: exec <command>)");
     handler.Register("ignoreproxy", Commands::IgnoreProxy, "System", R"(Toggle ProxyMod hook)");
-    handler.Register("stoptick", Commands::StopTick, "System", R"(Toggle tick event logging)");
-    handler.Register("logallevents", Commands::LogProcessEvents, "System", R"(Toggle logging of ALL ProcessEvent calls (very verbose))");
     handler.Register("json", Commands::MakeJSON, "System", R"(Diagnose JsonHook: print hook state; json [string] also runs direct C++ parse)");
 
     // Teleport
@@ -2391,12 +2134,6 @@ void RegisterCommands(CommandHandler& handler)
     handler.Register("twerk", Commands::Twerk, "Troll", R"(Toggle anti-twerk filter)");
     handler.Register("untwerk", Commands::DoUntwerk, "Troll", R"(Stop all other players from twerking)");
     handler.Register("autocrasher", Commands::AutoCrasher, "Troll", R"(Toggle auto-crash)");
-
-    // Variables
-    handler.Register("get", Commands::CmdGet, "Variables", R"(Get a variable: get <n>)");
-    handler.Register("set", Commands::CmdSet, "Variables", R"(Set a variable: set <n> <value>)");
-    handler.Register("unset", Commands::CmdUnset, "Variables", R"(Delete a variable: unset <n>)");
-    handler.Register("vars", Commands::CmdVars, "Variables", R"(List all variables)");
 
     // Keybindings
     KeyBindings::RegisterCommands(handler);
@@ -2434,11 +2171,10 @@ void SendCommandList(const CommandContext& ctx, const CommandHandler& handler)
 
 void InitDefaultCallbacks()
 {
+    InitSharedCallbacks();
     Commands::LogChat();
     Commands::Twerk();
-    Commands::BeginPlay();
     JsonHook::Setup();
-    AimAssist::ToggleRecoilControl();
     AimAssist::ToggleSilentAim();
 
     TickSystem::SetTickableFunction_AsIntervalMs(Tickables::DeletePitjaws, 5000L);
@@ -2520,6 +2256,14 @@ void OnModsLoaded() {}
 void OnModsUnloading()
 {
     JsonHook::Teardown();  // restore ExecFunction/flags before DLL pages are freed
+}
+
+void OnWorldChanged()
+{
+    // World transitioned — cached call targets (raw UObject*/UFunction*) are now
+    // stale; drop them so `call` cleanly rescans instead of touching freed memory.
+    State::ScannedFunctions.clear();
+    State::ScannedFunctionVariantsByName.clear();
 }
 
 #pragma pop_macro("EOF")

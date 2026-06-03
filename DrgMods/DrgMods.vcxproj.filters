@@ -144,6 +144,9 @@
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_NetLogConfig.cpp">
       <Filter>External</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\SharedCommands.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Lib_Forward.h">
@@ -187,6 +190,9 @@
     </ClInclude>
     <ClInclude Include="SDK\SDK\FSD_structs.hpp">
       <Filter>Header Files\SDK Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\SharedCommands.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

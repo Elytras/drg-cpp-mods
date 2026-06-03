@@ -118,6 +118,7 @@
     <ClInclude Include="Lib_VarSystem.h" />
     <ClInclude Include="Lib_VTableHook.h" />
     <ClInclude Include="ModManager.h" />
+    <ClInclude Include="SharedCommands.h" />
     <ClInclude Include="StringLib.h" />
     <ClInclude Include="UnrealCoreTypes.h" />
   </ItemGroup>
@@ -162,6 +163,9 @@
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="ModManager.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="SharedCommands.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
   </ItemGroup>

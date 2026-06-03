@@ -24,6 +24,12 @@ void CleanupSharedMemory();
 bool InjectDLL();
 void UnloadDLL(bool suppress = false);
 
+// ── Launch ────────────────────────────────────────────────────────────────────
+// Start the active profile's game exe (g_Profile->exePath) with its launchArgs,
+// working-dir = the exe's folder (so steam_appid.txt next to it is read). The
+// process watcher then auto-injects. No-op if already running or no path set.
+bool LaunchGame();
+
 // ── Dumper7 ───────────────────────────────────────────────────────────────────
 bool LoadDumper7();
 bool UnloadDumper7();

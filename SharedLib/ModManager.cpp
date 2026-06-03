@@ -56,6 +56,15 @@ using namespace ::Internal;
 // =========================================================================
 ModManager::ModManager()
 {
+    // The DLL can be injected before the engine has initialised the SDK globals
+    // (GObjects/GNames) — e.g. the CLI `launch` command starts the game and the
+    // watcher injects ~1s in, mid-startup. RegisterCommands() does eager SDK work on
+    // DRG (AimAssist config snapshot → StringToName), and LoadMods()'s PreLoadCheck
+    // touches GMalloc, so block until the engine object exists first.
+    // SDK::UEngine::GetEngine() safely returns null (scanning GObjects) until then;
+    // this is a no-op when injecting into an already-running game.
+    while (!SDK::UEngine::GetEngine()) Sleep(100);
+
     RegisterCommands(cmdHandler);
     cmdHandler.Register("retry", [this](const CommandContext&)
         {

@@ -19,6 +19,8 @@ netlog:
     - All_Kill
     - AllRagdoll
     - All_ShowHit
+    - All_SpawnFX
+    - All_Gunsling
     - StartMovement
     - Server_ShowHit
     - Server_StopFire
@@ -61,6 +63,11 @@ autorun:
   - lognetclient
   - lognetserver
   - norecoil
+  # Mouse side buttons → open SpaceRig menus remotely (ramrod)
+  - command: bind
+    args: [mouse5, ramrod, loadout]
+  - command: bind
+    args: [mouse4, ramrod, merit]
 #   - command: call
 #     args: [Server_SetFallVelocity, 0.0]
 #   - command: set

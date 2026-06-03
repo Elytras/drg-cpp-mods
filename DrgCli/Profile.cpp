@@ -10,6 +10,9 @@ const Profile kDrgProfile = {
     L"DrgMods.dll",
     "FSD-Win64-Shipping.exe",
 
+    LR"(C:\Program Files (x86)\Steam\steamapps\common\Deep Rock Galactic\FSD\Binaries\Win64\FSD-Win64-Shipping.exe)",
+    L"-disablemodding",
+
     L"Local\\DRG_Logs",
     L"Local\\DRG_InjLog",
     L"Local\\DRG_Commands",
@@ -31,6 +34,9 @@ const Profile kRcProfile = {
     L"RogueCore-Win64-Shipping.exe",
     L"RcMods.dll",
     "RogueCore-Win64-Shipping.exe",
+
+    LR"(D:\SteamLibrary\steamapps\common\Deep Rock Galactic RogueCore\RogueCore\Binaries\Win64\RogueCore-Win64-Shipping.exe)",
+    L"",
 
     L"Local\\RC_Logs",
     L"Local\\RC_InjLog",

@@ -248,7 +248,7 @@ namespace AimAssist
 
     void RegisterCommands(CommandHandler& handler)
     {
-        handler.Register("recoil",
+        handler.Register("norecoil",
             [](const CommandContext&) { ToggleRecoilControl(); },
             "Player",
             R"(Toggle unified RCS+aimbot loop. Aimbot fires on MouseLeft Held.)");

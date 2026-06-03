@@ -29,6 +29,12 @@ struct Profile
     const wchar_t* dllFilename;          // e.g. "DrgMods.dll"
     const char*    targetProcessNarrow;  // narrow copy of targetProcess
 
+    // Direct-launch support (CLI `launch`). Full path to the game exe + extra args.
+    // Working dir is derived from exePath so the game's steam_appid.txt (placed next
+    // to the exe) is read and Steam initialises on a direct launch.
+    const wchar_t* exePath;              // full path to the game exe ("" if unset)
+    const wchar_t* launchArgs;           // extra CLI args, e.g. "-disablemodding"
+
     // Shared memory names
     const wchar_t* shmemLogs;
     const wchar_t* shmemInjLog;

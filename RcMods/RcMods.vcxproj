@@ -198,6 +198,7 @@
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_Scan.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\Lib_VarSystem.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\ModManager.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\SharedCommands.cpp" />
     <ClCompile Include="SDK\SDK\Basic.cpp">
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpplatest</LanguageStandard>
     </ClCompile>
@@ -217,6 +218,7 @@
     <ClInclude Include="Lib_Utils.h" />
     <ClInclude Include="Lib_VTableInfo.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\ModManager.h" />
+    <ClInclude Include="$(SolutionDir)SharedLib\SharedCommands.h" />
     <ClInclude Include="SDK\SDK\Basic.hpp" />
     <ClInclude Include="SDK\SDK\RogueCore_classes.hpp" />
     <ClInclude Include="SDK\UnrealContainers.hpp" />

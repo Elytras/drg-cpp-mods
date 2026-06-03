@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <concepts>
+#include <type_traits>
 #include <unordered_set>
 
 namespace StringLib
@@ -180,6 +181,48 @@ Container SplitString(
         return haystack.find(needle) != std::basic_string_view<CharT>::npos;
     }
 
+    template <typename CharT>
+    bool StartsWith(std::basic_string_view<CharT> haystack, std::basic_string_view<CharT> needle) {
+        return haystack.size() >= needle.size() &&
+            haystack.compare(0, needle.size(), needle) == 0;
+    }
+
+    template <typename CharT>
+    bool EndsWith(std::basic_string_view<CharT> haystack, std::basic_string_view<CharT> needle) {
+        return haystack.size() >= needle.size() &&
+            haystack.compare(haystack.size() - needle.size(), needle.size(), needle) == 0;
+    }
+
+    // Returns true if `haystack` starts with any of the supplied needles.
+    template <typename CharT, typename Needles>
+    bool StartsWithAnyOf(std::basic_string_view<CharT> haystack, const Needles& needles) {
+        for (const auto& needle : needles) {
+            if (StartsWith(haystack, std::basic_string_view<CharT>(needle)))
+                return true;
+        }
+        return false;
+    }
+
+    // Returns true if `haystack` contains any of the supplied needles.
+    template <typename CharT, typename Needles>
+    bool ContainsAnyOf(std::basic_string_view<CharT> haystack, const Needles& needles) {
+        for (const auto& needle : needles) {
+            if (Contains(haystack, std::basic_string_view<CharT>(needle)))
+                return true;
+        }
+        return false;
+    }
+
+    // Returns true if `haystack` ends with any of the supplied needles.
+    template <typename CharT, typename Needles>
+    bool EndsWithAnyOf(std::basic_string_view<CharT> haystack, const Needles& needles) {
+        for (const auto& needle : needles) {
+            if (EndsWith(haystack, std::basic_string_view<CharT>(needle)))
+                return true;
+        }
+        return false;
+    }
+
     inline std::wstring ToWide(std::string_view s) {
         if (s.empty()) return {};
         int len = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
@@ -201,4 +244,6 @@ Container SplitString(
         CaseInsensitiveHash,
         CaseInsensitiveEqual
     >;
+
+
 }

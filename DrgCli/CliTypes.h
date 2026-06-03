@@ -42,7 +42,7 @@ extern DWORD   kWatchPollMs;
 constexpr wchar_t kDumper7Path[] = LR"(D:\Repos\Dumper7\x64\Release\Dumper-7.dll)";
 
 inline const std::vector<std::string> k_BuiltinCmds = {
-    "load", "unload", "reload", "d7l", "d7u", "exit", "killgame", "mode"
+    "load", "unload", "reload", "launch", "d7l", "d7u", "exit", "killgame", "mode"
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

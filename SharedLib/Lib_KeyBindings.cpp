@@ -6,7 +6,9 @@
 #include "Lib_GameHooks.h"
 
 #include <algorithm>
+#include <cctype>
 #include <shared_mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 #include <spdlog/spdlog.h>
@@ -127,12 +129,19 @@ namespace KeyBindings
         { Key::RCtrl,  VK_RCONTROL, "RCtrl"  },
         { Key::LAlt,   VK_LMENU,    "LAlt"   },
         { Key::RAlt,   VK_RMENU,    "RAlt"   },
-        // Mouse buttons
+        // Mouse buttons. Side buttons are commonly called Mouse4/Mouse5 (= XBUTTON1/2);
+        // those are the primary names so labels read "Mouse5". Mouse1-3 and the
+        // MouseX1/2 / MouseLeft-Middle spellings are all accepted as aliases.
         { Key::MouseLeft,   VK_LBUTTON,  "MouseLeft"   },
         { Key::MouseRight,  VK_RBUTTON,  "MouseRight"  },
         { Key::MouseMiddle, VK_MBUTTON,  "MouseMiddle" },
+        { Key::MouseX1,     VK_XBUTTON1, "Mouse4"      },
+        { Key::MouseX2,     VK_XBUTTON2, "Mouse5"      },
         { Key::MouseX1,     VK_XBUTTON1, "MouseX1"     },
         { Key::MouseX2,     VK_XBUTTON2, "MouseX2"     },
+        { Key::MouseLeft,   VK_LBUTTON,  "Mouse1"      },
+        { Key::MouseRight,  VK_RBUTTON,  "Mouse2"      },
+        { Key::MouseMiddle, VK_MBUTTON,  "Mouse3"      },
     };
 
     // Key enum values equal VK_* constants by design (see Lib_KeyBindings.h comment).
@@ -598,20 +607,120 @@ namespace KeyBindings
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  Command stubs — full CLI-bindable implementation deferred
+    //  CLI bind / unbind — parse a key chord and run a command on the game thread
     // ─────────────────────────────────────────────────────────────────────────
+
+    // CLI-created bindings, tracked separately from code-registered ones so that
+    // `unbind` only removes user binds and `bindings` can show the command text.
+    // Touched only on the command-dispatch (worker) thread — no locking needed.
+    struct CliBinding { BindingHandle handle; Key key; Mod mods; std::string command; };
+    static std::vector<CliBinding> s_cliBindings;
+
+    static bool IEquals(const std::string& a, const char* b)
+    {
+        size_t i = 0;
+        for (; i < a.size() && b[i]; ++i)
+            if (std::tolower((unsigned char)a[i]) != std::tolower((unsigned char)b[i])) return false;
+        return i == a.size() && b[i] == '\0';
+    }
+
+    // Parse "ctrl+shift+F2" → key + mods (modifier tokens in any order, one key).
+    // Returns false on an unknown token or if no primary key was given.
+    static bool ParseCombo(const std::string& spec, Key& outKey, Mod& outMods)
+    {
+        outMods = Mod::None;
+        bool haveKey = false;
+        size_t start = 0;
+        for (;;)
+        {
+            size_t plus = spec.find('+', start);
+            std::string tok = spec.substr(start, plus == std::string::npos ? std::string::npos : plus - start);
+            while (!tok.empty() && std::isspace((unsigned char)tok.front())) tok.erase(tok.begin());
+            while (!tok.empty() && std::isspace((unsigned char)tok.back()))  tok.pop_back();
+            if (!tok.empty())
+            {
+                bool matched = false;
+                for (const auto& m : kModTable)
+                    if (IEquals(tok, m.name)) { outMods |= m.m; matched = true; break; }
+                if (!matched)
+                    for (const auto& e : kKeyTable)
+                        if (IEquals(tok, e.name)) { outKey = e.k; haveKey = true; matched = true; break; }
+                if (!matched) return false;
+            }
+            if (plus == std::string::npos) break;
+            start = plus + 1;
+        }
+        return haveKey;
+    }
+
+    static std::string ComboLabel(Key key, Mod mods)
+    {
+        std::string s;
+        for (const auto& m : kModTable) if (static_cast<bool>(mods & m.m)) { s += m.name; s += '+'; }
+        for (const auto& e : kKeyTable) if (e.k == key) { s += e.name; return s; }
+        s += '?';
+        return s;
+    }
 
     void RegisterCommands(CommandHandler& handler)
     {
-        handler.Register("bind", [](const CommandContext& ctx)
+        handler.Register("bind", [&handler](const CommandContext& ctx)
         {
-            warn("[KeyBindings] bind: not yet implemented");
-        }, "keybindings", "bind <key> <command>  — assign a key to a command (stub)");
+            // Optional leading "-s"/"-suppress" → eat the key so the game doesn't see it.
+            size_t a = 1;
+            bool   suppress = false;
+            if (a < ctx.args.size() && (ctx.args[a] == "-s" || ctx.args[a] == "-suppress"))
+            { suppress = true; ++a; }
+
+            if (ctx.args.size() < a + 2)
+            {
+                warn("[KeyBindings] usage: bind [-s] <key> <command...>  (e.g. bind F2 ramrod enhancements)");
+                return;
+            }
+            Key key; Mod mods;
+            if (!ParseCombo(ctx.args[a], key, mods))
+            {
+                warn("[KeyBindings] unknown key '{}' — try F1-F12, A-Z, 0-9, Num0-9, Mouse4/5, or ctrl+/shift+/alt+ combos", ctx.args[a]);
+                return;
+            }
+            std::string cmd;
+            for (size_t i = a + 1; i < ctx.args.size(); ++i) { if (i > a + 1) cmd += ' '; cmd += ctx.args[i]; }
+
+            // Replace any existing CLI binding on the same chord.
+            for (auto it = s_cliBindings.begin(); it != s_cliBindings.end(); ++it)
+                if (it->key == key && it->mods == mods)
+                { Unregister(it->handle); s_cliBindings.erase(it); break; }
+
+            BindingOptions opts;
+            opts.trigger  = Trigger::Press;
+            opts.focus    = Focus::Game;   // fire while playing, not while typing in the CLI
+            opts.suppress = suppress;      // -s → eat the key from the game
+            BindingHandle h = RegisterGameThread(key, mods,
+                [&handler, cmd] { handler.Dispatch(cmd); }, opts);
+            if (!h)
+            {
+                warn("[KeyBindings] bind failed — {} already used by a non-CLI binding", ComboLabel(key, mods));
+                return;
+            }
+            s_cliBindings.push_back({ h, key, mods, cmd });
+            info("[KeyBindings] bound {}{} -> {}", ComboLabel(key, mods), suppress ? " (suppress)" : "", cmd);
+        }, "keybindings", "bind [-s] <key> <command>  — run a command on key press; -s eats the key (e.g. bind F2 ramrod enhancements)");
 
         handler.Register("unbind", [](const CommandContext& ctx)
         {
-            warn("[KeyBindings] unbind: not yet implemented");
-        }, "keybindings", "unbind <key>  — remove a key binding (stub)");
+            if (ctx.ArgCount() < 2) { warn("[KeyBindings] usage: unbind <key>"); return; }
+            Key key; Mod mods;
+            if (!ParseCombo(ctx.Arg(1), key, mods)) { warn("[KeyBindings] unknown key '{}'", ctx.Arg(1)); return; }
+            for (auto it = s_cliBindings.begin(); it != s_cliBindings.end(); ++it)
+                if (it->key == key && it->mods == mods)
+                {
+                    info("[KeyBindings] unbound {} (was -> {})", ComboLabel(key, mods), it->command);
+                    Unregister(it->handle);
+                    s_cliBindings.erase(it);
+                    return;
+                }
+            warn("[KeyBindings] no CLI binding on {}", ComboLabel(key, mods));
+        }, "keybindings", "unbind <key>  — remove a CLI key binding");
 
         handler.Register("bindings", [](const CommandContext& ctx)
         {
@@ -631,6 +740,8 @@ namespace KeyBindings
                     line += " (" + std::to_string(b.opts.heldMs) + "ms)";
                 if (b.opts.suppress)
                     line += "  suppress";
+                for (const auto& cb : s_cliBindings)
+                    if (cb.handle == b.handle) { line += "  -> " + cb.command; break; }
                 info("{}", line);
             }
         }, "keybindings", "bindings  — list all registered keybindings");

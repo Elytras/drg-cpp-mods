@@ -116,6 +116,7 @@ static uint32_t DispatchCommand(const std::string& cmd)
         return 0;
     }
     if (cmd == "reload") { UnloadDLL(false); Sleep(500); InjectDLL(); return 0; }
+    if (cmd == "launch") { LaunchGame(); return 0; }
     if (cmd == "d7l")    { LoadDumper7();   return 0; }
     if (cmd == "d7u")    { UnloadDumper7(); return 0; }
     if (cmd == "killgame")
@@ -408,6 +409,7 @@ int main(int argc, char** argv)
         if (IEquals(candidate, "load"))     return "Load the DLL into the game process";
         if (IEquals(candidate, "unload"))   return "Unload the DLL from the game process";
         if (IEquals(candidate, "reload"))   return "Hot-reload the DLL";
+        if (IEquals(candidate, "launch"))   return "Launch the game (profile args) + auto-inject";
         if (IEquals(candidate, "d7l"))      return "Load Dumper7 into the game process";
         if (IEquals(candidate, "d7u"))      return "Unload Dumper7 (in-game F6 only)";
         if (IEquals(candidate, "exit"))     return "Exit the CLI";

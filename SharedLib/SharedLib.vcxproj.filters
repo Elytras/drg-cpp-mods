@@ -59,6 +59,9 @@
     <ClInclude Include="ModManager.h">
       <Filter>Headers</Filter>
     </ClInclude>
+    <ClInclude Include="SharedCommands.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Lib_CommandHandler.cpp">
@@ -101,6 +104,9 @@
       <Filter>Source</Filter>
     </ClCompile>
     <ClCompile Include="ModManager.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="SharedCommands.cpp">
       <Filter>Source</Filter>
     </ClCompile>
   </ItemGroup>
