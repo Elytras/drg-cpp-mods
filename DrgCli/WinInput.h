@@ -87,6 +87,28 @@ public:
         m_selClearFn = std::move(clearFn);
     }
 
+    // Double-click in the log pane while a filter is active: drop the filter and
+    // jump to the clicked line in the full log. Called while the mutex is held;
+    // returns true iff a filter was active and the jump happened.
+    void SetRevealFilteredLineCallback(std::function<bool(COORD)> fn)
+    {
+        m_revealFilteredLineFn = std::move(fn);
+    }
+
+    // Peek overlay: double-click a log line (no filter active) to open its full
+    // text; the next keypress or mouse-click dismisses it. All called under mutex.
+    //   peekFn   — open the peek for the clicked line; returns true iff opened
+    //   closeFn  — close the peek if open; returns true iff one was active
+    //   activeFn — query whether a peek is currently open
+    void SetPeekCallbacks(std::function<bool(COORD)> peekFn,
+                          std::function<bool()>      closeFn,
+                          std::function<bool()>      activeFn)
+    {
+        m_peekFn       = std::move(peekFn);
+        m_closePeekFn  = std::move(closeFn);
+        m_peekActiveFn = std::move(activeFn);
+    }
+
     // Enable dedicated AC pane mode.
     //   resizeFn — called (under mutex) with desired height; returns AC pane start row
     //   clearFn  — called (under mutex) when AC is dismissed
@@ -181,6 +203,67 @@ public:
                 const bool                lmbNow = (me.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED) != 0;
 
                 m_lastMousePos = mpos;
+
+                // ── Peek overlay active — swallow mouse input ─────────────────
+                // A button press or wheel dismisses the peek; pure moves are
+                // ignored so the frozen overlay doesn't react to the cursor.
+                if (m_peekActiveFn && m_peekActiveFn())
+                {
+                    const bool acted = (me.dwButtonState != 0) ||
+                                       (me.dwEventFlags & MOUSE_WHEELED);
+                    if (acted && m_closePeekFn)
+                    {
+                        auto lock = MakeLock();
+                        m_closePeekFn();
+                        RedrawActive(prompt);
+                    }
+                    continue;
+                }
+
+                // ── Double-click — reveal a filtered line in the full log ─────
+                // Fires only on a genuine OS double-click (not a select-then-click),
+                // so an existing drag-selection can't be mistaken for this gesture.
+                // The leading single click of the double starts a 1-line selection;
+                // RevealFilteredLineUnderLock clears it and we drop m_lmbHeld here.
+                if (me.dwEventFlags & DOUBLE_CLICK)
+                {
+                    if (m_splitMode && m_revealFilteredLineFn)
+                    {
+                        auto lock = MakeLock();
+                        if (m_revealFilteredLineFn(mpos))
+                        {
+                            m_lmbHeld = false;   // cancel the nascent 1-click selection
+                            // SplitConsole already dropped its filter; sync our own
+                            // filter-edit state without re-invoking the clear callback.
+                            if (m_filterMode)
+                            {
+                                m_buf        = m_savedBuf;
+                                m_cursor     = m_savedCursor;
+                                m_filterMode = false;
+                                m_filterBuf.clear();
+                                Redraw(m_savedPrompt);
+                            }
+                            else
+                            {
+                                m_filterBuf.clear();
+                                Redraw(prompt);
+                            }
+                            continue;
+                        }
+                    }
+                    // No filter to reveal — open the full-text peek overlay for the
+                    // clicked line so over-long entries become readable.
+                    if (m_splitMode && m_peekFn)
+                    {
+                        auto lock = MakeLock();
+                        if (m_peekFn(mpos))
+                        {
+                            m_lmbHeld = false;   // cancel the nascent 1-click selection
+                            RedrawActive(prompt);
+                        }
+                    }
+                    continue;
+                }
 
                 // ── Wheel scroll ──────────────────────────────────────────
                 if (me.dwEventFlags & MOUSE_WHEELED)
@@ -323,6 +406,10 @@ public:
             // dismiss the AC pane or ghost text (e.g. Win+Shift+S for screenshot).
             if (IsIgnoredKey(vk)) continue;
 
+            // While a log line is being peeked, the next keystroke dismisses the
+            // overlay and is otherwise swallowed (so Esc/Enter/arrows just close).
+            if (m_closePeekFn && m_closePeekFn()) { RedrawActive(prompt); continue; }
+
             // Tab re-enters DoCompletion which manages its own AC state.
             // Any other key dismisses the AC pane and clears tracking state.
             // If the AC pane was active, ClearCandidateState triggers RenderAll
@@ -379,8 +466,33 @@ public:
                 continue;
             }
 
+            // ── Ctrl+V — paste clipboard text (command & filter modes) ───
+            if (ch == 0x16)
+            {
+                std::string paste = SanitizePaste(GetClipboardText());
+                if (!paste.empty())
+                {
+                    m_buf.insert(m_cursor, paste);
+                    m_cursor += (int)paste.size();
+                    RedrawActive(prompt);
+                    if (m_filterMode && m_filterChangeFn) m_filterChangeFn(m_buf);
+                }
+                continue;
+            }
+
             if (vk == VK_RETURN)
             {
+                // Shift+Enter inserts a literal newline instead of submitting
+                // (command/typing mode only — a multi-line filter string is
+                // meaningless against single-line log entries).
+                const bool shiftEnter = (ke.dwControlKeyState & SHIFT_PRESSED) != 0;
+                if (shiftEnter && !m_filterMode)
+                {
+                    m_buf.insert(m_cursor, "\n", 1);
+                    m_cursor += 1;
+                    Redraw(prompt);
+                    continue;
+                }
                 if (m_filterMode)
                 {
                     // Commit filter, return to command mode (filter stays active).
@@ -704,25 +816,46 @@ private:
 
     // ── Low-level helpers ──────────────────────────────────────────────────
 
+    // UTF-8 → wide for display, with control chars mapped to fixed-width glyphs so
+    // a newline (Shift+Enter / pasted) or stray control byte can't break the
+    // single-row input layout. One source-of-truth used by both WriteNarrow and
+    // ColWidth, so rendered width and cursor-column math always agree.
+    static std::wstring DisplayWide(const std::string& s)
+    {
+        if (s.empty()) return {};
+        int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+        if (n <= 0) return {};
+        std::wstring w(n, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), w.data(), n);
+        for (wchar_t& c : w)
+        {
+            if (c == L'\n')    c = L'\x21B5';  // ↵ newline marker
+            else if (c < 0x20) c = L'\xB7';    // · any other control char (tab, etc.)
+        }
+        return w;
+    }
+
     void WriteNarrow(const std::string& s)
     {
         if (s.empty()) return;
-        std::wstring w(s.size() + 4, L'\0');
-        int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], (int)w.size());
+        std::wstring w = DisplayWide(s);
         DWORD written;
-        WriteConsoleW(m_hOut, &w[0], n, &written, nullptr);
+        WriteConsoleW(m_hOut, w.data(), (int)w.size(), &written, nullptr);
     }
 
     int ColWidth(const std::string& s)
     {
-        if (s.empty()) return 0;
-        return MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+        return (int)DisplayWide(s).size();
     }
 
     // ── Hint ──────────────────────────────────────────────────────────────
 
     WinHint Hint()
     {
+        // No autocomplete hints while editing a filter — completions don't apply
+        // to filter strings, so suppress both the rendered ghost text and any
+        // End-key accept path that reads this.
+        if (m_filterMode) return {};
         // When a candidate is hovered, use it as the active completion
         // regardless of what the regular hint callback would return.
         if (m_hoveredCand >= 0 && m_hoveredCand < (int)m_lastCandidates.size())
@@ -811,6 +944,52 @@ private:
             SetClipboardData(CF_UNICODETEXT, hMem);
         }
         CloseClipboard();
+    }
+
+    // Read CF_UNICODETEXT from the clipboard as UTF-8 ("" if none/!text).
+    static std::string GetClipboardText()
+    {
+        if (!IsClipboardFormatAvailable(CF_UNICODETEXT)) return {};
+        if (!OpenClipboard(nullptr)) return {};
+        std::string out;
+        if (HANDLE h = GetClipboardData(CF_UNICODETEXT))
+        {
+            if (const wchar_t* w = static_cast<const wchar_t*>(GlobalLock(h)))
+            {
+                int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+                if (n > 0)
+                {
+                    out.resize(n);
+                    WideCharToMultiByte(CP_UTF8, 0, w, -1, out.data(), n, nullptr, nullptr);
+                    if (!out.empty() && out.back() == '\0') out.pop_back();  // drop NUL terminator
+                }
+                GlobalUnlock(h);
+            }
+        }
+        CloseClipboard();
+        return out;
+    }
+
+    // Make pasted text safe for the single-line buffer: drop NUL bytes entirely
+    // and normalise CRLF / lone CR to a single LF (kept as-is in the buffer and
+    // rendered via DisplayWide's ↵ marker).
+    static std::string SanitizePaste(const std::string& in)
+    {
+        std::string out;
+        out.reserve(in.size());
+        for (size_t i = 0; i < in.size(); ++i)
+        {
+            const char c = in[i];
+            if (c == '\0') continue;
+            if (c == '\r')
+            {
+                out.push_back('\n');
+                if (i + 1 < in.size() && in[i + 1] == '\n') ++i;  // collapse CRLF
+                continue;
+            }
+            out.push_back(c);
+        }
+        return out;
     }
 
     // Use instead of Redraw(prompt) for key handlers that run in filter mode:
@@ -1248,6 +1427,10 @@ private:
     std::function<void(COORD)>       m_mouseUpFn;
     std::function<std::string()>     m_copyFn;
     std::function<void()>            m_selClearFn; // RMB — clear selection
+    std::function<bool(COORD)>       m_revealFilteredLineFn; // double-click while filtering
+    std::function<bool(COORD)>       m_peekFn;               // double-click → open full-text peek
+    std::function<bool()>            m_closePeekFn;          // dismiss peek overlay
+    std::function<bool()>            m_peekActiveFn;         // is a peek currently open?
 
     // Candidate hover tooltip state
     std::vector<CandRegion>  m_candRegs;

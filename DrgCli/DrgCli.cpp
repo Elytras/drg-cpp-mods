@@ -400,6 +400,12 @@ int main(int argc, char** argv)
         [&]()                     { return split.CopySelectionUnderLock(); }
     );
     input.SetClearSelectionCallback([&]() { split.ClearSelectionUnderLock(); });
+    input.SetRevealFilteredLineCallback(
+        [&](COORD pos) { return split.RevealFilteredLineUnderLock(pos); });
+    input.SetPeekCallbacks(
+        [&](COORD pos) { return split.PeekLineUnderLock(pos); },
+        [&]()          { return split.ClosePeekUnderLock(); },
+        [&]()          { return split.IsPeekActive(); });
     input.SetAcMode(
         [&](int acH) -> SHORT { return split.SetAcHeightUnderLock(acH); },
         [&]()                 { split.ClearAcUnderLock(); }

@@ -51,8 +51,22 @@ public:
     // ── Filter API (call while holding Mutex()) ───────────────────────────
     void SetFilterUnderLock(const std::string& str);   // live-filter log pane
     void ClearFilterUnderLock();                        // remove filter, show all
+    // Double-click while filtering: resolve the clicked screen row to its line in
+    // the full (unfiltered) history, drop the filter, and scroll so that line
+    // stays on the same screen row. Returns true iff a filter was active.
+    bool RevealFilteredLineUnderLock(COORD pos);
     bool IsFilterActive()          const { return m_filterActive; }
     const std::string& FilterStr() const { return m_filterStr; }
+
+    // ── Peek API (call while holding Mutex()) ─────────────────────────────
+    // Open a full-text "peek" overlay for the log line under `pos`, word-wrapped
+    // across the whole log pane so long entries (RPC params, scan results, …)
+    // become fully readable. Returns true iff the overlay was opened.
+    bool PeekLineUnderLock(COORD pos);
+    // Close the peek overlay if open, restoring the normal log view. Returns true
+    // iff a peek was active (so callers can swallow the dismissing keystroke).
+    bool ClosePeekUnderLock();
+    bool IsPeekActive() const { return m_peekActive; }
 
     // ── Selection API (call while holding Mutex()) ────────────────────────
     // rectMode = true → rectangular (box) selection; false → linear (rows)
@@ -96,6 +110,7 @@ private:
     // ── Rendering ─────────────────────────────────────────────────────────
     void RenderAll();
     void RenderLogPane();
+    void RenderPeekOverlay();   // full-text view of m_peekText (when m_peekActive)
     void RenderCliPane();
     void DrawLogDivider();
     void DrawCliDivider();
@@ -123,6 +138,10 @@ private:
     bool                m_filterActive  = false;
     std::string         m_filterStr;
     std::vector<size_t> m_filteredIndices;  // indices into m_logHistory
+
+    // ── Peek state ────────────────────────────────────────────────────────
+    bool                m_peekActive = false;
+    std::string         m_peekText;          // full text of the peeked log line
 
     // ── Selection state ───────────────────────────────────────────────────
     bool     m_selActive  = false; // LMB currently held

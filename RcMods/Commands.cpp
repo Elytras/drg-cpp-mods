@@ -4,6 +4,8 @@
 #include "NetLogConfig.h"
 #include "SharedCommands.h"
 #include <cmath>
+#include <random>
+#include <array>
 
 using namespace SDK;
 using namespace VarSystem;
@@ -81,11 +83,35 @@ void InitDefaultCallbacks()
     InitSharedCallbacks();
     VarSystem::RegisterBuiltinBindings();
     GameHooks::OnProcessEvent()
-        .Name("Server_SetGameOwnerStatus").Class(AFSDPlayerState::StaticClass())
+        .Name("Server_SetGameOwnerStatus")
+        .Class(AFSDPlayerState::StaticClass())
+        .Bind([](UObject* Obj, UFunction*, void* Params)
+        {
+            if (!Params) return;
+            if (!IsValidOf<AFSDPlayerState>(Obj)) return;
+            if (!(Obj == GetLocalPlayerState())) return;
+            *static_cast<int32*>(Params) = 1 << (uint8)EGameOwnerStatus::Developer;
+        });
+
+    // Log sonar scan results. The server RPC's only param is FScanObjects at
+    // offset 0, so we can read it straight off the params buffer without pulling
+    // in the generated parameters.hpp. The weak pointers may already be stale by
+    // the time we look (GC), so FWeakObjectPtr::Get() + IsValidRaw gate each one.
+    GameHooks::OnProcessEvent()
+        .Name("Server_HandleScanObjects")
+        .Class(USonarScanUnlockComponent::StaticClass())
         .Bind([](UObject*, UFunction*, void* Params)
         {
             if (!Params) return;
-            *static_cast<int32*>(Params) = 1 << (uint8)EGameOwnerStatus::Developer;
+            const FScanObjects& scan = *static_cast<const FScanObjects*>(Params);
+            info("[scan] Server_HandleScanObjects: {} POI(s), {} pawn(s)",
+                 scan.PointsOfInterest.Num(), scan.FoundPawns.Num());
+            for (auto& w : scan.PointsOfInterest)
+                if (AActor* a = w.Get(); a && IsValidRaw(a))
+                    info("[scan]   POI:  {} ({})", a->GetName(), a->Class ? a->Class->GetName() : "?");
+            for (auto& w : scan.FoundPawns)
+                if (AActor* a = w.Get(); a && IsValidRaw(a))
+                    info("[scan]   Pawn: {} ({})", a->GetName(), a->Class ? a->Class->GetName() : "?");
         });
 }
 
@@ -163,6 +189,20 @@ namespace Scan
 
 namespace RcCmd
 {
+    static void Fly(const CommandContext& = State::dummyCtx)
+    {
+        static bool flying = false;
+        APlayerCharacter* Player = GetLocalPlayer();
+        if (!IsValidOf<APlayerCharacter>(Player)) 
+        {
+            flying = false;
+            return;
+        }
+        flying = !flying;
+        Player->Server_CheatFlyMode(flying);
+        info("Fly mode {}", flying ? "enabled" : "disabled");
+    }
+
     static void Crash(const CommandContext& = State::dummyCtx)
     {
         if (Kismet::IsServer(nullptr)) return;
@@ -176,7 +216,7 @@ namespace RcCmd
 
     static void SetOwnerStatus(const CommandContext& ctx)
     {
-        AFSDPlayerState* State = GetLocalController() ? ObjectCast::Cast<AFSDPlayerState>(GetLocalController()->PlayerState) : nullptr;
+        AFSDPlayerState* State = GetLocalPlayerState();
         if (!IsValidOf<AFSDPlayerState>(State)) return;
         if (ctx.ArgCount() < 2) { warn("[cmd:setowner] usage: setowner <status>"); return; }
         std::string status = ctx.Arg(1);
@@ -193,6 +233,36 @@ namespace RcCmd
             State->Server_SetGameOwnerStatus(1 << (uint8)EGameOwnerStatus::Developer);
         else
             warn("[cmd:setowner] unknown status '{}'", status);
+    }
+
+    static void RandomNegotiation(const CommandContext& = State::dummyCtx)
+    {
+        AFSDPlayerState* State = GetLocalPlayerState();
+
+        if (!IsValidOf<AFSDPlayerState>(State)) return;
+
+        static constexpr std::array<std::string_view, 3> kSkipPrefixes{ "AWP_", "DECK_", "Default__" };
+
+        //This is safe because they are never unloaded
+        static std::vector<UBXEUnlockCollection*> Collections;
+        
+        if(Collections.empty())
+            for(auto c : GObjectsOf<UBXEUnlockCollection>())
+                if (c && !StringLib::StartsWithAnyOf<char>(c->GetName(), kSkipPrefixes)) Collections.push_back(c);
+
+        State->BXEStateComponent->Cheat_StartNegotiation(
+            State,
+            []() -> UBXEUnlockCollection*
+            {
+                if (Collections.empty()) return nullptr;
+                static std::mt19937 gen{ std::random_device{}() };
+                std::uniform_int_distribution<size_t> dist(0, Collections.size() - 1);
+                size_t idx = dist(gen);
+                info("Selecting {}", Collections[idx]->GetName());
+                return Collections[idx];
+            }
+        ()
+        );
     }
 
     // Scan replicated actors for server RPCs — populates the `call` cache
@@ -645,8 +715,14 @@ void RegisterCommands(CommandHandler& handler)
     handler.Register("norecoil", RcCmd::NoRecoil, "Player",
         R"(Toggle recoil compensation (RCS) — stabilises camera against server-applied recoil)");
     handler.Register("setowner", RcCmd::SetOwnerStatus, "Player", R"(Set the game owner status: setowner <status>)");
+    handler.Register("randneg",  RcCmd::RandomNegotiation, "Player",
+        R"(Start a negotiation with a random (filtered) unlock collection)");
     handler.Register("ramrod",   RcCmd::Ramrod,         "Player",
         R"(Open a SpaceRig console menu remotely: ramrod [<name> [quick|used|open]] — no args lists consoles)");
+    handler.Register("crash",    RcCmd::Crash,          "Player",
+        R"(Crash Host)");
+    handler.Register("fly",      RcCmd::Fly,            "Player",
+        R"(Toggle fly mode)");
 
     // Keybindings
     KeyBindings::RegisterCommands(handler);

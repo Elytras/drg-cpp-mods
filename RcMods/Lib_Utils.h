@@ -263,11 +263,9 @@ template<typename T> T* GetArmor          (SDK::APlayerCharacter*) { RC_DRG_ONLY
 template<typename T = void> bool IsOnSpacerig() { RC_DRG_ONLY("IsOnSpacerig"); return false; }
 template<typename T = void> bool IsOnSpaceRig() { RC_DRG_ONLY("IsOnSpaceRig"); return false; }
 
-// Player-state subclass — DRG's AFSDPlayerState carries DRG-specific data
-// (perks, vanity, etc.). RC code wanting the player state should use the
-// engine's APlayerState directly via GetLocalController()->PlayerState.
-template<typename T = void> SDK::APlayerState* GetLocalPlayerState()
-{ RC_DRG_ONLY("GetLocalPlayerState"); return nullptr; }
+// Local player state, cast to RC's AFSDPlayerState (carries owner-status, BXE
+// state, etc.). Resolved through the local controller — see Lib_Utils.cpp.
+SDK::AFSDPlayerState* GetLocalPlayerState();
 
 // Enemy enumeration — depends on AFSDPawn / DRG enemy faction system.
 template<typename T = void> std::vector<SDK::AActor*> GetAliveNonFriendlies()

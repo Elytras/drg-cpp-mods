@@ -103,6 +103,12 @@ APlayerCharacter* GetLocalPlayer()
     return ObjectCast::Cast<APlayerCharacter>(Controller->Pawn);
 }
 
+AFSDPlayerState* GetLocalPlayerState()
+{
+    APlayerController* Controller = GetLocalController();
+    return Controller ? ObjectCast::Cast<AFSDPlayerState>(Controller->PlayerState) : nullptr;
+}
+
 APlayerCharacter* GetLocalPlayerCharacterBlocking(uint64_t MaxWaitMs)
 {
     const uint64_t deadline = GetTimeMs() + MaxWaitMs;

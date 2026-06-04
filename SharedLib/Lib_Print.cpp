@@ -529,6 +529,40 @@ std::string GetFieldValueAsString(uintptr_t Base, FField* Field)
                     result = shown > 0 ? '{' + inner + '}' : std::format("<struct:{}>", sn);
                 }
             }
+            else if constexpr (std::is_same_v<T, FWeakObjectProperty> ||
+                               std::is_same_v<T, FLazyObjectProperty>)
+            {
+                // TWeakObjectPtr / TLazyObjectPtr — resolve to the live object (or null
+                // if the referent has been GC'd). FWeakObjectPtr::Get() does the
+                // index/serial validation, so a stale handle safely yields null.
+                UObject* obj = GetPropertyPtr<FWeakObjectPtr>(Base, prop->Offset)->Get();
+                result = (obj && IsValidRaw(obj)) ? obj->GetName() : "null";
+            }
+            else if constexpr (std::is_same_v<T, FArrayProperty>)
+            {
+                // Inline TArray rendering for the netlog param string. Elements are laid
+                // out contiguously; recurse into InnerProperty (offset 0) per element.
+                const auto& arr = *GetPropertyPtr<UC::TArray<uint8>>(Base, prop->Offset);
+                const int32 num = arr.Num();
+                if (!prop->InnerProperty || !arr.IsValid() || num <= 0)
+                    result = "[]";
+                else
+                {
+                    constexpr int32 kMaxShow = 8;
+                    const int32     maxShow  = (std::min)(num, kMaxShow);
+                    const int32     es       = prop->InnerProperty->ElementSize;
+                    const uintptr_t db       = reinterpret_cast<uintptr_t>(arr.GetDataPtr());
+                    std::string inner;
+                    for (int32 i = 0; i < maxShow; ++i)
+                    {
+                        if (i > 0) inner += ", ";
+                        inner += GetFieldValueAsString(db + static_cast<uintptr_t>(i) * es,
+                                                       prop->InnerProperty);
+                    }
+                    if (num > maxShow) inner += std::format(", ... ({} more)", num - maxShow);
+                    result = '[' + inner + ']';
+                }
+            }
             else
                 result = "<unsupported>";
         });

@@ -641,6 +641,281 @@ namespace
             warn("  {} wildcard callback(s) run on EVERY ProcessEvent — keep this low", st.wildcards);
     }
 
+    // ── refsto: find objects that reference a target (direct + transitive) ────
+    // Reflection-driven reference finder. ForEachRef walks an object's full class
+    // hierarchy and yields every raw UObject* stored in its reflected layout —
+    // scalar object/class props, and recursively through structs, arrays, sets and
+    // maps. Soft/weak/lazy/interface/delegate refs are intentionally NOT followed
+    // (soft is path-based by request; the others are non-owning and need handle
+    // decoding — left for a later pass).
+    //
+    // The transitive search is an iterative frontier (reverse-BFS): level 1 finds
+    // direct referrers of the target; each subsequent level finds referrers of the
+    // previous level's hits, skipping anything already visited, until the frontier
+    // empties or the depth cap is hit. Before the expensive instance walk, each
+    // candidate is pruned by a target-independent, memoized per-class set of the
+    // object-property *declared* types it could possibly hold: if none of those
+    // declared types is an ancestor of any class currently in the frontier, the
+    // class cannot reference it and every instance is skipped.
+    //   refsto BXEUnlockCollection        → direct referrers (depth 1)
+    //   refsto MyActor 3                  → up to 3 hops out
+    //   refsto SomeWidget all             → walk until the frontier is exhausted
+    namespace RefScan
+    {
+        using ClassSet = std::unordered_set<UClass*>;
+        // Declared object-reference types a class can hold. `universal` is set when
+        // a raw object property has no declared PropertyClass — it could hold
+        // anything, so such classes can never be pruned.
+        struct DeclInfo { ClassSet types; bool universal = false; };
+
+        void AddPropDecl(FProperty* prop, DeclInfo& out, int depth);
+
+        void AddStructDecl(UStruct* st, DeclInfo& out, int depth)
+        {
+            if (!st || depth > 8) return;
+            for (FField* f : FFieldRange(st->ChildProperties))
+                if (auto* p = FieldCast::Cast<FProperty>(f)) AddPropDecl(p, out, depth);
+        }
+
+        // Gather the declared class type(s) reachable through a property. Container
+        // and struct properties recurse into their element/member types. Interface
+        // properties are ignored (the walker doesn't follow them).
+        void AddPropDecl(FProperty* prop, DeclInfo& out, int depth)
+        {
+            FieldCast::Visit(prop, [&](auto* p)
+            {
+                using T = std::remove_pointer_t<decltype(p)>;
+                if      constexpr (std::is_same_v<T, FArrayProperty>)  { if (p->InnerProperty)  AddPropDecl(p->InnerProperty, out, depth); }
+                else if constexpr (std::is_same_v<T, FSetProperty>)    { if (p->ElementProperty) AddPropDecl(p->ElementProperty, out, depth); }
+                else if constexpr (std::is_same_v<T, FMapProperty>)    { if (p->KeyProperty) AddPropDecl(p->KeyProperty, out, depth);
+                                                                         if (p->ValueProperty) AddPropDecl(p->ValueProperty, out, depth); }
+                else if constexpr (std::is_same_v<T, FStructProperty>) { if (p->Struct) AddStructDecl(p->Struct, out, depth + 1); }
+                else if constexpr (std::is_same_v<T, FInterfaceProperty>) { /* not followed */ }
+                else if constexpr (requires { p->PropertyClass; })     { if (p->PropertyClass) out.types.insert(p->PropertyClass);
+                                                                         else out.universal = true; }
+            });
+        }
+
+        // Memoized per class — target-independent, so it persists across invocations.
+        std::unordered_map<UClass*, std::shared_ptr<DeclInfo>> g_declCache;
+        const DeclInfo& DeclTypesForClass(UClass* c)
+        {
+            auto it = g_declCache.find(c);
+            if (it != g_declCache.end()) return *it->second;
+            auto info = std::make_shared<DeclInfo>();
+            g_declCache.emplace(c, info);                 // insert before fill (cycle-safe)
+            for (UClass* cur : UClassHierarchyRange(c))
+                for (FField* f : FFieldRange(cur->ChildProperties))
+                    if (auto* p = FieldCast::Cast<FProperty>(f)) AddPropDecl(p, *info, 0);
+            return *info;
+        }
+
+        using RefYield = std::function<void(UObject* pointee, FProperty* topProp)>;
+
+        // Yield every raw UObject* reachable from `prop` at value-base `base`.
+        // `topProp` is the originating top-level property (kept for reporting).
+        void ExtractRefs(uintptr_t base, FProperty* prop, FProperty* topProp, int depth, const RefYield& yield)
+        {
+            if (!prop || depth > 8) return;
+            FieldCast::Visit(prop, [&](auto* p)
+            {
+                using T = std::remove_pointer_t<decltype(p)>;
+                if constexpr (std::is_same_v<T, FObjectProperty> ||
+                              std::is_same_v<T, FObjectPropertyBase> ||
+                              std::is_same_v<T, FClassProperty>)
+                {
+                    if (UObject* o = *GetPropertyPtr<UObject*>(base, p->Offset)) yield(o, topProp);
+                }
+                else if constexpr (std::is_same_v<T, FStructProperty>)
+                {
+                    if (!p->Struct) return;
+                    const uintptr_t sb = base + p->Offset;
+                    for (FField* f : FFieldRange(p->Struct->ChildProperties))
+                        if (auto* ip = FieldCast::Cast<FProperty>(f)) ExtractRefs(sb, ip, topProp, depth + 1, yield);
+                }
+                else if constexpr (std::is_same_v<T, FArrayProperty>)
+                {
+                    if (!p->InnerProperty) return;
+                    const auto& arr = *GetPropertyPtr<UC::TArray<uint8>>(base, p->Offset);
+                    const int32 num = arr.Num();
+                    const int32 es  = p->InnerProperty->ElementSize;
+                    if (!arr.IsValid() || num <= 0 || num > 5'000'000 || es <= 0) return;
+                    const uintptr_t db = reinterpret_cast<uintptr_t>(arr.GetDataPtr());
+                    if (!db) return;
+                    for (int32 i = 0; i < num; ++i)
+                        ExtractRefs(db + static_cast<uintptr_t>(i) * es, p->InnerProperty, topProp, depth + 1, yield);
+                }
+                else if constexpr (std::is_same_v<T, FSetProperty>)
+                {
+                    if (!p->ElementProperty) return;
+                    const uintptr_t sb = base + p->Offset;
+                    const uintptr_t dp = *reinterpret_cast<const uintptr_t*>(sb);
+                    const int32     na = *reinterpret_cast<const int32*>(sb + 0x08);
+                    const int32*    id = reinterpret_cast<const int32*>(sb + 0x10);
+                    const int32*    sd = *reinterpret_cast<int32* const*>(sb + 0x20);
+                    const uint32*   bd = sd ? reinterpret_cast<const uint32*>(sd) : reinterpret_cast<const uint32*>(id);
+                    if (!dp || na <= 0 || na > 5'000'000) return;
+                    const int32 es = p->ElementProperty->ElementSize + 8;
+                    for (int32 i = 0; i < na; ++i)
+                        if (bd && (bd[i / 32] & (1u << (i % 32))))
+                            ExtractRefs(dp + static_cast<uintptr_t>(i) * es, p->ElementProperty, topProp, depth + 1, yield);
+                }
+                else if constexpr (std::is_same_v<T, FMapProperty>)
+                {
+                    if (!p->KeyProperty || !p->ValueProperty) return;
+                    const uintptr_t mb = base + p->Offset;
+                    const uintptr_t dp = *reinterpret_cast<const uintptr_t*>(mb);
+                    const int32     na = *reinterpret_cast<const int32*>(mb + 0x08);
+                    const int32*    id = reinterpret_cast<const int32*>(mb + 0x10);
+                    const int32*    sd = *reinterpret_cast<int32* const*>(mb + 0x20);
+                    const uint32*   bd = sd ? reinterpret_cast<const uint32*>(sd) : reinterpret_cast<const uint32*>(id);
+                    if (!dp || na <= 0 || na > 5'000'000) return;
+                    const int32 ps = (((p->ValueProperty->Offset + p->ValueProperty->ElementSize) + 7) & ~7) + 8;
+                    for (int32 i = 0; i < na; ++i)
+                        if (bd && (bd[i / 32] & (1u << (i % 32))))
+                        {
+                            const uintptr_t pb = dp + static_cast<uintptr_t>(i) * ps;
+                            ExtractRefs(pb, p->KeyProperty,   topProp, depth + 1, yield);
+                            ExtractRefs(pb, p->ValueProperty, topProp, depth + 1, yield);
+                        }
+                }
+                // weak / lazy / soft / delegate: intentionally not followed (v1).
+            });
+        }
+
+        void ForEachRef(UObject* obj, const RefYield& yield)
+        {
+            if (!obj || !obj->Class) return;
+            const uintptr_t base = reinterpret_cast<uintptr_t>(obj);
+            for (UClass* cur : UClassHierarchyRange(obj->Class))
+                for (FField* f : FFieldRange(cur->ChildProperties))
+                    if (auto* p = FieldCast::Cast<FProperty>(f)) ExtractRefs(base, p, p, 0, yield);
+        }
+    } // namespace RefScan
+
+    void RefsTo(const CommandContext& ctx)
+    {
+        if (ctx.ArgCount() < 2)
+        {
+            warn("[cmd:refsto] usage: refsto <name> [depth] — finds objects referencing "
+                 "<name>; depth default 1, 'all' walks the frontier until exhausted");
+            return;
+        }
+        const std::string needle = ctx.Arg(1);
+        int depth = 1;
+        if (ctx.ArgCount() >= 3)
+        {
+            const std::string& d = ctx.Arg(2);
+            depth = (d == "all") ? 16 : (std::max)(1, static_cast<int>(std::strtol(d.c_str(), nullptr, 10)));
+        }
+
+        // Reads live instance memory ⇒ must run on the game thread (the GObjects
+        // table and object layouts can be mutated by GC off-thread otherwise).
+        EnqueueOnce([needle, depth]()
+        {
+            UObject* target = nullptr;
+            for (int i = 0; i < UObject::GObjects->Num(); ++i)
+            {
+                auto* o = UObject::GObjects->GetByIndex(i);
+                if (!o || !Kismet::IsValid(o)) continue;
+                if (PropertyInspector::NameMatches(o->GetName(), needle, true)) { target = o; break; }
+            }
+            if (!target) { warn("[cmd:refsto] no object matches '{}'", needle); return; }
+
+            info("[cmd:refsto] target: {} ({}) — reverse search depth {}",
+                 target->GetName(), target->Class ? target->Class->GetName() : "?", depth);
+
+            std::unordered_set<UObject*> visited { target };
+            std::unordered_set<UObject*> frontier{ target };
+            constexpr int kMaxPrintPerLevel = 100;
+            int grandTotal = 0;
+            int levelsRun  = 0;
+
+            for (int level = 1; level <= depth && !frontier.empty(); ++level)
+            {
+                // Ancestors of every frontier class — a candidate can only point at
+                // the frontier through a property whose declared type is one of these.
+                RefScan::ClassSet relevant;
+                for (UObject* fo : frontier)
+                    if (fo->Class)
+                        for (UClass* c : UClassHierarchyRange(fo->Class)) relevant.insert(c);
+
+                // referrer, owning property name, the frontier object it points at
+                std::vector<std::tuple<UObject*, std::string, UObject*>> hits;
+                const int num = UObject::GObjects->Num();
+                for (int i = 0; i < num; ++i)
+                {
+                    auto* obj = UObject::GObjects->GetByIndex(i);
+                    if (!obj || !Kismet::IsValid(obj) || visited.count(obj)) continue;
+                    UClass* k = obj->Class;
+                    if (!k) continue;
+
+                    // Class-capability prune.
+                    const RefScan::DeclInfo& decl = RefScan::DeclTypesForClass(k);
+                    bool possible = decl.universal;
+                    if (!possible)
+                        for (UClass* p : decl.types)
+                            if (relevant.count(p)) { possible = true; break; }
+                    if (!possible) continue;
+
+                    UObject*   pointee = nullptr;
+                    FProperty* viaProp = nullptr;
+                    RefScan::ForEachRef(obj, [&](UObject* po, FProperty* tp)
+                    {
+                        if (!pointee && frontier.count(po)) { pointee = po; viaProp = tp; }
+                    });
+                    if (pointee)
+                        hits.emplace_back(obj, viaProp ? viaProp->Name.ToString() : "?", pointee);
+                }
+
+                if (hits.empty()) break;   // frontier exhausted
+
+                // Promote hits into the next frontier.
+                std::unordered_set<UObject*> next;
+                for (auto& h : hits) { visited.insert(std::get<0>(h)); next.insert(std::get<0>(h)); }
+
+                // Group referrers under the object they point at, so a shared target
+                // is named once instead of repeated on every line.
+                std::vector<UObject*> order;
+                std::unordered_map<UObject*, std::vector<std::pair<UObject*, std::string>>> byPointee;
+                for (auto& [referrer, prop, pointee] : hits)
+                {
+                    auto& v = byPointee[pointee];
+                    if (v.empty()) order.push_back(pointee);
+                    v.emplace_back(referrer, prop);
+                }
+
+                info("[cmd:refsto] level {} — {} referrer(s) → {} object(s)",
+                     level, hits.size(), order.size());
+                int printed = 0; bool truncated = false;
+                for (UObject* pointee : order)
+                {
+                    auto& refs = byPointee[pointee];
+                    info("  {} ({}) ← {} referrer(s):", pointee->GetName(),
+                         pointee->Class ? pointee->Class->GetName() : "?", refs.size());
+                    for (auto& [referrer, prop] : refs)
+                    {
+                        if (printed >= kMaxPrintPerLevel) { truncated = true; break; }
+                        info("      [{}] {}.{}",
+                             referrer->Class ? referrer->Class->GetName() : "?",
+                             referrer->GetName(), prop);
+                        ++printed;
+                    }
+                    if (truncated) break;
+                }
+                if (truncated)
+                    info("  ... ({} more not shown)", static_cast<int>(hits.size()) - printed);
+
+                grandTotal += static_cast<int>(hits.size());
+                ++levelsRun;
+                frontier.swap(next);
+            }
+
+            info("[cmd:refsto] done — {} total referrer(s) across {} level(s)",
+                 grandTotal, levelsRun);
+        });
+    }
+
 } // anonymous namespace
 
 void RegisterSharedCommands(CommandHandler& handler)
@@ -660,6 +935,7 @@ void RegisterSharedCommands(CommandHandler& handler)
     handler.Register("scanall",   ScanAll,   "Inspection", R"(Scan all classes for server RPCs and log them)");
     handler.Register("dumpfuncs", DumpFuncs, "Inspection", R"(List every UFunction on a class/object across its hierarchy with flag tags: dumpfuncs <class-or-object> [name-filter])");
     handler.Register("findobjs",  FindObjs,  "Inspection", R"(Find objects in GObjects by name, grouped by kind: findobjs <name> [cdo|deck|world|other ...] — tags each hit (CDO/DECK/world/other) and prints per-group counts; group tokens narrow the listing)");
+    handler.Register("refsto",     RefsTo,    "Inspection", R"(Find objects that reference a target (direct + transitive): refsto <name> [depth|all] — reverse-BFS over reflected object/struct/array/set/map refs (soft/weak not followed); depth default 1)");
     handler.Register("dumpdispatch", DumpDispatch, "Inspection", R"(Show ProcessEvent dispatch-cache occupancy: total/enabled callbacks, byFunctionPtr/byFunctionName bucket counts, and wildcard count)");
 
     // Variables (implementations live in Lib_VarSystem)

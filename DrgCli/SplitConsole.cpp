@@ -181,6 +181,9 @@ void SplitConsole::FillDividerInto(std::vector<CHAR_INFO>& buf, SHORT w, int row
 //   neither       → "" (plain dashes)
 std::string SplitConsole::BuildLogDivTag() const
 {
+    if (m_peekActive)
+        return " [PEEK \xe2\x80\x94 press any key to close] ";
+
     std::string tag;
     if (m_filterActive)
     {
@@ -261,6 +264,8 @@ void SplitConsole::RenderAll()
 
 void SplitConsole::RenderLogPane()
 {
+    if (m_peekActive) { RenderPeekOverlay(); return; }
+
     int logH = m_logDivRow;
     if (logH <= 0) return;
 
@@ -285,6 +290,80 @@ void SplitConsole::RenderLogPane()
         FillLineInto(buf, w, baseRow + i, m_logHistory[hi], attr);
     }
     ApplySelectionToBuffer(buf, w);
+
+    COORD      sz{w, static_cast<SHORT>(logH)};
+    COORD      origin{0, 0};
+    SMALL_RECT dest{0, 0, static_cast<SHORT>(w - 1), static_cast<SHORT>(logH - 1)};
+    WriteConsoleOutputW(m_hOut, buf.data(), sz, origin, &dest);
+}
+
+// Greedy word-wrap a wide string to `w` columns. Breaks on the last space that
+// fits; hard-breaks any single token longer than a line.
+static std::vector<std::wstring> WrapWide(const std::wstring& s, int w)
+{
+    std::vector<std::wstring> out;
+    if (w <= 0) return out;
+    size_t pos = 0;
+    while (pos < s.size())
+    {
+        if ((int)(s.size() - pos) <= w) { out.push_back(s.substr(pos)); break; }
+        size_t brk = s.rfind(L' ', pos + w - 1);
+        if (brk == std::wstring::npos || brk <= pos)
+        {
+            out.push_back(s.substr(pos, w));   // no break point — hard split
+            pos += w;
+        }
+        else
+        {
+            out.push_back(s.substr(pos, brk - pos));
+            pos = brk + 1;                     // skip the break space
+        }
+    }
+    return out;
+}
+
+// Full-text overlay for a single peeked log line, word-wrapped across the whole
+// log pane. Replaces the normal log view until the peek is dismissed.
+void SplitConsole::RenderPeekOverlay()
+{
+    int logH = m_logDivRow;
+    if (logH <= 0) return;
+
+    CONSOLE_SCREEN_BUFFER_INFO csbi{};
+    GetConsoleScreenBufferInfo(m_hOut, &csbi);
+    SHORT w   = csbi.dwSize.X;
+    WORD attr = csbi.wAttributes;
+
+    std::wstring wl;
+    if (!m_peekText.empty())
+    {
+        int n = MultiByteToWideChar(CP_UTF8, 0, m_peekText.c_str(), (int)m_peekText.size(), nullptr, 0);
+        if (n > 0)
+        {
+            wl.resize(n);
+            MultiByteToWideChar(CP_UTF8, 0, m_peekText.c_str(), (int)m_peekText.size(), wl.data(), n);
+        }
+    }
+
+    std::vector<std::wstring> rows = WrapWide(wl, w);
+
+    std::vector<CHAR_INFO> buf(logH * w);
+    for (auto& ci : buf) { ci.Char.UnicodeChar = L' '; ci.Attributes = attr; }
+
+    auto putRow = [&](int row, const std::wstring& s)
+    {
+        int base = row * w;
+        for (int c = 0; c < w; ++c)
+            buf[base + c].Char.UnicodeChar = (c < (int)s.size()) ? s[c] : L' ';
+    };
+
+    const bool truncated = (int)rows.size() > logH;
+    const int  shown     = truncated ? logH - 1 : (int)rows.size();
+    for (int i = 0; i < shown; ++i) putRow(i, rows[i]);
+    if (truncated)
+        putRow(logH - 1,
+            L"… (" + std::to_wstring((int)rows.size() - shown) +
+            L" more lines — widen the window to see all)");
 
     COORD      sz{w, static_cast<SHORT>(logH)};
     COORD      origin{0, 0};
@@ -494,6 +573,93 @@ void SplitConsole::ClearFilterUnderLock()
     RenderLogPane();
     DrawLogDivider();
     SetConsoleCursorPosition(m_hOut, cur);
+}
+
+bool SplitConsole::RevealFilteredLineUnderLock(COORD pos)
+{
+    if (!m_filterActive) return false;
+
+    int logH = m_logDivRow;
+    if (logH <= 0) return false;
+    if (pos.Y < 0 || pos.Y >= logH) return false;   // only react inside the log pane
+
+    // Resolve the clicked line to an absolute m_logHistory index using the CURRENT
+    // (filtered) view — this must happen before we drop the filter.
+    SelCoord coord = ScreenToHistory(pos);
+    if (!coord.valid()) return false;
+    const int hi       = coord.historyIdx;
+    const int clickRow = std::max(0, std::min((int)pos.Y, logH - 1));
+
+    // Drop the filter and any in-progress/finished selection.
+    m_filterActive = false;
+    m_filterStr.clear();
+    m_filteredIndices.clear();
+    m_selActive  = false;
+    m_selDone    = false;
+    m_selAnchor  = {};
+    m_selCurrent = {};
+
+    // Keep the clicked line on the same screen row so it doesn't visually jump.
+    // Full pane: row = hi - (endIdx - logH) and endIdx = total - scrollOffset, so
+    //   scrollOffset = total - hi - logH + row.
+    // Clamping to [0, maxOff] handles the "line near the top of the buffer" case
+    // by landing on the oldest page (closest position that still exists).
+    const int total  = (int)m_logHistory.size();
+    const int maxOff = std::max(0, total - logH);
+    int scrollOff = total - hi - logH + clickRow;
+    if (scrollOff < 0)      scrollOff = 0;
+    if (scrollOff > maxOff) scrollOff = maxOff;
+    m_scrollOffset = scrollOff;
+
+    COORD cur = GetCursorPos();
+    RenderLogPane();
+    DrawLogDivider();
+    SetConsoleCursorPosition(m_hOut, cur);
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Peek API
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool SplitConsole::PeekLineUnderLock(COORD pos)
+{
+    if (m_peekActive)   return false;   // already peeking
+    if (m_filterActive) return false;   // double-click reveals filtered lines instead
+
+    int logH = m_logDivRow;
+    if (logH <= 0) return false;
+    if (pos.Y < 0 || pos.Y >= logH) return false;   // only react inside the log pane
+
+    SelCoord coord = ScreenToHistory(pos);
+    if (!coord.valid()) return false;
+    const int hi = coord.historyIdx;
+    if (hi < 0 || hi >= (int)m_logHistory.size()) return false;
+
+    m_peekText   = m_logHistory[hi];
+    m_peekActive = true;
+
+    // Drop the nascent 1-line selection from the leading click of the double.
+    m_selActive = false; m_selDone = false; m_selAnchor = {}; m_selCurrent = {};
+
+    COORD cur = GetCursorPos();
+    RenderLogPane();        // delegates to RenderPeekOverlay while m_peekActive
+    DrawLogDivider();
+    SetConsoleCursorPosition(m_hOut, cur);
+    return true;
+}
+
+bool SplitConsole::ClosePeekUnderLock()
+{
+    if (!m_peekActive) return false;
+    m_peekActive = false;
+    m_peekText.clear();
+
+    COORD cur = GetCursorPos();
+    RenderLogPane();
+    DrawLogDivider();
+    SetConsoleCursorPosition(m_hOut, cur);
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
