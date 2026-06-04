@@ -537,6 +537,98 @@ namespace
                             : (" match '" + filter + "' of " + std::to_string(total)));
     }
 
+    // ── findobjs: locate objects in GObjects by name, grouped by kind ─────────
+    // Walks the whole GObjects table fuzzy-matching <name>, classifies every hit
+    // into one of four groups, tags each printed line with its group, and prints
+    // per-group counts. Optional trailing group tokens (cdo|deck|world|other)
+    // narrow the *listing* to those groups; the counts are always computed across
+    // every group so you see the full distribution regardless of the filter.
+    //   findobjs Player           → everything matching "Player", all groups
+    //   findobjs * cdo            → every class-default object
+    //   findobjs Card deck world  → DECK_ + active-world hits matching "Card"
+    enum class ObjGroup { Cdo = 0, Deck = 1, World = 2, Other = 3 };
+
+    const char* ObjGroupTag(ObjGroup g)
+    {
+        switch (g)
+        {
+            case ObjGroup::Cdo:   return "CDO";
+            case ObjGroup::Deck:  return "DECK";
+            case ObjGroup::World: return "world";
+            default:              return "other";
+        }
+    }
+
+    // One object → exactly one group, by priority: CDO (UE's Default__ prefix),
+    // then the DECK_ asset prefix, then live-world membership, else other.
+    ObjGroup ClassifyObject(UObject* obj, const std::string& name)
+    {
+        if (name.rfind("Default__", 0) == 0) return ObjGroup::Cdo;
+        if (name.rfind("DECK_", 0)     == 0) return ObjGroup::Deck;
+        if (IsInActiveWorld(obj))            return ObjGroup::World;
+        return ObjGroup::Other;
+    }
+
+    void FindObjs(const CommandContext& ctx)
+    {
+        if (ctx.ArgCount() < 2)
+        {
+            warn("[cmd:findobjs] usage: findobjs <name> [cdo|deck|world|other ...] "
+                 "— '*' lists everything; trailing group tokens narrow the listing");
+            return;
+        }
+        const std::string& needle = ctx.Arg(1);
+
+        // Parse optional group filter tokens. None given ⇒ list all groups.
+        bool want[4] = { false, false, false, false };
+        bool anyFilter = false;
+        for (size_t i = 2; i < ctx.args.size(); ++i)
+        {
+            std::string t = ctx.args[i];
+            std::transform(t.begin(), t.end(), t.begin(),
+                           [](unsigned char c) { return (char)std::tolower(c); });
+            if      (t == "cdo")   { want[(int)ObjGroup::Cdo]   = true; anyFilter = true; }
+            else if (t == "deck")  { want[(int)ObjGroup::Deck]  = true; anyFilter = true; }
+            else if (t == "world") { want[(int)ObjGroup::World] = true; anyFilter = true; }
+            else if (t == "other") { want[(int)ObjGroup::Other] = true; anyFilter = true; }
+            else warn("[cmd:findobjs] ignoring unknown group token '{}' "
+                      "(use cdo|deck|world|other)", ctx.args[i]);
+        }
+        auto wanted = [&](ObjGroup g) { return !anyFilter || want[(int)g]; };
+
+        constexpr int kMaxResults = 100;
+        int  counts[4] = { 0, 0, 0, 0 };   // total matches per group (uncapped)
+        int  shown     = 0;
+        bool capped    = false;
+        for (int i = 0; i < UObject::GObjects->Num(); ++i)
+        {
+            auto* obj = UObject::GObjects->GetByIndex(i);
+            if (!obj) continue;
+            const std::string name = obj->GetName();
+            if (!PropertyInspector::NameMatches(name, needle, true)) continue;
+
+            const ObjGroup g = ClassifyObject(obj, name);
+            ++counts[(int)g];
+            if (!wanted(g)) continue;
+
+            if (shown < kMaxResults)
+            {
+                const std::string className = obj->Class ? obj->Class->GetName() : "?";
+                const std::string outerName = obj->Outer ? obj->Outer->GetName() : "?";
+                info("  [{:<5}] [{}] {}  (outer: {})", ObjGroupTag(g), className, name, outerName);
+                ++shown;
+            }
+            else capped = true;
+        }
+        if (capped)
+            info("  ... (listing capped at {} — pass a group token or refine the name)", kMaxResults);
+
+        const int total = counts[0] + counts[1] + counts[2] + counts[3];
+        info("[cmd:findobjs] '{}' — {} match(es): CDO {}, DECK {}, world {}, other {}{}",
+             needle, total, counts[0], counts[1], counts[2], counts[3],
+             anyFilter ? " (listing filtered)" : "");
+    }
+
 } // anonymous namespace
 
 void RegisterSharedCommands(CommandHandler& handler)
@@ -555,6 +647,7 @@ void RegisterSharedCommands(CommandHandler& handler)
     handler.Register("findclass", FindClass, "Inspection", R"(Find classes by name (fuzzy substring))");
     handler.Register("scanall",   ScanAll,   "Inspection", R"(Scan all classes for server RPCs and log them)");
     handler.Register("dumpfuncs", DumpFuncs, "Inspection", R"(List every UFunction on a class/object across its hierarchy with flag tags: dumpfuncs <class-or-object> [name-filter])");
+    handler.Register("findobjs",  FindObjs,  "Inspection", R"(Find objects in GObjects by name, grouped by kind: findobjs <name> [cdo|deck|world|other ...] — tags each hit (CDO/DECK/world/other) and prints per-group counts; group tokens narrow the listing)");
 
     // Variables (implementations live in Lib_VarSystem)
     handler.Register("get",   Cmd_Get,   "Variables", R"(Get a variable: get <n>)");

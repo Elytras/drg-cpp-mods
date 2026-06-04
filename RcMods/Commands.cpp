@@ -195,34 +195,6 @@ namespace RcCmd
             warn("[cmd:setowner] unknown status '{}'", status);
     }
 
-    static void FindObjects(const CommandContext& ctx)
-    {
-        if (ctx.ArgCount() < 2) { warn("[cmd:findobjs] usage: findobjs <name> [world]"); return; }
-        const std::string& needle    = ctx.Arg(1);
-        bool               worldOnly = ctx.ArgCount() >= 3 && ctx.Arg(2) == "world";
-
-        constexpr int kMaxResults = 100;
-        int hits = 0;
-        for (int i = 0; i < UObject::GObjects->Num(); ++i)
-        {
-            auto* obj = UObject::GObjects->GetByIndex(i);
-            if (!obj) continue;
-            if (!PropertyInspector::NameMatches(obj->GetName(), needle, true)) continue;
-            if (worldOnly && !IsInActiveWorld(obj)) continue;
-
-            const std::string className = obj->Class ? obj->Class->GetName() : "?";
-            const std::string outerName = obj->Outer ? obj->Outer->GetName() : "?";
-            info("  [{}] {}  (outer: {})", className, obj->GetName(), outerName);
-            if (++hits >= kMaxResults)
-            {
-                info("  ... (capped at {} results — refine the query)", kMaxResults);
-                break;
-            }
-        }
-        info("[cmd:findobjs] {} match(es) for '{}'{}",
-            hits, needle, worldOnly ? " (world only)" : "");
-    }
-
     // Scan replicated actors for server RPCs — populates the `call` cache
     // AND sends the ScanResponse for CLI autocomplete.
     static void ScanFuncs(const CommandContext& ctx)
@@ -659,9 +631,7 @@ void RegisterCommands(CommandHandler& handler)
     // logallevents, stoptick, get/set/unset/vars.
     RegisterSharedCommands(handler);
 
-    // Inspection
-    handler.Register("findobjs", RcCmd::FindObjects, "Inspection",
-        R"(Find objects by name in GObjects: findobjs <name> [world])");
+    // Inspection  (findobjs now lives in SharedCommands.cpp — shared by both games)
     handler.Register("prop",      PropertyInspector::DispatchCommand, "Inspection",
         R"(prop <cdo|obj> <n> <dump|get|set|list> [prop] [value] [fuzzy] [class <name>])");
     handler.Register("scanfuncs", RcCmd::ScanFuncs, "Inspection",
