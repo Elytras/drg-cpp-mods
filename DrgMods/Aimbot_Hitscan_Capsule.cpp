@@ -1,4 +1,4 @@
-// Aimbot_Hitscan_Capsule.cpp — UCapsuleHitscanComponent (capsule-sweep weapons, e.g. Experimental arc-welder).
+﻿// Aimbot_Hitscan_Capsule.cpp — UCapsuleHitscanComponent (capsule-sweep weapons, e.g. Experimental arc-welder).
 //
 // UCapsuleHitscanComponent packs all hits in the same FMultiHitScanHits format as
 // UMultiHitscanComponent: parallel Hits/Components/PhysicalMaterials arrays.
@@ -26,9 +26,9 @@ namespace AimAssist
     void EnableHitscanCapsuleOptimize()
     {
         if (HitscanCapsuleOptimizeHandle) return;
-        HitscanCapsuleOptimizeHandle = OnProcessEventByNameAndClass(
-            "Server_RegisterHit", UCapsuleHitscanComponent::StaticClass(),
-            [](UObject* /*Obj*/, UFunction*, void* Parms) {
+        HitscanCapsuleOptimizeHandle = OnProcessEvent()
+            .Name("Server_RegisterHit").Class(UCapsuleHitscanComponent::StaticClass())
+            .Bind([](UObject* /*Obj*/, UFunction*, void* Parms) {
                 if (!Parms) return;
                 auto* p = reinterpret_cast<Params::CapsuleHitscanComponent_Server_RegisterHit*>(Parms);
                 auto& hits       = p->hitResults.Hits;
@@ -91,10 +91,7 @@ namespace AimAssist
 
                 if constexpr (Debug::LogSilentAim)
                     info("[silentaim/capsule] done: modified={} total={}", modified, hits.Num());
-            },
-            ClassMatchMode::ExactOrSubclass,
-            ExecutionTiming::Before,
-            ExecutionMode::CallOriginal);
+            });
     }
 
     void DisableHitscanCapsuleOptimize()

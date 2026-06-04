@@ -1069,8 +1069,9 @@ namespace Commands
     }
 
     static GameHooks::HookToggle<GameHooks::ProcessEventHook> s_chatLog{
-        [] { return GameHooks::OnProcessEventByNameAndClass(
-            "ClientNewMessage", SDK::AFSDGameState::StaticClass(), Callbacks::ServerMessageIntercept); } };
+        [] { return GameHooks::OnProcessEvent()
+            .Name("ClientNewMessage").Class(SDK::AFSDGameState::StaticClass())
+            .Bind(Callbacks::ServerMessageIntercept); } };
 
     void LogChat(const CommandContext& = State::dummyCtx)
     {
@@ -1123,9 +1124,10 @@ namespace Commands
         {
             auto* DanceFunc = SDK::APlayerCharacter::StaticClass()
                 ->GetFunction("PlayerCharacter", "Server_SetIsDancing");
-            State::DanceCallback = GameHooks::OnProcessEventAdvanced(
-                Callbacks::DanceIntercept, "Server_SetIsDancing",
-                SDK::APlayerCharacter::StaticClass(), nullptr, DanceFunc);
+            State::DanceCallback = GameHooks::OnProcessEvent()
+                .Name("Server_SetIsDancing").Class(SDK::APlayerCharacter::StaticClass())
+                .Function(DanceFunc)
+                .Bind(Callbacks::DanceIntercept);
             info("[cmd:twerk] Anti-twerk enabled");
         }
         else
@@ -1166,7 +1168,9 @@ namespace Commands
                 error("[cmd:ignoreproxy] Failed to find class 'ProxyMod_C'.");
                 return 0;
             }
-            return GameHooks::OnProcessEventByNameAndClass("Init", ProxyMod, Callbacks::ProxyModHook);
+            return GameHooks::OnProcessEvent()
+                .Name("Init").Class(ProxyMod)
+                .Bind(Callbacks::ProxyModHook);
         } };
 
     void IgnoreProxy(const CommandContext& = State::dummyCtx)

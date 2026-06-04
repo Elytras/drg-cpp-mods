@@ -220,9 +220,9 @@ namespace
 
     // ── stoptick ─────────────────────────────────────────────────────────────
     GameHooks::HookToggle<GameHooks::ProcessEventHook> s_tickWatcher{
-        [] { return GameHooks::OnProcessEventByNameAndClass(
-            "ReceiveTick", AActor::StaticClass(),
-            [](UObject* Object, UFunction*, void*)
+        [] { return GameHooks::OnProcessEvent()
+            .Name("ReceiveTick").Class(AActor::StaticClass())
+            .Bind([](UObject* Object, UFunction*, void*)
             {
                 if (Object) info("[ReceiveTick] {}", Object->GetName());
             }); } };
@@ -629,6 +629,18 @@ namespace
              anyFilter ? " (listing filtered)" : "");
     }
 
+    // ── dumpdispatch ──────────────────────────────────────────────────────────
+    void DumpDispatch(const CommandContext&)
+    {
+        const auto st = GameHooks::ProcessEventHook::Get().GetDispatchStats();
+        info("[cmd:dumpdispatch] ProcessEvent callbacks: {} ({} enabled)", st.totalCallbacks, st.enabled);
+        info("  byFunctionPtr buckets : {}", st.byFunctionPtrKeys);
+        info("  byFunctionName buckets: {}", st.byFunctionNameKeys);
+        info("  wildcards             : {}", st.wildcards);
+        if (st.wildcards > 0)
+            warn("  {} wildcard callback(s) run on EVERY ProcessEvent — keep this low", st.wildcards);
+    }
+
 } // anonymous namespace
 
 void RegisterSharedCommands(CommandHandler& handler)
@@ -648,6 +660,7 @@ void RegisterSharedCommands(CommandHandler& handler)
     handler.Register("scanall",   ScanAll,   "Inspection", R"(Scan all classes for server RPCs and log them)");
     handler.Register("dumpfuncs", DumpFuncs, "Inspection", R"(List every UFunction on a class/object across its hierarchy with flag tags: dumpfuncs <class-or-object> [name-filter])");
     handler.Register("findobjs",  FindObjs,  "Inspection", R"(Find objects in GObjects by name, grouped by kind: findobjs <name> [cdo|deck|world|other ...] — tags each hit (CDO/DECK/world/other) and prints per-group counts; group tokens narrow the listing)");
+    handler.Register("dumpdispatch", DumpDispatch, "Inspection", R"(Show ProcessEvent dispatch-cache occupancy: total/enabled callbacks, byFunctionPtr/byFunctionName bucket counts, and wildcard count)");
 
     // Variables (implementations live in Lib_VarSystem)
     handler.Register("get",   Cmd_Get,   "Variables", R"(Get a variable: get <n>)");

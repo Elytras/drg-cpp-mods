@@ -1,4 +1,4 @@
-#include "Lib_GameHooks.h"
+﻿#include "Lib_GameHooks.h"
 #include "Lib_ObjectFactory.h"   // FStaticConstructObjectParameters, ObjectFactory::GetStaticConstructObject
 #include <unordered_set>
 
@@ -26,7 +26,9 @@ void ProcessEventHook::StoreState(std::shared_ptr<const CallbackState> s)
 {
     DBG_CHECK_PTR(s.get());
     s->Validate();
+    const bool nonEmpty = !s->list.empty();
     std::atomic_store(&stateOwner_, std::move(s));
+    hasCallbacks_.store(nonEmpty, std::memory_order_release);
     DBG_ASSERT(std::atomic_load(&stateOwner_) != nullptr, "State store failed");
 }
 
@@ -196,8 +198,15 @@ void __fastcall ProcessEventHook::HookedProcessEvent(UObject* Object, UFunction*
 
     inst->DrainTasks();
 
-    auto state = std::atomic_load(&inst->stateOwner_);
-    bool hasCallbacks = state && !state->list.empty();
+    // Fast path: when no callbacks are registered (the common case) skip the
+    // atomic<shared_ptr> load entirely — the gate is a plain atomic<bool>.
+    std::shared_ptr<const CallbackState> state;
+    bool hasCallbacks = false;
+    if (inst->hasCallbacks_.load(std::memory_order_acquire))
+    {
+        state = std::atomic_load(&inst->stateOwner_);
+        hasCallbacks = state && !state->list.empty();
+    }
 
     if (hasCallbacks)
     {
@@ -317,6 +326,19 @@ CallbackHandle ProcessEventHook::AddCallback(ProcessEventCallback callback,
     return handle;
 }
 
+ProcessEventHook::DispatchStats ProcessEventHook::GetDispatchStats() const
+{
+    DispatchStats st;
+    auto state = std::atomic_load(&stateOwner_);
+    if (!state) return st;
+    st.totalCallbacks     = state->list.size();
+    st.byFunctionPtrKeys  = state->cache.byFunctionPtr.size();
+    st.byFunctionNameKeys = state->cache.byFunctionName.size();
+    st.wildcards          = state->cache.wildcards.size();
+    for (const auto& e : state->list) if (e.enabled) ++st.enabled;
+    return st;
+}
+
 // ── Free convenience functions ────────────────────────────────────────────────
 
 bool InstallProcessEventHook() { return ProcessEventHook::Get().Install(); }
@@ -333,12 +355,6 @@ CallbackHandle OnProcessEventByClass(UClass* cls, ProcessEventCallback cb, Class
     return ProcessEventHook::Get().AddCallback(std::move(cb), "", cls, nullptr, nullptr, m, t, mode);
 }
 
-CallbackHandle OnProcessEventByNameAndClass(const std::string& fn, UClass* cls, ProcessEventCallback cb, ClassMatchMode m, ExecutionTiming t, ExecutionMode mode)
-{
-    DBG_ASSERT(!fn.empty(), "Empty function name"); DBG_CHECK_PTR(cls); DBG_ASSERT(cb, "Null callback");
-    return ProcessEventHook::Get().AddCallback(std::move(cb), fn, cls, nullptr, nullptr, m, t, mode);
-}
-
 CallbackHandle OnProcessEventByObject(const UObject* obj, ProcessEventCallback cb, ExecutionTiming t, ExecutionMode mode)
 {
     DBG_CHECK_PTR(obj); DBG_ASSERT(cb, "Null callback");
@@ -351,32 +367,10 @@ CallbackHandle OnProcessEventByFunction(UFunction* func, ProcessEventCallback cb
     return ProcessEventHook::Get().AddCallback(std::move(cb), "", nullptr, nullptr, func, ClassMatchMode::ExactOrSubclass, t, mode);
 }
 
-CallbackHandle OnProcessEventByFunctionAndObject(UFunction* func, const UObject* obj, ProcessEventCallback cb, ExecutionTiming t, ExecutionMode mode)
-{
-    DBG_CHECK_PTR(func); DBG_CHECK_PTR(obj); DBG_ASSERT(cb, "Null callback");
-    return ProcessEventHook::Get().AddCallback(std::move(cb), "", nullptr, obj, func, ClassMatchMode::ExactOrSubclass, t, mode);
-}
-
 CallbackHandle OnProcessEventAll(ProcessEventCallback cb, ExecutionTiming t, ExecutionMode mode)
 {
     DBG_ASSERT(cb, "Null callback");
     return ProcessEventHook::Get().AddCallback(std::move(cb), "", nullptr, nullptr, nullptr, ClassMatchMode::ExactOrSubclass, t, mode);
-}
-
-CallbackHandle OnProcessEventAdvanced(ProcessEventCallback cb,
-    const std::string& fn, UClass* cls, const UObject* obj,
-    UFunction* func, ClassMatchMode m, ExecutionTiming t, ExecutionMode mode)
-{
-    DBG_ASSERT(cb, "Null callback");
-    return ProcessEventHook::Get().AddCallback(std::move(cb), fn, cls, obj, func, m, t, mode);
-}
-
-CallbackHandle OnProcessEventAdvanced(const CallbackParams& p, ProcessEventCallback cb)
-{
-    DBG_ASSERT(cb, "Null callback");
-    return ProcessEventHook::Get().AddCallback(std::move(cb),
-        p.functionName, p.classFilter, p.objectFilter, p.functionFilter,
-        p.classMatchMode, p.timing, p.mode);
 }
 
 bool RemoveHook            (CallbackHandle h) { DBG_ASSERT(h > 0, "Invalid handle"); return ProcessEventHook::Get().RemoveCallback(h); }
@@ -402,7 +396,9 @@ EngineTickHook::EngineTickHook()
 void EngineTickHook::StoreState(std::shared_ptr<const CallbackList> s)
 {
     DBG_CHECK_PTR(s.get());
+    const bool nonEmpty = !s->empty();
     std::atomic_store(&stateOwner_, std::move(s));
+    hasCallbacks_.store(nonEmpty, std::memory_order_release);
     DBG_ASSERT(std::atomic_load(&stateOwner_) != nullptr, "State store failed");
 }
 
@@ -482,8 +478,14 @@ void __fastcall EngineTickHook::HookedTick(UEngine* Engine, float DeltaSeconds, 
     if (depthBefore == 0)
         inst->DrainTasks();
 
-    auto state = std::atomic_load(&inst->stateOwner_);
-    bool hasCallbacks = state && !state->empty();
+    // Fast path: skip the atomic<shared_ptr> load when no tick callbacks exist.
+    std::shared_ptr<const CallbackList> state;
+    bool hasCallbacks = false;
+    if (inst->hasCallbacks_.load(std::memory_order_acquire))
+    {
+        state = std::atomic_load(&inst->stateOwner_);
+        hasCallbacks = state && !state->empty();
+    }
 
     if (hasCallbacks)
     {
@@ -592,7 +594,9 @@ StaticConstructObjectHook::StaticConstructObjectHook()
 void StaticConstructObjectHook::StoreState(std::shared_ptr<const CallbackList> s)
 {
     DBG_CHECK_PTR(s.get());
+    const bool nonEmpty = !s->empty();
     std::atomic_store(&stateOwner_, std::move(s));
+    hasCallbacks_.store(nonEmpty, std::memory_order_release);
     DBG_ASSERT(std::atomic_load(&stateOwner_) != nullptr, "State store failed");
 }
 
@@ -680,8 +684,16 @@ SDK::UObject* StaticConstructObjectHook::HookedSCO(FStaticConstructObjectParamet
     }
     else
     {
-        auto state = std::atomic_load(&inst->stateOwner_);
-        const bool hasCallbacks = state && !state->empty();
+        // Fast path: skip the atomic<shared_ptr> load when no SCO callbacks exist.
+        // This is the hottest hook (fires on nearly every UObject construction),
+        // so the plain atomic<bool> gate matters most here.
+        std::shared_ptr<const CallbackList> state;
+        bool hasCallbacks = false;
+        if (inst->hasCallbacks_.load(std::memory_order_acquire))
+        {
+            state = std::atomic_load(&inst->stateOwner_);
+            hasCallbacks = state && !state->empty();
+        }
 
         if (hasCallbacks)
         {

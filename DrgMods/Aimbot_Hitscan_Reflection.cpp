@@ -1,4 +1,4 @@
-// Aimbot_Hitscan_Reflection.cpp — UReflectionHitscanComponent (Wavecooker / reflective laser).
+﻿// Aimbot_Hitscan_Reflection.cpp — UReflectionHitscanComponent (Wavecooker / reflective laser).
 //
 // UReflectionHitscanComponent fires a beam that can bounce off terrain surfaces.
 // Two RPCs carry result data (both use the same FReflectiveHitscanHit struct):
@@ -62,33 +62,27 @@ namespace AimAssist
     {
         if (HitscanReflectionOptimizeHandle) return;
 
-        HitscanReflectionOptimizeHandle = OnProcessEventByNameAndClass(
-            "Server_RegisterHit", UReflectionHitscanComponent::StaticClass(),
-            [](UObject* /*Obj*/, UFunction*, void* Parms) {
+        HitscanReflectionOptimizeHandle = OnProcessEvent()
+            .Name("Server_RegisterHit").Class(UReflectionHitscanComponent::StaticClass())
+            .Bind([](UObject* /*Obj*/, UFunction*, void* Parms) {
                 if (!Parms) return;
                 auto* p = reinterpret_cast<Params::ReflectionHitscanComponent_Server_RegisterHit*>(Parms);
                 if constexpr (Debug::LogSilentAim)
                     info("[silentaim/reflect] Server_RegisterHit comp={:p}",
                         static_cast<void*>(p->Hit.Component));
                 OptimizeReflectiveHit(p->Hit);
-            },
-            ClassMatchMode::ExactOrSubclass,
-            ExecutionTiming::Before,
-            ExecutionMode::CallOriginal);
+            });
 
-        HitscanReflectionReflectHandle = OnProcessEventByNameAndClass(
-            "Server_RegisterHit_Reflection", UReflectionHitscanComponent::StaticClass(),
-            [](UObject* /*Obj*/, UFunction*, void* Parms) {
+        HitscanReflectionReflectHandle = OnProcessEvent()
+            .Name("Server_RegisterHit_Reflection").Class(UReflectionHitscanComponent::StaticClass())
+            .Bind([](UObject* /*Obj*/, UFunction*, void* Parms) {
                 if (!Parms) return;
                 auto* p = reinterpret_cast<Params::ReflectionHitscanComponent_Server_RegisterHit_Reflection*>(Parms);
                 if constexpr (Debug::LogSilentAim)
                     info("[silentaim/reflect] Server_RegisterHit_Reflection comp={:p}",
                         static_cast<void*>(p->Hit.Component));
                 OptimizeReflectiveHit(p->Hit);
-            },
-            ClassMatchMode::ExactOrSubclass,
-            ExecutionTiming::Before,
-            ExecutionMode::CallOriginal);
+            });
     }
 
     void DisableHitscanReflectionOptimize()

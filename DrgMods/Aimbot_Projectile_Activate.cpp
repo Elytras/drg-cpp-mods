@@ -1,4 +1,4 @@
-// Aimbot_Projectile_Activate.cpp — AProjectileBase::Activate direction override.
+﻿// Aimbot_Projectile_Activate.cpp — AProjectileBase::Activate direction override.
 //
 // The launcher's Server_Fire RPC is just the network-replication trigger.
 // The actual projectile direction is set in AProjectileBase::Activate(
@@ -36,9 +36,9 @@ namespace AimAssist
     void EnableProjectileActivate()
     {
         if (ProjectileActivateHandle) return;
-        ProjectileActivateHandle = OnProcessEventByNameAndClass(
-            "Activate", AProjectileBase::StaticClass(),
-            [](UObject* /*Obj*/, UFunction*, void* Parms) {
+        ProjectileActivateHandle = OnProcessEvent()
+            .Name("Activate").Class(AProjectileBase::StaticClass())
+            .Bind([](UObject* /*Obj*/, UFunction*, void* Parms) {
                 if (!Parms) return;
                 if (!g_PendingRedirect.active) return;
 
@@ -75,10 +75,7 @@ namespace AimAssist
                 p->Direction.X = dir.X;
                 p->Direction.Y = dir.Y;
                 p->Direction.Z = dir.Z;
-            },
-            ClassMatchMode::ExactOrSubclass,
-            ExecutionTiming::Before,
-            ExecutionMode::CallOriginal);
+            });
     }
 
     void DisableProjectileActivate()

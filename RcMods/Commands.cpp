@@ -1,4 +1,4 @@
-#include "Commands.h"
+﻿#include "Commands.h"
 #include "Library.h"
 #include "BpModLoader.h"
 #include "NetLogConfig.h"
@@ -80,9 +80,9 @@ void InitDefaultCallbacks()
 {
     InitSharedCallbacks();
     VarSystem::RegisterBuiltinBindings();
-    GameHooks::OnProcessEventByNameAndClass(
-        "Server_SetGameOwnerStatus", AFSDPlayerState::StaticClass(),
-        [](UObject*, UFunction*, void* Params)
+    GameHooks::OnProcessEvent()
+        .Name("Server_SetGameOwnerStatus").Class(AFSDPlayerState::StaticClass())
+        .Bind([](UObject*, UFunction*, void* Params)
         {
             if (!Params) return;
             *static_cast<int32*>(Params) = 1 << (uint8)EGameOwnerStatus::Developer;

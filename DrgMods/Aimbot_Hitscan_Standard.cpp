@@ -1,4 +1,4 @@
-// Aimbot_Hitscan_Standard.cpp — hitscan hooks for UHitscanComponent / AAmmoDrivenWeapon.
+﻿// Aimbot_Hitscan_Standard.cpp — hitscan hooks for UHitscanComponent / AAmmoDrivenWeapon.
 //
 // Three hooks, registered together in ToggleSilentAim:
 //
@@ -49,9 +49,9 @@ namespace AimAssist
     void EnableHitscanSilentAim()
     {
         if (HitscanSilentAimHandle) return;
-        HitscanSilentAimHandle = OnProcessEventByNameAndClass(
-            "OnWeaponFired", AAmmoDrivenWeapon::StaticClass(),
-            [](UObject* Obj, UFunction*, void* Parms) {
+        HitscanSilentAimHandle = OnProcessEvent()
+            .Name("OnWeaponFired").Class(AAmmoDrivenWeapon::StaticClass())
+            .Bind([](UObject* Obj, UFunction*, void* Parms) {
                 if constexpr (Debug::LogSilentAim)
                     info("[silentaim/hitscan] OnWeaponFired class={} obj={:p}",
                         Obj && Obj->Class ? Obj->Class->GetName() : "?", static_cast<void*>(Obj));
@@ -127,10 +127,7 @@ namespace AimAssist
                         target->pos.X, target->pos.Y, target->pos.Z,
                         static_cast<void*>(target->mesh),
                         static_cast<void*>(target->physMat));
-            },
-            ClassMatchMode::ExactOrSubclass,
-            ExecutionTiming::Before,
-            ExecutionMode::CallOriginal);
+            });
     }
 
     void DisableHitscanSilentAim()
@@ -147,9 +144,10 @@ namespace AimAssist
     void EnableHitscanRpcRedirect()
     {
         if (HitscanRpcRedirectHandle) return;
-        HitscanRpcRedirectHandle = OnProcessEventByNameAndClass(
-            "Server_RegisterHit_Terrain", UHitscanComponent::StaticClass(),
-            [](UObject* Obj, UFunction*, void* Parms) {
+        HitscanRpcRedirectHandle = OnProcessEvent()
+            .Name("Server_RegisterHit_Terrain").Class(UHitscanComponent::StaticClass())
+            .Mode(ExecutionMode::SkipOriginal)
+            .Bind([](UObject* Obj, UFunction*, void* Parms) {
                 auto* comp = Cast<UHitscanComponent>(Obj);
                 auto* tp   = Parms
                     ? reinterpret_cast<Params::HitscanComponent_Server_RegisterHit_Terrain*>(Parms)
@@ -182,10 +180,7 @@ namespace AimAssist
                 }
 
                 g_PendingRedirect = {};
-            },
-            ClassMatchMode::ExactOrSubclass,
-            ExecutionTiming::Before,
-            ExecutionMode::SkipOriginal);
+            });
     }
 
     void DisableHitscanRpcRedirect()
@@ -207,9 +202,9 @@ namespace AimAssist
     void EnableHitscanHitOptimize()
     {
         if (HitscanHitOptimizeHandle) return;
-        HitscanHitOptimizeHandle = OnProcessEventByNameAndClass(
-            "Server_RegisterHit", UHitscanComponent::StaticClass(),
-            [](UObject* /*Obj*/, UFunction*, void* Parms) {
+        HitscanHitOptimizeHandle = OnProcessEvent()
+            .Name("Server_RegisterHit").Class(UHitscanComponent::StaticClass())
+            .Bind([](UObject* /*Obj*/, UFunction*, void* Parms) {
                 if (!Parms) return;
                 auto* p = reinterpret_cast<Params::HitscanComponent_Server_RegisterHit*>(Parms);
                 if (!p->Target)
@@ -246,10 +241,7 @@ namespace AimAssist
                 p->Location.Y   = best->pos.Y;
                 p->Location.Z   = best->pos.Z;
                 p->PhysMaterial = best->physMat;
-            },
-            ClassMatchMode::ExactOrSubclass,
-            ExecutionTiming::Before,
-            ExecutionMode::CallOriginal);
+            });
     }
 
     void DisableHitscanHitOptimize()

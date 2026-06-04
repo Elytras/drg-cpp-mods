@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Lib_GameHooks.h — ProcessEventHook and GameHooks convenience API.
 
 #include <atomic>
@@ -68,6 +68,13 @@ namespace GameHooks
         std::atomic<bool>                  pendingUninstall_{ false };
         std::atomic<bool>                  hookInstalled_{ false };
         std::atomic<bool>                  hasTasks_{ false };
+        // Hot-path gate: mirrors "the committed state has >= 1 callback". Set by
+        // each Derived::StoreState (release) right after the state is published;
+        // read (acquire) at the top of the Hooked* trampolines so the common
+        // zero-callback case skips the atomic<shared_ptr> load entirely. A stale
+        // read only costs one extra slow-path load (true) or one missed dispatch
+        // during a concurrent (un)register (false) — both benign and transient.
+        std::atomic<bool>                  hasCallbacks_{ false };
         mutable std::mutex                 writeMutex_;
         std::mutex                         taskMutex_;
         std::vector<std::function<void()>> taskQueue_;
@@ -330,6 +337,18 @@ namespace GameHooks
         bool DoUninstall();
 
     public:
+        // Snapshot of dispatch-cache occupancy — for diagnostics (dumpdispatch).
+        // Wildcards run on EVERY ProcessEvent, so a high count defeats the cache.
+        struct DispatchStats
+        {
+            size_t totalCallbacks     = 0;
+            size_t enabled            = 0;
+            size_t byFunctionPtrKeys  = 0;  // distinct UFunction* buckets
+            size_t byFunctionNameKeys = 0;  // distinct FName buckets
+            size_t wildcards          = 0;  // callbacks with no name/func filter
+        };
+        DispatchStats GetDispatchStats() const;
+
         bool Install();
 
         CallbackHandle AddCallback(ProcessEventCallback callback,
@@ -351,17 +370,13 @@ namespace GameHooks
         ClassMatchMode m = ClassMatchMode::ExactOrSubclass,
         ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal);
 
-    CallbackHandle OnProcessEventByNameAndClass(const std::string& fn, SDK::UClass* cls, ProcessEventCallback cb,
-        ClassMatchMode m = ClassMatchMode::ExactOrSubclass,
-        ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal);
-
+    // NOTE: multi-filter combinations (name+class, function+object, etc.) live on
+    // the OnProcessEvent() builder below — the fixed-arity ByXAndY helpers were
+    // retired because the arg order got ambiguous and didn't compose.
     CallbackHandle OnProcessEventByObject(const SDK::UObject* obj, ProcessEventCallback cb,
         ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal);
 
     CallbackHandle OnProcessEventByFunction(SDK::UFunction* func, ProcessEventCallback cb,
-        ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal);
-
-    CallbackHandle OnProcessEventByFunctionAndObject(SDK::UFunction* func, const SDK::UObject* obj, ProcessEventCallback cb,
         ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal);
 
     CallbackHandle OnProcessEventAll(ProcessEventCallback cb,
@@ -378,12 +393,48 @@ namespace GameHooks
         ExecutionMode       mode           = ExecutionMode::CallOriginal;
     };
 
-    CallbackHandle OnProcessEventAdvanced(ProcessEventCallback cb,
-        const std::string& fn = "", SDK::UClass* cls = nullptr, const SDK::UObject* obj = nullptr,
-        SDK::UFunction* func = nullptr, ClassMatchMode m = ClassMatchMode::ExactOrSubclass,
-        ExecutionTiming t = ExecutionTiming::Before, ExecutionMode mode = ExecutionMode::CallOriginal);
+    // =========================================================================
+    // ProcessEventBuilder — fluent, collision-proof way to register a PE callback.
+    //
+    // The fixed-arity OnProcessEventByX / OnProcessEventByXAndY helpers don't
+    // compose: every new filter combination needs another named overload, and the
+    // arg order (name-then-class vs class-then-name) gets ambiguous. The builder
+    // is the single canonical entry point — chain only the filters you need, then
+    // Bind(). It populates a CallbackParams and registers it via ProcessEventHook::AddCallback.
+    //
+    //   GameHooks::OnProcessEvent()
+    //       .Class(AFoo::StaticClass()).Name("ReceiveTick")
+    //       .Timing(ExecutionTiming::After)
+    //       .Bind([](UObject* o, UFunction* f, void* p){ ... });
+    //
+    // Filters left unset match everything (same semantics as CallbackParams
+    // defaults). The terminal Bind() returns the CallbackHandle.
+    // =========================================================================
+    class ProcessEventBuilder
+    {
+        CallbackParams p_;
+    public:
+        ProcessEventBuilder& Name    (std::string fn)         { p_.functionName   = std::move(fn); return *this; }
+        ProcessEventBuilder& Class   (SDK::UClass* cls)       { p_.classFilter    = cls;           return *this; }
+        ProcessEventBuilder& Object  (const SDK::UObject* o)  { p_.objectFilter   = o;             return *this; }
+        ProcessEventBuilder& Function(SDK::UFunction* fn)     { p_.functionFilter = fn;            return *this; }
+        ProcessEventBuilder& Match   (ClassMatchMode m)       { p_.classMatchMode = m;             return *this; }
+        ProcessEventBuilder& Timing  (ExecutionTiming t)      { p_.timing         = t;             return *this; }
+        ProcessEventBuilder& Mode    (ExecutionMode m)        { p_.mode           = m;             return *this; }
 
-    CallbackHandle OnProcessEventAdvanced(const CallbackParams& p, ProcessEventCallback cb);
+        // Convenience: SkipOriginal is the common non-default mode.
+        ProcessEventBuilder& Skip()                           { p_.mode = ExecutionMode::SkipOriginal; return *this; }
+
+        // Terminal — registers the callback, returns its handle.
+        CallbackHandle Bind(ProcessEventCallback cb) const
+        {
+            return ProcessEventHook::Get().AddCallback(std::move(cb),
+                p_.functionName, p_.classFilter, p_.objectFilter, p_.functionFilter,
+                p_.classMatchMode, p_.timing, p_.mode);
+        }
+    };
+
+    inline ProcessEventBuilder OnProcessEvent() { return {}; }
 
     bool RemoveHook            (CallbackHandle h);
     bool SetHookExecutionMode  (CallbackHandle h, ExecutionMode m);
@@ -606,6 +657,41 @@ namespace GameHooks
         bool Toggle()     { return handle_ ? Disable() : Enable(); }
 
         void Reset() noexcept override { handle_ = 0; }
+    };
+
+    // =========================================================================
+    // ScopedHookToggle<Hook> — RAII HookToggle.
+    //
+    // Enables the registrar on construction and removes the callback on
+    // destruction — for temporary / diagnostic hooks that should only live for a
+    // scope (e.g. a one-shot pewatch session). It owns a HookToggle, so it still
+    // participates in ResetAllToggles(): if the hooks tear down first (DLL unload
+    // / reload), the handle is already forgotten and ~ScopedHookToggle's Disable()
+    // is a safe no-op.
+    //
+    //   {
+    //       GameHooks::ScopedHookToggle<GameHooks::ProcessEventHook> watch{
+    //           [] { return GameHooks::OnProcessEventAll(&LogIt); } };
+    //       ... callback active only for this scope ...
+    //   } // automatically removed here
+    // =========================================================================
+    template<typename Hook>
+    class ScopedHookToggle
+    {
+        HookToggle<Hook> toggle_;
+    public:
+        explicit ScopedHookToggle(std::function<CallbackHandle()> registrar, bool enableNow = true)
+            : toggle_(std::move(registrar)) { if (enableNow) toggle_.Enable(); }
+        ~ScopedHookToggle() { toggle_.Disable(); }
+
+        ScopedHookToggle(const ScopedHookToggle&)            = delete;
+        ScopedHookToggle& operator=(const ScopedHookToggle&) = delete;
+
+        bool Enable()                   { return toggle_.Enable(); }
+        bool Disable()                  { return toggle_.Disable(); }
+        bool Toggle()                   { return toggle_.Toggle(); }
+        bool Set(bool on)               { return toggle_.Set(on); }
+        bool IsEnabled() const noexcept { return toggle_.IsEnabled(); }
     };
 
 } // namespace GameHooks

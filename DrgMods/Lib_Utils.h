@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Lib_Utils.h — SubclassCache, safe parsers, general helpers, player access.
 #include <string>
 #include <cstdint>
@@ -172,7 +172,11 @@ AActorType* GetActorOfClass(SDK::UClass* Class = AActorType::StaticClass())
     }
     for (SDK::AActor* Object : GObjectsOf<SDK::AActor>())
     {
-        if ((Object->Class->IsSubclassOf(Class) || Object->Class->IsA(Class)) && !Object->IsDefaultObject())
+        // IsDefaultObject() is the cheap check, so it gates the subclass walk.
+        // (The old `|| Object->Class->IsA(Class)` arm was redundant: it asked
+        // whether the UClass object itself is an instance of Class — near-always
+        // false — so IsSubclassOf alone is the correct and complete test.)
+        if (!Object->IsDefaultObject() && Object->Class->IsSubclassOf(Class))
             return static_cast<AActorType*>(Object);
     }
     warn("GetActorOfClass: No actor of class {} found", Class->StaticName().ToString());

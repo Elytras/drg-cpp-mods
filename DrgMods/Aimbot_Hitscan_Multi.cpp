@@ -1,4 +1,4 @@
-// Aimbot_Hitscan_Multi.cpp — UMultiHitscanComponent (shotguns / multi-pellet weapons).
+﻿// Aimbot_Hitscan_Multi.cpp — UMultiHitscanComponent (shotguns / multi-pellet weapons).
 //
 // UMultiHitscanComponent has only Server_RegisterHit (no _Terrain / _Destructable
 // variants), so this single hook handles both redirection and optimization.
@@ -41,9 +41,9 @@ namespace AimAssist
     void EnableHitscanMultiOptimize()
     {
         if (HitscanMultiOptimizeHandle) return;
-        HitscanMultiOptimizeHandle = OnProcessEventByNameAndClass(
-            "Server_RegisterHit", UMultiHitscanComponent::StaticClass(),
-            [](UObject* /*Obj*/, UFunction*, void* Parms) {
+        HitscanMultiOptimizeHandle = OnProcessEvent()
+            .Name("Server_RegisterHit").Class(UMultiHitscanComponent::StaticClass())
+            .Bind([](UObject* /*Obj*/, UFunction*, void* Parms) {
                 if (!Parms) return;
                 auto* p = reinterpret_cast<Params::MultiHitscanComponent_Server_RegisterHit*>(Parms);
                 auto& hits       = p->hitResults.Hits;
@@ -123,10 +123,7 @@ namespace AimAssist
 
                 if constexpr (Debug::LogSilentAim)
                     info("[silentaim/multi] done: modified={} total={}", modified, hits.Num());
-            },
-            ClassMatchMode::ExactOrSubclass,
-            ExecutionTiming::Before,
-            ExecutionMode::CallOriginal);
+            });
     }
 
     void DisableHitscanMultiOptimize()

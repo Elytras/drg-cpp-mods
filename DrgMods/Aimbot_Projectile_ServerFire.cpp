@@ -1,4 +1,4 @@
-// Aimbot_Projectile_ServerFire.cpp — UProjectileLauncherBaseComponent::Server_Fire.
+﻿// Aimbot_Projectile_ServerFire.cpp — UProjectileLauncherBaseComponent::Server_Fire.
 //
 // Server_Fire is a server RPC and goes through ProcessEvent dispatch, so our
 // PE hook intercepts it. We rewrite the rotation quaternion in the FTransform
@@ -33,9 +33,9 @@ namespace AimAssist
     void EnableProjectileSilentAim()
     {
         if (ProjectileSilentAimHandle) return;
-        ProjectileSilentAimHandle = OnProcessEventByNameAndClass(
-            "Server_Fire", UProjectileLauncherBaseComponent::StaticClass(),
-            [](UObject* Obj, UFunction*, void* Parms) {
+        ProjectileSilentAimHandle = OnProcessEvent()
+            .Name("Server_Fire").Class(UProjectileLauncherBaseComponent::StaticClass())
+            .Bind([](UObject* Obj, UFunction*, void* Parms) {
                 if constexpr (Debug::LogSilentAim)
                     info("[silentaim/projectile] Server_Fire class={} obj={:p} outer={}",
                         Obj && Obj->Class ? Obj->Class->GetName() : "?",
@@ -129,10 +129,7 @@ namespace AimAssist
                     q.W = std::cos(half);
                 }
                 *reinterpret_cast<FQuat*>(parms) = q;
-            },
-            ClassMatchMode::ExactOrSubclass,
-            ExecutionTiming::Before,
-            ExecutionMode::CallOriginal);
+            });
     }
 
     void DisableProjectileSilentAim()

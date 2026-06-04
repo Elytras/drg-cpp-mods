@@ -1,4 +1,4 @@
-// Aimbot_Hitscan_Destructable.cpp — UHitscanComponent::Server_RegisterHit_Destructable.
+﻿// Aimbot_Hitscan_Destructable.cpp — UHitscanComponent::Server_RegisterHit_Destructable.
 //
 // Used by lock-on rifle and other weapons that target destructible armor parts.
 // Same logic as HitOptimize (Hitscan_Standard), but the RPC also carries
@@ -27,9 +27,9 @@ namespace AimAssist
     void EnableHitscanDestructableOptimize()
     {
         if (HitscanDestructableOptimizeHandle) return;
-        HitscanDestructableOptimizeHandle = OnProcessEventByNameAndClass(
-            "Server_RegisterHit_Destructable", UHitscanComponent::StaticClass(),
-            [](UObject* /*Obj*/, UFunction*, void* Parms) {
+        HitscanDestructableOptimizeHandle = OnProcessEvent()
+            .Name("Server_RegisterHit_Destructable").Class(UHitscanComponent::StaticClass())
+            .Bind([](UObject* /*Obj*/, UFunction*, void* Parms) {
                 if (!Parms) return;
                 auto* p = reinterpret_cast<Params::HitscanComponent_Server_RegisterHit_Destructable*>(Parms);
                 if (!p->Target)
@@ -73,10 +73,7 @@ namespace AimAssist
                     info("[silentaim/destructable] enemy={} baseline={:.2f} → best={:.2f} boneIdx={}",
                         Enemy->Class ? Enemy->Class->GetName() : "?",
                         baseline, best->multiplier, p->BoneIndex);
-            },
-            ClassMatchMode::ExactOrSubclass,
-            ExecutionTiming::Before,
-            ExecutionMode::CallOriginal);
+            });
     }
 
     void DisableHitscanDestructableOptimize()
