@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // SharedCommands.h — game-agnostic commands shared by DrgMods and RcMods.
 //
 // Compiled once per consumer (DrgMods / RcMods) against that game's Library.h,

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Injector.h — DLL injection, shared memory, Dumper7, and background watcher threads.
 
 #include <Windows.h>

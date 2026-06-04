@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Lib_PropertyInspector.h — GObjects search, property read/write, prop command.
 
 #include <optional>

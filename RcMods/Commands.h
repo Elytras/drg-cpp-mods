@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Commands.h — Command registration and lifecycle functions for ModManager (RogueCore).
 
 #include "Lib_CommandHandler.h"

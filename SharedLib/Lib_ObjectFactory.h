@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Lib_ObjectFactory.h — StaticConstructObject_Internal lookup and NewObject wrapper.
 
 #include <cstdint>

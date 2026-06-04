@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Aim_Internal.h — AimAssist module internal header.
 // Included by all Aimbot_*.cpp files. Not part of the public API (see Aim.h).
 //

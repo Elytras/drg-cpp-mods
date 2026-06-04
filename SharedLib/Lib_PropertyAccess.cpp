@@ -1,4 +1,4 @@
-#include "Lib_PropertyAccess.h"
+﻿#include "Lib_PropertyAccess.h"
 
 using namespace SDK;  // file-local; no math types used in this TU
 

@@ -1,4 +1,4 @@
-// Completion.cpp — REPL tab-completion and ghost-hint logic.
+﻿// Completion.cpp — REPL tab-completion and ghost-hint logic.
 
 #include "Completion.h"
 

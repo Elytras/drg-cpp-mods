@@ -1,4 +1,4 @@
-// Aimbot_Config.cpp — global config loading (aimbot.yaml) + per-weapon override storage.
+﻿// Aimbot_Config.cpp — global config loading (aimbot.yaml) + per-weapon override storage.
 //
 // Global tunables (FOV cones, sampling constants, keybinds, class lists) are
 // loaded from aimbot.yaml, searched in two locations (first match wins):

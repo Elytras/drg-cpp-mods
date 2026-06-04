@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Lib_VTableHook.h — Simplified per-slot vtable hook with a central registry.
 //
 // Design:

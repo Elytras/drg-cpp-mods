@@ -1,4 +1,4 @@
-// Aimbot_DebugConfig.cpp — diagnostic tools: wpinfo command and firespy toggle.
+﻿// Aimbot_DebugConfig.cpp — diagnostic tools: wpinfo command and firespy toggle.
 //
 // Compile-time debug flags (Debug::LogSilentAim, Debug::ShowGetComponentByClassQuery)
 // are inline constexpr values in Aim_Internal.h::Debug — edit there and rebuild.

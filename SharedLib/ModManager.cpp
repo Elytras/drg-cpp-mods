@@ -1,4 +1,4 @@
-// ModManager.cpp — shared mod-load orchestration for both games.
+﻿// ModManager.cpp — shared mod-load orchestration for both games.
 //
 // Compiled once per consumer (DrgMods / RcMods) against that game's Library.h,
 // like the other SharedLib *.cpp. The few per-game differences are expressed

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Lib_EasyHook.h — MinHook wrapper.
 
 #include <stdexcept>

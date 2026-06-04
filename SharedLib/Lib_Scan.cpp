@@ -1,4 +1,4 @@
-#include "Lib_Scan.h"
+﻿#include "Lib_Scan.h"
 #include "Lib_PropertyAccess.h"  // GetTypeName
 #include "Lib_ObjectCast.h"
 #include <algorithm>

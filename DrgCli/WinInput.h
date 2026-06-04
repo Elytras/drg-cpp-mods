@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // WinInput.h — minimal Windows console readline with Tab-completion,
 //               inline ghost-text hints, and up/down history.
 //               No dependencies beyond Windows.h.

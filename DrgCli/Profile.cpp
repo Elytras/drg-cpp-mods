@@ -1,4 +1,4 @@
-#include "Profile.h"
+﻿#include "Profile.h"
 #include "Injector.h"  // GetProcId
 #include <cwctype>
 #include <cstring>

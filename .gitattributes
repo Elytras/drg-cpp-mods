@@ -4,6 +4,18 @@
 * text=auto
 
 ###############################################################################
+# Force LF (not platform-native CRLF) in the working tree for C/C++ sources.
+# core.eol defaults to "native" (CRLF on Windows), so `* text=auto` alone would
+# re-introduce CRLF on checkout. These rules keep the UTF-8+BOM/LF normalization
+# (2026-06) sticky across platforms and contributor autocrlf settings.
+###############################################################################
+*.cpp text eol=lf
+*.h   text eol=lf
+*.hpp text eol=lf
+*.c   text eol=lf
+*.inl text eol=lf
+
+###############################################################################
 # Set default behavior for command prompt diff.
 #
 # This is need for earlier builds of msysgit that does not have it on by

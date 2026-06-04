@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 /**
  * Lib_Json — High-Performance JSON Parser Hook

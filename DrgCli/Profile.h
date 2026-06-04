@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Profile.h — Runtime-selectable per-game string constants for the CLI.
 //
 // The CLI is a single binary that can talk to either DrgMods.dll or RcMods.dll.

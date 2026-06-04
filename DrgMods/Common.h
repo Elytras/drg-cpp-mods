@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Common.h (DRG) — Per-game string constants only; IPC layouts are in
 // SharedLib/IpcProtocol.h.
 

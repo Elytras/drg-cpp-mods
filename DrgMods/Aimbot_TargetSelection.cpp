@@ -1,4 +1,4 @@
-// Aimbot_TargetSelection.cpp — target finding, weakpoint scoring, and selector registry.
+﻿// Aimbot_TargetSelection.cpp — target finding, weakpoint scoring, and selector registry.
 //
 // Owns:
 //   • Targeting selector registry (built-ins: default, closest, closest-wp) and

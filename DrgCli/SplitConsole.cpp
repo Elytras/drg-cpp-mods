@@ -1,4 +1,4 @@
-// SplitConsole.cpp — Windows Console API 3-pane split layout implementation.
+﻿// SplitConsole.cpp — Windows Console API 3-pane split layout implementation.
 
 #include "SplitConsole.h"
 #include <cctype>   // ::tolower

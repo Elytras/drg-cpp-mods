@@ -1,4 +1,4 @@
-// DrgCli.cpp — Combined CLI + injector host (DRG and RC).
+﻿// DrgCli.cpp — Combined CLI + injector host (DRG and RC).
 //   • Creates all shared memory (log, cmd, response) and manages DLL lifecycle.
 //   • Watches for the target process and auto-injects the matching mod DLL.
 //   • Runs a readline REPL with tab-completion, ghost hints, and AC pane.

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Completion.h — REPL tab-completion and ghost-hint logic for the 'call' command.
 
 #include <string>

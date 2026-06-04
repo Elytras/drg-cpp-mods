@@ -1,4 +1,4 @@
-// Aim.cpp — implementation split into Aimbot_*.cpp files.
+﻿// Aim.cpp — implementation split into Aimbot_*.cpp files.
 //
 // Files and their responsibilities:
 //   Aim_Internal.h              — shared types, Config/Debug namespaces, internal declarations

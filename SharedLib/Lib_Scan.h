@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Lib_Scan.h — Generic, SDK-agnostic scan helpers (replicated/server RPCs).
 //
 // Each .cpp consumer's AdditionalIncludeDirectories supplies the right per-game

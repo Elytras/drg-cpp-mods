@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // IpcProtocol.h — Shared CLI/DLL IPC layouts and capacity constants.
 //
 // All members are identical between the DRG and RC builds — this is the

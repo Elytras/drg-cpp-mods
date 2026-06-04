@@ -1,4 +1,4 @@
-// Injector.cpp — DLL injection, shared memory, Dumper7, and background watcher threads.
+﻿// Injector.cpp — DLL injection, shared memory, Dumper7, and background watcher threads.
 
 #define _CRT_SECURE_NO_WARNINGS
 #ifndef WIN32_LEAN_AND_MEAN

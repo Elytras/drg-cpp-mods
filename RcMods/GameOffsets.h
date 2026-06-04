@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // GameOffsets.h (RC / UE 5.6) — per-game RVAs, signatures, and vtable indices.
 // All values are determined empirically from RogueCore-Win64-Shipping.exe.
 

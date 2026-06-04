@@ -1,4 +1,4 @@
-#include "Lib_PropertyInspector.h"
+﻿#include "Lib_PropertyInspector.h"
 #include "Lib_Print.h"
 #include <algorithm>
 #include <cctype>

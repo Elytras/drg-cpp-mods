@@ -1,4 +1,4 @@
-// Aimbot_Base.cpp — public state, RCS+aimbot loop, ToggleSilentAim, command/keybind registration.
+﻿// Aimbot_Base.cpp — public state, RCS+aimbot loop, ToggleSilentAim, command/keybind registration.
 //
 // Entry point for the AimAssist module. Owns the engine-tick RCS loop and
 // orchestrates the Enable/Disable calls for all silent-aim subsystems.

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Lib_Print.h — PrintFieldValue, DumpItemProperties, BuildClassChain, Detail.
 
 #include <string>

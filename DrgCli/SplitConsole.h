@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // SplitConsole.h — Windows Console API 3-pane split layout.
 //
 //  Layout (all rows are absolute screen-buffer rows, viewport pinned at 0):

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Lib_VTableInfo.h — RogueCore (UE 5.6).
 //
 // Intentionally minimal. The DrgMods/Lib_VTableInfo.h equivalent is FULLY

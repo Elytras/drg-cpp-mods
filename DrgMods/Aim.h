@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Aim.h — Aimbot + RCS + Silent Aim system.
 //
 // Self-contained module that owns:

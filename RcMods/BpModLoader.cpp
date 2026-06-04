@@ -1,4 +1,4 @@
-#include "BpModLoader.h"
+﻿#include "BpModLoader.h"
 #include "Library.h"
 #include "SDK/SDK/AssetRegistry_classes.hpp"
 #include "SDK/SDK/AssetRegistry_parameters.hpp"

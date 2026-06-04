@@ -1,4 +1,4 @@
-// Lib_NetLogConfig.cpp — loads per-command skip lists from config.yaml.
+﻿// Lib_NetLogConfig.cpp — loads per-command skip lists from config.yaml.
 // See Lib_NetLogConfig.h for the two-path search description.
 
 #include "Lib_NetLogConfig.h"

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // CliTypes.h — Shared types, constants, extern global declarations, and inline helpers.
 // Include this at the top of any CLI implementation header.
 

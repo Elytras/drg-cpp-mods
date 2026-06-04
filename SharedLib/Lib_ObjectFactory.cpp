@@ -1,4 +1,4 @@
-#include "Lib_ObjectFactory.h"
+﻿#include "Lib_ObjectFactory.h"
 #include "Common.h"        // TARGET_PROCESS
 #include "GameOffsets.h"   // kStaticConstructObjectRVA, …CallSig
 

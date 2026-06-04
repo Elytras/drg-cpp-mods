@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Lib_KeyBindings.h — Game/CLI/system-wide keybinding registration.
 
 #include <cstdint>

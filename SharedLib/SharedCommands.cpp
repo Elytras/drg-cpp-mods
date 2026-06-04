@@ -1,4 +1,4 @@
-// SharedCommands.cpp — game-agnostic commands shared by DrgMods and RcMods.
+﻿// SharedCommands.cpp — game-agnostic commands shared by DrgMods and RcMods.
 //
 // Compiled once per consumer (DrgMods / RcMods) against that game's Library.h,
 // like ModManager.cpp. Everything here touches only SDK symbols that exist with

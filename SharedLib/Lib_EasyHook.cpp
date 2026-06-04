@@ -1,4 +1,4 @@
-#include "Lib_EasyHook.h"
+﻿#include "Lib_EasyHook.h"
 
 namespace EasyHook
 {

@@ -1,4 +1,4 @@
-#include "Lib_CommandHandler.h"
+﻿#include "Lib_CommandHandler.h"
 #include "Lib_GameHooks.h"
 #include "Lib_VarSystem.h"
 #include <algorithm>

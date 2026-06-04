@@ -1,4 +1,4 @@
-#include "Lib_ObjectCast.h"
+﻿#include "Lib_ObjectCast.h"
 
 using namespace SDK;  // file-local; no math types used in this TU
 

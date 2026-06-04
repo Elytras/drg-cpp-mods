@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // GameOffsets.h (DRG / UE 4.27) — per-game RVAs, signatures, and vtable indices.
 // All values are determined empirically from FSD-Win64-Shipping.exe disassembly.
 // Update when the game patches or the executable changes structure.

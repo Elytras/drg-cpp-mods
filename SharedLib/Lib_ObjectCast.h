@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Lib_ObjectCast.h — UObject cast system, class flag helpers, IsValidRaw.
 
 #include <concepts>

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Library.h — Single include for all RC mod utilities.
 // Order matters: each header depends on those above it.
 
