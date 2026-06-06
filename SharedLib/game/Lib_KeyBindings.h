@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <vector>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -154,6 +155,7 @@ struct BindingOptions
     bool             suppress = false;
     int              heldMs   = 300;          // repeat interval for Trigger::Held
     std::vector<Key> coKeys;                  // extra keys that must be held simultaneously
+    std::string      label;                   // human description ("Aimbot") for UIs
 };
 
 using BindingHandle = size_t;
@@ -203,4 +205,25 @@ namespace KeyBindings
     // Register bind/unbind/bindings commands into the given handler.
     // Implementations are stubs pending full CLI-bindable support.
     void RegisterCommands(CommandHandler& handler);
+
+    // Thread-safe snapshot of user-created (CLI `bind`) bindings, for UIs like the
+    // overlay keybind menu. `chord` is parseable back into `bind`/`unbind`.
+    struct CliBindView { std::string chord; std::string command; };
+    std::vector<CliBindView> SnapshotCli();
+
+    // Thread-safe snapshot of ALL registered bindings (code + CLI), so a UI can show
+    // which keys are taken. `cli` marks the user binds that can be rebound/unbound;
+    // `command` is set only for those. `focus`/`trigger` are pretty-printed.
+    struct BindView
+    {
+        std::string chord, focus, trigger, command, label;
+        bool        suppress = false;
+        bool        cli      = false;
+    };
+    std::vector<BindView> SnapshotAll();
+
+    // Parse a chord string ("ctrl+F3", "End", "Mouse5") → key + mods. False on an
+    // unknown token or if no primary key was given. Pretty-print is the inverse.
+    bool        ParseChord(const std::string& spec, Key& outKey, Mod& outMods);
+    std::string ChordLabel(Key key, Mod mods);
 }

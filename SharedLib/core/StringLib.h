@@ -4,6 +4,8 @@
 #endif
 
 #include <Windows.h>
+#include <algorithm>
+#include <cctype>
 #include <vector>
 #include <string>
 #include <string_view>
@@ -174,6 +176,32 @@ Container SplitString(
             return std::tolower(static_cast<unsigned char>(char1)) ==
                 std::tolower(static_cast<unsigned char>(char2));
             });
+    }
+
+    // Ergonomic case-insensitive helpers for the common (char) case. Unlike the
+    // templated EqualsIgnoreCase / Contains above, these take string_view, so a
+    // std::string OR a const char* converts implicitly at the call site — call as
+    // StringLib::IEquals(a, "b"). These are the canonical CI helpers; prefer them
+    // over hand-rolled tolower loops.
+    inline bool IEquals(std::string_view a, std::string_view b) {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); ++i)
+            if (std::tolower((unsigned char)a[i]) != std::tolower((unsigned char)b[i])) return false;
+        return true;
+    }
+
+    inline bool IContains(std::string_view hay, std::string_view needle) {
+        if (needle.empty()) return true;
+        auto it = std::search(hay.begin(), hay.end(), needle.begin(), needle.end(),
+            [](char a, char b) { return std::tolower((unsigned char)a) == std::tolower((unsigned char)b); });
+        return it != hay.end();
+    }
+
+    inline bool IStartsWith(std::string_view hay, std::string_view prefix) {
+        if (prefix.size() > hay.size()) return false;
+        for (size_t i = 0; i < prefix.size(); ++i)
+            if (std::tolower((unsigned char)hay[i]) != std::tolower((unsigned char)prefix[i])) return false;
+        return true;
     }
 
     template <typename CharT>

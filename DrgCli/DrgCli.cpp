@@ -29,9 +29,9 @@
 #include <unordered_set>
 #include <iostream>
 
-#include "../SharedLib/IpcProtocol.h"
+#include "../SharedLib/core/IpcProtocol.h"
 #include "Profile.h"
-#include "../SharedLib/StringLib.h"
+#include "../SharedLib/core/StringLib.h"
 
 #include "SplitConsole.h"
 #include "WinInput.h"

@@ -1,8 +1,8 @@
 ﻿#pragma once
 // Common.h (RC) — Per-game string constants only; IPC layouts are in
-// SharedLib/IpcProtocol.h.
+// SharedLib/core/IpcProtocol.h.
 
-#include "../SharedLib/IpcProtocol.h"
+#include "IpcProtocol.h"
 
 //-----------------------------------------------------------------------------
 // Process / DLL identity

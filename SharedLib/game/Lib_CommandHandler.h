@@ -48,6 +48,12 @@ struct MutableContext
 extern ResponseBuffer* g_pRespBuffer;
 extern void SendResponse(uint32_t cmdSeq, const std::string& msg);
 
+// Optional sink that mirrors every text response into another consumer (the
+// in-game overlay console). Set by OverlayConsole::Init; both games' SendResponse
+// feed it so structured/scan/list dumps show in-game, not just over IPC. Runs on
+// the game thread; the callee must be thread-safe and must not call SendResponse.
+extern std::function<void(const std::string&)> g_responseTap;
+
 // =========================================================================
 // CommandHandler
 // =========================================================================

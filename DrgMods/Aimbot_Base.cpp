@@ -291,15 +291,15 @@ namespace AimAssist
         using enum Focus;
 
         auto kb = Config::GetGlobals();
-        KeyBindings::RegisterGameThread(kb->AimbotKey, kb->AimbotMod,
-            AimbotPressed,  BindingOptions{ Press,   Game, false });
-        KeyBindings::RegisterGameThread(kb->AimbotKey, kb->AimbotMod,
-            AimbotReleased, BindingOptions{ Release, Game, false });
+        BindingOptions aimDown{ Press,   Game, false }; aimDown.label = "Aim assist (hold)";
+        BindingOptions aimUp  { Release, Game, false }; aimUp.label   = "Aim assist (release)";
+        KeyBindings::RegisterGameThread(kb->AimbotKey, kb->AimbotMod, AimbotPressed,  aimDown);
+        KeyBindings::RegisterGameThread(kb->AimbotKey, kb->AimbotMod, AimbotReleased, aimUp);
 
-        KeyBindings::RegisterGameThread(kb->RecoilToggleKey, kb->RecoilToggleMod,
-            ToggleRecoilControl, BindingOptions{ Press, Game, false });
-        KeyBindings::RegisterGameThread(kb->SilentAimToggleKey, kb->SilentAimToggleMod,
-            ToggleSilentAim,     BindingOptions{ Press, Game, false });
+        BindingOptions rcsOpts{ Press, Game, false }; rcsOpts.label = "Toggle recoil control";
+        BindingOptions saOpts { Press, Game, false }; saOpts.label  = "Toggle silent aim";
+        KeyBindings::RegisterGameThread(kb->RecoilToggleKey,   kb->RecoilToggleMod,   ToggleRecoilControl, rcsOpts);
+        KeyBindings::RegisterGameThread(kb->SilentAimToggleKey, kb->SilentAimToggleMod, ToggleSilentAim,    saOpts);
     }
 
 } // namespace AimAssist

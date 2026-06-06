@@ -67,3 +67,5 @@
 #include "Lib_Scan.h"               // Scan:: helpers (BuildFuncSig, ScanAllClasses, …)
 #include "Lib_Json.h"               // JsonHook::Setup, JsonImpl::Parser, JSONType constants
 #include "Lib_KeyBindings.h"        // Key, Mod, Trigger, Focus, KeyBindings:: API
+#include "Lib_Overlay.h"            // Overlay:: — standalone DX11 ImGui overlay
+#include "Lib_OverlayConsole.h"     // OverlayConsole:: — in-game CLI (log + commands)

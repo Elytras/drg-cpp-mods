@@ -54,13 +54,6 @@ namespace BpModLoader
         const std::string t = suf;
         return s.size() >= t.size() && s.compare(s.size() - t.size(), t.size(), t) == 0;
     }
-    static bool ContainsCI(const std::string& s, const char* needle)
-    {
-        std::string a = s, b = needle;
-        std::transform(a.begin(), a.end(), a.begin(), [](unsigned char c){ return (char)std::tolower(c); });
-        std::transform(b.begin(), b.end(), b.begin(), [](unsigned char c){ return (char)std::tolower(c); });
-        return a.find(b) != std::string::npos;
-    }
 
     // Construct an identity FTransform: no translation, identity rotation,
     // unit scale.  FQuat is double-precision (X,Y,Z,W); FVector is double (X,Y,Z).
@@ -203,15 +196,23 @@ namespace BpModLoader
             ++actorClasses;
 
             std::string name = cls->GetName();
-            if (StartsWith(name, "SKEL_") || StartsWith(name, "REINST_") ||
-                StartsWith(name, "TRASHCLASS_") || StartsWith(name, "PLACEHOLDER-"))
+            if (StringLib::StartsWithAnyOf<char>(
+                name,
+                std::array<decltype(name),4>{
+                     "SKEL_", 
+                     "REINST_", 
+                     "TRASHCLASS_", 
+                     "PLACEHOLDER-"
+                }
+            )
+                )
                 continue;
 
-            if (!StartsWith(name, kNamePrefix))
+            if (!StringLib::StartsWith<char>(name, kNamePrefix))
             {
                 if (!quiet && kVerbose)
-                    if (hints.size() < 40 && EndsWith(name, "_C") &&
-                        (ContainsCI(name, "init") || ContainsCI(name, "mod")))
+                    if (hints.size() < 40 && StringLib::EndsWith<char>(name, "_C") &&
+                        (StringLib::IContains(name, std::string{"init"}) || StringLib::IContains(name, std::string{"mod"})))
                         hints.push_back(name);
                 continue;
             }

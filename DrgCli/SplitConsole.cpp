@@ -4,10 +4,6 @@
 #include <cctype>   // ::tolower
 #include <climits>  // INT_MAX
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Constructor
-// ─────────────────────────────────────────────────────────────────────────────
-
 SplitConsole::SplitConsole()
     : m_hOut(GetStdHandle(STD_OUTPUT_HANDLE))
     , m_acH(0)

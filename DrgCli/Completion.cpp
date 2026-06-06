@@ -2,28 +2,21 @@
 
 #include "Completion.h"
 
+#ifndef NOMINMAX
+#define NOMINMAX            // StringLib pulls <Windows.h>; keep std::min/max usable
+#endif
+#include "SharedLib/core/StringLib.h"
+
 #include <algorithm>
 #include <cctype>
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  String helpers
+//  String helpers — thin shims over the canonical StringLib CI helpers, kept as
+//  free functions because Completion.h exposes them across the CLI.
 // ─────────────────────────────────────────────────────────────────────────────
 
-bool IStartsWith(const std::string& str, const std::string& prefix)
-{
-    if (prefix.size() > str.size()) return false;
-    for (size_t i = 0; i < prefix.size(); ++i)
-        if (tolower((unsigned char)str[i]) != tolower((unsigned char)prefix[i])) return false;
-    return true;
-}
-
-bool IEquals(const std::string& a, const std::string& b)
-{
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-        if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i])) return false;
-    return true;
-}
+bool IStartsWith(const std::string& str, const std::string& prefix) { return StringLib::IStartsWith(str, prefix); }
+bool IEquals(const std::string& a, const std::string& b)            { return StringLib::IEquals(a, b); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Parse helpers

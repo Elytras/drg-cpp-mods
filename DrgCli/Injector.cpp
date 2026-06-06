@@ -14,7 +14,7 @@
 #include <thread>
 #include <iostream>
 
-#include "../SharedLib/IpcProtocol.h"
+#include "../SharedLib/core/IpcProtocol.h"
 #include "CliTypes.h"
 #include "Injector.h"
 #include "Profile.h"

@@ -52,7 +52,7 @@
 // Listed in dependency order for ease of use. Each header should be self-contained and only depend on those above it.
 #include "Lib_Forward.h"            // namespace/type aliases, forward decls
 //#include "Lib_VTableInfo.h"         // VTable index info for unreal functions
-#include "../SharedLib/Lib_ObjectCast.h"         // ObjectCast, class flags, IsValidRaw
+#include "../SharedLib/game/Lib_ObjectCast.h"         // ObjectCast, class flags, IsValidRaw
 #include "Lib_PropertyAccess.h"     // GetPropertyPtr, ReadBool/WriteBool, GetTypeName
 #include "Lib_Utils.h"              // SubclassCache, safe parsers, GetLocalPlayer, etc.
 // Module name now comes from Common.h (TARGET_PROCESS); RVA + call-site sig
@@ -60,14 +60,14 @@
 // NewObject<T>()). FFrame and FStaticConstructObjectParameters layouts in
 // Lib_ObjectFactory.h are still the UE 4.27 layouts and must be verified
 // against UE 5.6 before relying on them.
-#include "../SharedLib/Lib_ObjectFactory.h"
-#include "../SharedLib/Lib_Print.h"              // PrintFieldValue, DumpItemProperties, Detail
-#include "../SharedLib/Lib_EasyHook.h"           // MinHook wrapper
-#include "../SharedLib/Lib_VTableHook.h"         // VTableHook class
-#include "../SharedLib/Lib_GameHooks.h"          // ProcessEventHook, GameHooks API
-#include "../SharedLib/Lib_VarSystem.h"          // VarSystem (commands deferred to Lib_CommandHandler.h)
-#include "../SharedLib/Lib_CommandHandler.h"     // CommandContext, MutableContext, CommandHandler, VarSystem commands
-#include "../SharedLib/Lib_PropertyInspector.h"  // PropertyInspector namespace
-#include "../SharedLib/Lib_Scan.h"               // Scan:: helpers (BuildFuncSig, ScanAllClasses, …)
+#include "../SharedLib/game/Lib_ObjectFactory.h"
+#include "../SharedLib/game/Lib_Print.h"              // PrintFieldValue, DumpItemProperties, Detail
+#include "../SharedLib/hooks/Lib_EasyHook.h"     // MinHook wrapper
+#include "../SharedLib/hooks/Lib_VTableHook.h"   // VTableHook class
+#include "../SharedLib/hooks/Lib_GameHooks.h"    // ProcessEventHook, GameHooks API
+#include "../SharedLib/game/Lib_VarSystem.h"          // VarSystem (commands deferred to Lib_CommandHandler.h)
+#include "../SharedLib/game/Lib_CommandHandler.h"     // CommandContext, MutableContext, CommandHandler, VarSystem commands
+#include "../SharedLib/game/Lib_PropertyInspector.h"  // PropertyInspector namespace
+#include "../SharedLib/game/Lib_Scan.h"               // Scan:: helpers (BuildFuncSig, ScanAllClasses, …)
 //#include "Lib_Json.h"             // JsonHook::Setup, JsonImpl::Parser, JSONType constants
-#include "../SharedLib/Lib_KeyBindings.h"        // Key, Mod, Trigger, Focus, KeyBindings:: API
+#include "../SharedLib/game/Lib_KeyBindings.h"        // Key, Mod, Trigger, Focus, KeyBindings:: API

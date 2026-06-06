@@ -11,6 +11,7 @@
 
 #include "Common.h"
 #include "Lib_KeyBindings.h"
+#include "Lib_OverlayConsole.h"   // mirror logs into the in-game overlay console
 #include "ModManager.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,6 +46,7 @@ MetaBuffer*     g_pMetaBuffer = nullptr;
 
 void SendResponse(uint32_t cmdSeq, const std::string& msg)
 {
+    if (g_responseTap) g_responseTap(msg);   // mirror into the in-game console
     if (!g_pRespBuffer || !g_hRespEvent) return;
 
     constexpr DWORD MAX_WAIT_MS = 1000;
@@ -198,7 +200,9 @@ void WorkerThread()
         sink->set_pattern("%v");
         sink->set_level(spdlog::level::trace);
 
-        auto logger = std::make_shared<spdlog::logger>("rc", sink);
+        std::vector<spdlog::sink_ptr> sinks = { sink };
+        sinks.push_back(OverlayConsole::GetSink());   // mirror logs into the in-game console
+        auto logger = std::make_shared<spdlog::logger>("rc", sinks.begin(), sinks.end());
         logger->set_level(spdlog::level::trace);
 
         spdlog::set_default_logger(logger);

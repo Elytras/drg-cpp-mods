@@ -1,4 +1,4 @@
-# config.yaml — netlog skip lists and startup autorun script.
+# config.yaml netlog skip lists and startup autorun script.
 #
 # Searched in two locations (first match wins):
 #   1. Next to the module DLL  — place here for distribution / in-game use
@@ -57,8 +57,6 @@ netlog:
     - Client_ReceiveMinionDamageNumber
     - Server_SetIsPressingMovementInput
 
-
-
 autorun:
   - lognetclient
   - lognetserver
@@ -72,3 +70,5 @@ autorun:
 #     args: [Server_SetFallVelocity, 0.0]
 #   - command: set
 #     args: [myvar, hello]
+  - command: bind
+    args: [F3, randneg]

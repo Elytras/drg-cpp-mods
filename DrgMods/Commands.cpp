@@ -20,6 +20,7 @@
 #include <numbers>
 #include <type_traits>
 #include <nlohmann/json.hpp>
+#include <imgui.h>   // overlay demo window (draw callback runs on the render thread)
 
 #include "SDK/SDK/Basic.hpp"
 #include "SDK/SDK/CoreUObject_classes.hpp"
@@ -864,30 +865,6 @@ namespace Commands
 
     void MakeJSON(const CommandContext& JS)
     {}
-
-    //void tpbars(const ctx&){
-    //    if (!IsValidOf<SDK::APlayerCharacter>(GetLocalPlayer())) return;
-    //    std::vector<SDK::AActor*> Relevant{};
-    //    SDK::TArray<SDK::AActor*> Barnacles = GetAllActorsOfClass<SDK::ABhaBarnacle>();
-    //    SDK::TArray<SDK::AActor*> Apocas = GetAllActorsOfClass<>
-    //    SDK::TArray<SDK::AActor*> Teleports = GetAllActorsOfClass<SDK::AReplicatedActor_C>();
-    //    for(auto T : Teleports) {
-    //        if(!IsValidOf<SDK::AReplicatedActor_C>(T)) continue;
-    //        if(T->GetOwner() != GetLocalPlayer()) continue;
-    //        auto TP = CastChecked<SDK::AReplicatedActor_C>(T);
-    //        for(auto A : FoundActors) {
-    //            if(!IsValidOf<SDK::ABhaBarnacle>(A)) continue;
-    //            TP->Server_TeleportPlayer()
-    //
-    //        }
-    //    }
-    //}
-    //void Resup(const ctx&) {
-    //    if (!IsValidOf<SDK::APlayerCharacter>(GetLocalPlayer())) return;
-    //    for (auto i : GetLocalPlayer()->InventoryComponent->GetAllItems()) {
-    //        if()
-    //    }
-    //}
 
     void ClearTwerkers(const ctx&) {
         if (!CanChangeWorld()) return;
@@ -2055,13 +2032,15 @@ namespace Binds {
         using enum Trigger;
         using enum Focus;
 
-        KeyBindings::RegisterGameThread(
-            Key::F4, Mod::None, Binds::Crash,
-            BindingOptions{ Press, Game, true });
+        BindingOptions crashOpts{ Press, Game, true }; crashOpts.label = "Crash (test)";
+        KeyBindings::RegisterGameThread(Key::F4, Mod::None, Binds::Crash, crashOpts);
 
-        KeyBindings::RegisterGameThread(
-            I, Mod::Ctrl, Binds::InfiniteAmmo,
-            BindingOptions{ Press, Game, true });
+        BindingOptions ammoOpts{ Press, Game, true }; ammoOpts.label = "Infinite ammo";
+        KeyBindings::RegisterGameThread(I, Mod::Ctrl, Binds::InfiniteAmmo, ammoOpts);
+
+        // The overlay toggle key is owned by Overlay itself (Overlay::Start registers
+        // a global show-binding on Overlay::GetToggleKey, default End; the overlay
+        // WndProc closes on the same key). Rebind via Overlay::SetToggleKey.
 
         // Aimbot, RCS, and Silent Aim keybinds live in Aim.
         AimAssist::RegisterKeybinds();
@@ -2120,6 +2099,11 @@ void RegisterCommands(CommandHandler& handler)
             spdlog::warn("[clearlog] truncate failed — file probably locked by another process");
     }, "System", R"(Truncate the on-disk file log (next to the DLL))");
     handler.Register("ignoreproxy", Commands::IgnoreProxy, "System", R"(Toggle ProxyMod hook)");
+    handler.Register("overlay", [](const CommandContext&) {
+        if (!Overlay::IsRunning()) { warn("[overlay] not running"); return; }
+        bool on = Overlay::ToggleVisible();
+        info("[overlay] {}", on ? "shown" : "hidden");
+    }, "System", R"(Toggle the ImGui debug overlay)");
     handler.Register("json", Commands::MakeJSON, "System", R"(Diagnose JsonHook: print hook state; json [string] also runs direct C++ parse)");
 
     // Teleport
@@ -2255,10 +2239,26 @@ bool PreLoadCheck()
     return true;
 }
 
-void OnModsLoaded() {}
+void OnModsLoaded()
+{
+    // Standalone DX11 overlay (own window/thread) — sidesteps Streamline. Starts
+    // hidden; toggle with Insert or the `overlay` command.
+    if (Overlay::Start(Overlay::Mode::Overlay))
+    {
+        Overlay::SetTargetFps(200);
+        // The "Elytras" console + commands panels are registered by
+        // ModManager::LoadModsGameThread via OverlayConsole::Init().
+        info("[overlay] started — press End" /*edit as you edit default menu button*/ " (or `overlay`) to show the console");
+    }
+    else
+    {
+        warn("[overlay] failed to start");
+    }
+}
 
 void OnModsUnloading()
 {
+    Overlay::Stop();       // stop the overlay thread + tear down its window/device
     JsonHook::Teardown();  // restore ExecFunction/flags before DLL pages are freed
 }
 

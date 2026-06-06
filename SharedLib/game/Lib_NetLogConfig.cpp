@@ -14,7 +14,7 @@ namespace NetLogConfig
     // Uses the address of Load() to identify the containing DLL, so this works
     // correctly when compiled into both DrgMods.dll and RcMods.dll separately.
 
-    static std::filesystem::path FindConfig()
+    static std::filesystem::path ModuleDir()
     {
         wchar_t buf[MAX_PATH]{};
         HMODULE hm = nullptr;
@@ -23,7 +23,12 @@ namespace NetLogConfig
             GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
             reinterpret_cast<LPCWSTR>(&Load), &hm);
         if (hm) GetModuleFileNameW(hm, buf, MAX_PATH);
-        const auto dir = std::filesystem::path(buf).parent_path();
+        return std::filesystem::path(buf).parent_path();
+    }
+
+    static std::filesystem::path FindConfig()
+    {
+        const auto dir = ModuleDir();
 
         // 1. Next to the module DLL — distribution / in-game use
         auto p = dir / L"config.yaml";
@@ -35,6 +40,15 @@ namespace NetLogConfig
         if (!ec && std::filesystem::exists(p)) return p;
 
         return {};
+    }
+
+    std::string ConfigPath()
+    {
+        const auto found = FindConfig();
+        if (!found.empty()) return found.string();
+        const auto dir = ModuleDir();
+        if (dir.empty()) return {};
+        return (dir / L"config.yaml").string();   // preferred location for first save
     }
 
     // ── Public API ────────────────────────────────────────────────────────────

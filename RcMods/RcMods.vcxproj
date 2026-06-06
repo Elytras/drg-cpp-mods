@@ -117,7 +117,7 @@
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)SharedLib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)SharedLib;$(SolutionDir)SharedLib\core;$(SolutionDir)SharedLib\hooks;$(SolutionDir)SharedLib\overlay;$(SolutionDir)SharedLib\game;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
@@ -136,7 +136,7 @@
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)SharedLib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)SharedLib;$(SolutionDir)SharedLib\core;$(SolutionDir)SharedLib\hooks;$(SolutionDir)SharedLib\overlay;$(SolutionDir)SharedLib\game;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <StringPooling>true</StringPooling>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
@@ -185,20 +185,23 @@
       no-ops at runtime — fill in RcMods/GameOffsets.h with RC's
       SCO_Internal RVA or call-site signature to enable NewObject<T>().
     -->
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_CommandHandler.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_NetLogConfig.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_EasyHook.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_GameHooks.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_KeyBindings.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectCast.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectFactory.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Print.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyAccess.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyInspector.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Scan.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_VarSystem.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\ModManager.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\SharedCommands.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_ActorList.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_CommandHandler.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\overlay\Lib_Overlay.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\overlay\Lib_OverlayConsole.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_NetLogConfig.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\hooks\Lib_EasyHook.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\hooks\Lib_GameHooks.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_KeyBindings.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_ObjectCast.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_ObjectFactory.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_Print.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_PropertyAccess.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_PropertyInspector.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_Scan.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_VarSystem.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\ModManager.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\SharedCommands.cpp" />
     <ClCompile Include="SDK\SDK\Basic.cpp">
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpplatest</LanguageStandard>
     </ClCompile>
@@ -211,16 +214,18 @@
     <ClInclude Include="BpModLoader.h" />
     <ClInclude Include="Commands.h" />
     <ClInclude Include="NetLogConfig.h" />
-    <ClInclude Include="$(SolutionDir)SharedLib\Lib_NetLogConfig.h" />
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_NetLogConfig.h" />
     <ClInclude Include="Common.h" />
     <ClInclude Include="Lib_Forward.h" />
     <ClInclude Include="Library.h" />
     <ClInclude Include="Lib_Utils.h" />
     <ClInclude Include="Lib_VTableInfo.h" />
-    <ClInclude Include="$(SolutionDir)SharedLib\ModManager.h" />
-    <ClInclude Include="$(SolutionDir)SharedLib\SharedCommands.h" />
+    <ClInclude Include="$(SolutionDir)SharedLib\game\ModManager.h" />
+    <ClInclude Include="$(SolutionDir)SharedLib\game\SharedCommands.h" />
     <ClInclude Include="SDK\SDK\Basic.hpp" />
+    <ClInclude Include="SDK\SDK\Engine_parameters.hpp" />
     <ClInclude Include="SDK\SDK\RogueCore_classes.hpp" />
+    <ClInclude Include="SDK\SDK\RogueCore_structs.hpp" />
     <ClInclude Include="SDK\UnrealContainers.hpp" />
   </ItemGroup>
   <ItemGroup>

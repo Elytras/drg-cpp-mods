@@ -1,8 +1,12 @@
 ﻿#include "Lib_CommandHandler.h"
 #include "Lib_GameHooks.h"
 #include "Lib_VarSystem.h"
+#include <string_view>
 #include <algorithm>
 #include <map>
+
+// Default: no tap. OverlayConsole::Init installs one to mirror responses in-game.
+std::function<void(const std::string&)> g_responseTap;
 static constexpr bool CmdIsSpace(char c) noexcept
 {
     return static_cast<unsigned char>(c) <= 32;

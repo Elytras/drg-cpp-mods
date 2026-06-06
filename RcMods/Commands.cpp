@@ -3,10 +3,11 @@
 #include "BpModLoader.h"
 #include "NetLogConfig.h"
 #include "SharedCommands.h"
+#include "Lib_Overlay.h"   // standalone DX11 overlay (own window/thread)
 #include <cmath>
 #include <random>
 #include <array>
-
+#include "SDK/SDK/Engine_parameters.hpp"
 using namespace SDK;
 using namespace VarSystem;
 
@@ -59,10 +60,23 @@ bool PreLoadCheck() { return true; }
 void OnModsLoaded()
 {
     BpModLoader::Install();
+
+    // Standalone DX11 overlay (own window/thread) — sidesteps Streamline (RC also
+    // ships NVIDIA Streamline). Starts hidden; toggle with End or the `overlay`
+    // command. The "Elytras" console/commands panels are registered by
+    // ModManager::LoadModsGameThread via OverlayConsole::Init().
+    if (Overlay::Start(Overlay::Mode::Overlay))
+    {
+        Overlay::SetTargetFps(200);
+        info("[overlay] started — press End (or `overlay`) to show the console");
+    }
+    else
+        warn("[overlay] failed to start");
 }
 
 void OnModsUnloading()
 {
+    Overlay::Stop();   // stop the overlay thread + tear down its window/device
     BpModLoader::Uninstall();
 }
 
@@ -113,6 +127,16 @@ void InitDefaultCallbacks()
                 if (AActor* a = w.Get(); a && IsValidRaw(a))
                     info("[scan]   Pawn: {} ({})", a->GetName(), a->Class ? a->Class->GetName() : "?");
         });
+
+    GameHooks::OnProcessEvent()
+        .Name("ClientStartCameraShake")
+        .Class(APlayerController::StaticClass())
+        .Bind([](UObject* Controller, UFunction*, void* Params)
+            {
+                if (!Params) return;    
+                if (Controller != GetLocalController()) return; 
+                static_cast<Params::PlayerController_ClientStartCameraShake*>(Params)->Scale = 0.0f;
+            });
 }
 
 // =========================================================================
@@ -710,6 +734,11 @@ void RegisterCommands(CommandHandler& handler)
     // System
     handler.Register("call",         RcCmd::Call,         "System",
         R"(Call a server RPC: call <FunctionName> [arg0 arg1 ...])");
+    handler.Register("overlay", [](const CommandContext&) {
+        if (!Overlay::IsRunning()) { warn("[overlay] not running"); return; }
+        bool on = Overlay::ToggleVisible();
+        info("[overlay] {}", on ? "shown" : "hidden");
+    }, "System", R"(Toggle the ImGui debug overlay)");
 
     // Player
     handler.Register("norecoil", RcCmd::NoRecoil, "Player",

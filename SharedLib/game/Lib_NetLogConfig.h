@@ -36,6 +36,11 @@ namespace NetLogConfig
     // Returns an empty Config (nothing suppressed) if the file is not found.
     Config Load();
 
+    // The resolved config.yaml path via the two-path search; if neither exists,
+    // the preferred (next-to-DLL) location so a UI can create it on first save.
+    // Empty only if the module path can't be determined.
+    std::string ConfigPath();
+
 } // namespace NetLogConfig
 
 // Execute the 'autorun' entries from config.yaml through the given handler.

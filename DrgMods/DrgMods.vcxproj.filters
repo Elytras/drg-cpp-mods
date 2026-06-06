@@ -63,7 +63,7 @@
     <ClCompile Include="Main.cpp">
       <Filter>Source Files\DLL Impl</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\ModManager.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\game\ModManager.cpp">
       <Filter>Source Files\DLL Impl</Filter>
     </ClCompile>
     <ClCompile Include="Commands.cpp">
@@ -72,40 +72,40 @@
     <ClCompile Include="Lib_Utils.cpp">
       <Filter>Source Files\LibraryImplementations</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_CommandHandler.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_CommandHandler.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_EasyHook.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\hooks\Lib_EasyHook.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_GameHooks.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\hooks\Lib_GameHooks.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Json.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_Json.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_KeyBindings.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_KeyBindings.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectCast.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_ObjectCast.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_ObjectFactory.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_ObjectFactory.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Print.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_Print.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyAccess.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_PropertyAccess.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_PropertyInspector.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_PropertyInspector.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_VarSystem.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_VarSystem.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_Scan.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_Scan.cpp">
       <Filter>External</Filter>
     </ClCompile>
     <ClCompile Include="Aimbot_Base.cpp">
@@ -141,11 +141,17 @@
     <ClCompile Include="Aimbot_TargetSelection.cpp">
       <Filter>Source Files\DLL Impl\Aimbot</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\Lib_NetLogConfig.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_NetLogConfig.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\SharedCommands.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\game\SharedCommands.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\overlay\Lib_Overlay.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\overlay\Lib_OverlayConsole.cpp">
+      <Filter>External</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -164,7 +170,7 @@
     <ClInclude Include="Library.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)SharedLib\ModManager.h">
+    <ClInclude Include="$(SolutionDir)SharedLib\game\ModManager.h">
       <Filter>Header Files\DLL Headers</Filter>
     </ClInclude>
     <ClInclude Include="Commands.h">
@@ -191,7 +197,7 @@
     <ClInclude Include="SDK\SDK\FSD_structs.hpp">
       <Filter>Header Files\SDK Headers</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)SharedLib\SharedCommands.h">
+    <ClInclude Include="$(SolutionDir)SharedLib\game\SharedCommands.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

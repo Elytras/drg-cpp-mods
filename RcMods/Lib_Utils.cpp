@@ -34,14 +34,8 @@ void SubclassCache::Clear()
     cache_.clear();
 }
 
+// Safe parsers (SafeSto*) moved to SharedLib/CoreUtils.h (header-only).
 // =========================================================================
-// Safe parsers
-// =========================================================================
-
-int64_t  SafeStoll (const std::string& s) noexcept { if (s.empty()) return 0;   try { return std::stoll(s);  } catch (...) { return 0; } }
-uint64_t SafeStoull(const std::string& s) noexcept { if (s.empty()) return 0;   try { return std::stoull(s); } catch (...) { return 0; } }
-float    SafeStof  (const std::string& s) noexcept { if (s.empty()) return 0.f; try { return std::stof(s);  } catch (...) { return 0.f; } }
-double   SafeStod  (const std::string& s) noexcept { if (s.empty()) return 0.0; try { return std::stod(s);  } catch (...) { return 0.0; } }
 
 // =========================================================================
 // String / FString
@@ -65,21 +59,9 @@ bool IsInActiveWorld(UObject* obj)
     return false;
 }
 
-void     SleepNow (uint64_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds{ ms }); }
-uint64_t GetTimeMs()
-{
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-
 void Exec(std::string cmd)
 {
     Kismet::ExecuteConsoleCommand(GetWorld(), FString(StringLib::ToWide(cmd).c_str()), nullptr);
-}
-
-bool NearlyEqual(double a, double b, double epsilon)
-{
-    return std::fabs(a - b) <= epsilon * (std::max)({ 1.0, std::fabs(a), std::fabs(b) });
 }
 
 // =========================================================================

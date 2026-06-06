@@ -13,6 +13,7 @@
 
 #include "Common.h"
 #include "Lib_KeyBindings.h"
+#include "Lib_OverlayConsole.h"
 #include "ModManager.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -47,6 +48,7 @@ MetaBuffer*     g_pMetaBuffer = nullptr;
 
 void SendResponse(uint32_t cmdSeq, const std::string& msg)
 {
+    if (g_responseTap) g_responseTap(msg);   // mirror into the in-game console
     if (!g_pRespBuffer || !g_hRespEvent) return;
 
     constexpr DWORD MAX_WAIT_MS = 1000;
@@ -139,7 +141,13 @@ protected:
         if (!fp_) return;
         spdlog::memory_buf_t formatted;
         spdlog::sinks::base_sink<Mutex>::formatter_->format(msg, formatted);
-        std::fwrite(formatted.data(), 1, formatted.size(), fp_);
+        // Strip trailing newlines (the pattern appends one, and some payloads carry
+        // their own) and write exactly one line ending — otherwise the file double-
+        // spaced. Text mode translates the '\n' to the platform line ending.
+        size_t n = formatted.size();
+        while (n > 0 && (formatted.data()[n - 1] == '\n' || formatted.data()[n - 1] == '\r')) --n;
+        std::fwrite(formatted.data(), 1, n, fp_);
+        std::fputc('\n', fp_);
     }
     void flush_() override { if (fp_) std::fflush(fp_); }
 
@@ -286,6 +294,7 @@ void WorkerThread()
 
         std::vector<spdlog::sink_ptr> sinks = { shmem };
         if (g_FileSink) sinks.push_back(g_FileSink);
+        sinks.push_back(OverlayConsole::GetSink());   // mirror logs into the in-game console
         auto logger = std::make_shared<spdlog::logger>("drg", sinks.begin(), sinks.end());
         logger->set_level(spdlog::level::trace);
 

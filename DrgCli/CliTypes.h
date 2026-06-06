@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "../SharedLib/IpcProtocol.h"
+#include "../SharedLib/core/IpcProtocol.h"
 #include "Profile.h"
 #include "SplitConsole.h"
 #include "WinInput.h"

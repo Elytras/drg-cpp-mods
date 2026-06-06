@@ -8,7 +8,7 @@
 #include "Commands.h"
 #include "Library.h"
 #include "Lib_NetLogConfig.h"
-
+#include "Lib_OverlayConsole.h"   // OverlayConsole::Init — in-game CLI panels
 // File-local SDK pollution: this TU does not use math wrappers (FVector etc.),
 // so unqualified SDK type lookup here is unambiguous.
 using namespace SDK;
@@ -51,9 +51,6 @@ namespace Internal
 
 using namespace ::Internal;
 
-// =========================================================================
-// Constructor
-// =========================================================================
 ModManager::ModManager()
 {
     // The DLL can be injected before the engine has initialised the SDK globals
@@ -125,6 +122,7 @@ void ModManager::LoadModsGameThread()
     info("[ModManager] Starting initialization...");
     if (!StartupInfo()) [[unlikely]] return;
     OnModsLoaded();             // game-specific (RC: BpModLoader::Install)
+    OverlayConsole::Init(&cmdHandler);   // in-game CLI panels (no-op if overlay isn't started)
     InitDefaultCallbacks();
     RunConfig(cmdHandler);
     if constexpr (UseThreads) {

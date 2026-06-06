@@ -4,9 +4,11 @@
 #include "Lib_KeyBindings.h"
 #include "Lib_CommandHandler.h"
 #include "Lib_GameHooks.h"
+#include "StringLib.h"   // IEquals (canonical CI helper)
 
 #include <algorithm>
 #include <cctype>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -615,14 +617,10 @@ namespace KeyBindings
     // Touched only on the command-dispatch (worker) thread — no locking needed.
     struct CliBinding { BindingHandle handle; Key key; Mod mods; std::string command; };
     static std::vector<CliBinding> s_cliBindings;
-
-    static bool IEquals(const std::string& a, const char* b)
-    {
-        size_t i = 0;
-        for (; i < a.size() && b[i]; ++i)
-            if (std::tolower((unsigned char)a[i]) != std::tolower((unsigned char)b[i])) return false;
-        return i == a.size() && b[i] == '\0';
-    }
+    // s_cliBindings is mutated from the command-dispatch path (worker thread for CLI
+    // commands, game thread for overlay-dispatched ones) and read by SnapshotCli on
+    // the overlay thread — guard it. Lock order is always s_cliMutex → s_mutex.
+    static std::mutex s_cliMutex;
 
     // Parse "ctrl+shift+F2" → key + mods (modifier tokens in any order, one key).
     // Returns false on an unknown token or if no primary key was given.
@@ -641,10 +639,10 @@ namespace KeyBindings
             {
                 bool matched = false;
                 for (const auto& m : kModTable)
-                    if (IEquals(tok, m.name)) { outMods |= m.m; matched = true; break; }
+                    if (StringLib::IEquals(tok, m.name)) { outMods |= m.m; matched = true; break; }
                 if (!matched)
                     for (const auto& e : kKeyTable)
-                        if (IEquals(tok, e.name)) { outKey = e.k; haveKey = true; matched = true; break; }
+                        if (StringLib::IEquals(tok, e.name)) { outKey = e.k; haveKey = true; matched = true; break; }
                 if (!matched) return false;
             }
             if (plus == std::string::npos) break;
@@ -687,9 +685,12 @@ namespace KeyBindings
             for (size_t i = a + 1; i < ctx.args.size(); ++i) { if (i > a + 1) cmd += ' '; cmd += ctx.args[i]; }
 
             // Replace any existing CLI binding on the same chord.
-            for (auto it = s_cliBindings.begin(); it != s_cliBindings.end(); ++it)
-                if (it->key == key && it->mods == mods)
-                { Unregister(it->handle); s_cliBindings.erase(it); break; }
+            {
+                std::lock_guard lk(s_cliMutex);
+                for (auto it = s_cliBindings.begin(); it != s_cliBindings.end(); ++it)
+                    if (it->key == key && it->mods == mods)
+                    { Unregister(it->handle); s_cliBindings.erase(it); break; }
+            }
 
             BindingOptions opts;
             opts.trigger  = Trigger::Press;
@@ -702,7 +703,7 @@ namespace KeyBindings
                 warn("[KeyBindings] bind failed — {} already used by a non-CLI binding", ComboLabel(key, mods));
                 return;
             }
-            s_cliBindings.push_back({ h, key, mods, cmd });
+            { std::lock_guard lk(s_cliMutex); s_cliBindings.push_back({ h, key, mods, cmd }); }
             info("[KeyBindings] bound {}{} -> {}", ComboLabel(key, mods), suppress ? " (suppress)" : "", cmd);
         }, "keybindings", "bind [-s] <key> <command>  — run a command on key press; -s eats the key (e.g. bind F2 ramrod enhancements)");
 
@@ -711,14 +712,17 @@ namespace KeyBindings
             if (ctx.ArgCount() < 2) { warn("[KeyBindings] usage: unbind <key>"); return; }
             Key key; Mod mods;
             if (!ParseCombo(ctx.Arg(1), key, mods)) { warn("[KeyBindings] unknown key '{}'", ctx.Arg(1)); return; }
-            for (auto it = s_cliBindings.begin(); it != s_cliBindings.end(); ++it)
-                if (it->key == key && it->mods == mods)
-                {
-                    info("[KeyBindings] unbound {} (was -> {})", ComboLabel(key, mods), it->command);
-                    Unregister(it->handle);
-                    s_cliBindings.erase(it);
-                    return;
-                }
+            {
+                std::lock_guard lk(s_cliMutex);
+                for (auto it = s_cliBindings.begin(); it != s_cliBindings.end(); ++it)
+                    if (it->key == key && it->mods == mods)
+                    {
+                        info("[KeyBindings] unbound {} (was -> {})", ComboLabel(key, mods), it->command);
+                        Unregister(it->handle);
+                        s_cliBindings.erase(it);
+                        return;
+                    }
+            }
             warn("[KeyBindings] no CLI binding on {}", ComboLabel(key, mods));
         }, "keybindings", "unbind <key>  — remove a CLI key binding");
 
@@ -760,5 +764,40 @@ namespace KeyBindings
             if (fail) result += ", " + std::to_string(fail) + " MISMATCHED";
             info("{}", result);
         }, "keybindings", "bindings_probe  — verify Key enum values match VK_* table");
+    }
+
+    std::vector<CliBindView> SnapshotCli()
+    {
+        std::vector<CliBindView> out;
+        std::lock_guard lk(s_cliMutex);
+        out.reserve(s_cliBindings.size());
+        for (const auto& b : s_cliBindings)
+            out.push_back({ ComboLabel(b.key, b.mods), b.command });
+        return out;
+    }
+
+    bool        ParseChord(const std::string& spec, Key& outKey, Mod& outMods) { return ParseCombo(spec, outKey, outMods); }
+    std::string ChordLabel(Key key, Mod mods)                                  { return ComboLabel(key, mods); }
+
+    std::vector<BindView> SnapshotAll()
+    {
+        // Lock order s_cliMutex → s_mutex (matches the bind/unbind path).
+        std::lock_guard  cli(s_cliMutex);
+        std::shared_lock lock(s_mutex);
+        std::vector<BindView> out;
+        out.reserve(s_bindings.size());
+        for (const auto& b : s_bindings)
+        {
+            BindView v;
+            v.chord    = BindingLabel(b);
+            v.focus    = FocusName(b.opts.focus);
+            v.trigger  = TriggerName(b.opts.trigger);
+            v.label    = b.opts.label;
+            v.suppress = b.opts.suppress;
+            for (const auto& cb : s_cliBindings)
+                if (cb.handle == b.handle) { v.command = cb.command; v.cli = true; break; }
+            out.push_back(std::move(v));
+        }
+        return out;
     }
 }

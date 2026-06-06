@@ -14,7 +14,8 @@
         compile them here (it would fail — no SDK in scope).
 
     The consumer projects (DrgMods, RcMods) still ClCompile each .cpp via
-    a path reference to $(SolutionDir)SharedLib\Lib_X.cpp; that's where the
+    a path reference to $(SolutionDir)SharedLib\&lt;layer&gt;\Lib_X.cpp (layer =
+    core/game/hooks/overlay); that's where the
     actual compilation happens, with the appropriate SDK headers visible.
   -->
   <ItemGroup Label="ProjectConfigurations">
@@ -87,7 +88,7 @@
            For RcMods context, use the Project Context dropdown in the VS editor tab. -->
       <ExcludedFromBuild>true</ExcludedFromBuild>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)DrgMods;$(SolutionDir)SharedLib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)DrgMods;$(SolutionDir)SharedLib;$(SolutionDir)SharedLib\core;$(SolutionDir)SharedLib\hooks;$(SolutionDir)SharedLib\overlay;$(SolutionDir)SharedLib\game;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>FMT_HEADER_ONLY;NOMINMAX;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <InlineFunctionExpansion Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AnySuitable</InlineFunctionExpansion>
@@ -104,68 +105,78 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="Lib_CommandHandler.h" />
-    <ClInclude Include="Lib_EasyHook.h" />
-    <ClInclude Include="Lib_GameHooks.h" />
-    <ClInclude Include="Lib_Json.h" />
-    <ClInclude Include="Lib_KeyBindings.h" />
-    <ClInclude Include="Lib_NetLogConfig.h" />
-    <ClInclude Include="Lib_ObjectCast.h" />
-    <ClInclude Include="Lib_ObjectFactory.h" />
-    <ClInclude Include="Lib_Print.h" />
-    <ClInclude Include="Lib_PropertyAccess.h" />
-    <ClInclude Include="Lib_PropertyInspector.h" />
-    <ClInclude Include="Lib_VarSystem.h" />
-    <ClInclude Include="Lib_VTableHook.h" />
-    <ClInclude Include="ModManager.h" />
-    <ClInclude Include="SharedCommands.h" />
-    <ClInclude Include="StringLib.h" />
-    <ClInclude Include="UnrealCoreTypes.h" />
+    <ClInclude Include="game\Lib_CommandHandler.h" />
+    <ClInclude Include="overlay\Lib_Overlay.h" />
+    <ClInclude Include="overlay\Lib_OverlayConsole.h" />
+    <ClInclude Include="hooks\Lib_EasyHook.h" />
+    <ClInclude Include="hooks\Lib_GameHooks.h" />
+    <ClInclude Include="game\Lib_Json.h" />
+    <ClInclude Include="game\Lib_KeyBindings.h" />
+    <ClInclude Include="game\Lib_NetLogConfig.h" />
+    <ClInclude Include="game\Lib_ObjectCast.h" />
+    <ClInclude Include="game\Lib_ObjectFactory.h" />
+    <ClInclude Include="game\Lib_Print.h" />
+    <ClInclude Include="game\Lib_PropertyAccess.h" />
+    <ClInclude Include="game\Lib_PropertyInspector.h" />
+    <ClInclude Include="game\Lib_VarSystem.h" />
+    <ClInclude Include="hooks\Lib_VTableHook.h" />
+    <ClInclude Include="core\CoreUtils.h" />
+    <ClInclude Include="core\GameThreadSnapshot.h" />
+    <ClInclude Include="game\ModManager.h" />
+    <ClInclude Include="game\SharedCommands.h" />
+    <ClInclude Include="core\StringLib.h" />
+    <ClInclude Include="game\UnrealCoreTypes.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Lib_CommandHandler.cpp">
+    <ClCompile Include="game\Lib_CommandHandler.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="Lib_EasyHook.cpp">
+    <ClCompile Include="overlay\Lib_Overlay.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="Lib_GameHooks.cpp">
+    <ClCompile Include="overlay\Lib_OverlayConsole.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="Lib_Json.cpp">
+    <ClCompile Include="hooks\Lib_EasyHook.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="Lib_KeyBindings.cpp">
+    <ClCompile Include="hooks\Lib_GameHooks.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="Lib_Math.cpp">
+    <ClCompile Include="game\Lib_Json.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="Lib_ObjectCast.cpp">
+    <ClCompile Include="game\Lib_KeyBindings.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="Lib_ObjectFactory.cpp">
+    <ClCompile Include="game\Lib_Math.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="Lib_Print.cpp">
+    <ClCompile Include="game\Lib_ObjectCast.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="Lib_PropertyAccess.cpp">
+    <ClCompile Include="game\Lib_ObjectFactory.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="Lib_PropertyInspector.cpp">
+    <ClCompile Include="game\Lib_Print.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="Lib_NetLogConfig.cpp">
+    <ClCompile Include="game\Lib_PropertyAccess.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="Lib_VarSystem.cpp">
+    <ClCompile Include="game\Lib_PropertyInspector.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="ModManager.cpp">
+    <ClCompile Include="game\Lib_NetLogConfig.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="SharedCommands.cpp">
+    <ClCompile Include="game\Lib_VarSystem.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="game\ModManager.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="game\SharedCommands.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
   </ItemGroup>
