@@ -97,6 +97,9 @@
     <ClCompile Include="overlay\tabs\VarsTab.cpp">
       <Filter>Source</Filter>
     </ClCompile>
+    <ClCompile Include="overlay\tabs\KeybindsTab.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
     <ClCompile Include="hooks\Lib_EasyHook.cpp">
       <Filter>Source</Filter>
     </ClCompile>
