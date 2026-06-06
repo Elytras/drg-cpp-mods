@@ -31,6 +31,7 @@
 #include <unordered_map>
 #include <vector>
 #include <algorithm>
+#include <functional>
 
 namespace OverlayConsole
 {
@@ -175,21 +176,6 @@ namespace OverlayConsole
         // `set <name> <value>` commands (game-thread safe).
         struct VarSnap { std::string name, token; VarSystem::VarType type; };
         GameThreadSnapshot<std::vector<VarSnap>> g_vars;   // refreshes unconditionally
-        // Persistent per-row edit state so dragging/typing isn't clobbered by the
-        // 0.5 s snapshot refresh while a widget is active.
-        std::unordered_map<std::string, float>       g_varEditF;
-        std::unordered_map<std::string, int>         g_varEditI;
-        std::unordered_map<std::string, std::string> g_varEditS;
-
-        // Keybinds tab: per-row chord edit buffer (idle-seeded), plus the add-row.
-        std::unordered_map<std::string, std::string> g_kbChordEdit;
-        char g_kbAddChord[64]  = {};
-        char g_kbAddCmd[256]   = {};
-
-        // Vars tab add-row.
-        char g_varAddName[128] = {};
-        char g_varAddVal[256]  = {};
-
         // Actors tab: game-thread-built snapshot. Heavy GObjects walk, so the snapshot
         // gates auto-refresh on a recent beat() (tab actually rendered) to avoid spiking
         // frametime when you aren't looking at the tab.
@@ -200,26 +186,14 @@ namespace OverlayConsole
             using namespace std::chrono;
             return (uint64_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
         }
-        char  g_fClass[128] = {}, g_fName[128] = {}, g_fOuter[128] = {}, g_fOwner[128] = {}, g_fInst[128] = {};
-        int   g_classMode = 0;          // 0 Contains, 1 Is, 2 Is+Sub, 3 Not, 4 NotSub
-        int   g_repMode   = 0;          // 0 All, 1 Replicated, 2 Not replicated
-        uint64_t    g_actorGotoAddr = 0;   // pending jump-to actor (by unique addr)
-        uint64_t    g_actorSelAddr  = 0;   // highlighted row (by unique addr)
 
-        // Config tab: raw config.yaml editor.
-        char        g_cfgText[32768] = {};
-        bool        g_cfgLoaded = false;
-        std::string g_cfgStatus;
-
-        // ── UI state (overlay thread only) ───────────────────────────────────────
+        // ── Console input + completion state (overlay thread only) ───────────────
+        // Shared infra: read/written by the ImGui input callback, the completion
+        // engine (ComputeCompletions/GhostSuffix/ArgPoolFor) and RunCommand — all
+        // free functions because RunCommand is called by every tab and InputCallback
+        // is a C-style ImGui callback. These move into the 3b TabContext, not into
+        // ConsoleTab. (ConsoleTab owns only its private view state — see the class.)
         char        g_input[512]   = {};
-        char        g_filter[128]  = {};
-        char        g_logFilter[128] = {};   // Console log-pane live filter (substring, case-insensitive)
-        char        g_args[512]    = {};   // args for the selected command
-        std::string g_selCmd;             // currently selected command (Commands tab)
-        std::string g_selDesc;
-        bool g_autoScroll    = true;
-        bool g_scrollBottom  = false;
 
         // Console input history (most-recent last). g_historyPos walks it: -1 means
         // "at the live edit line"; 0..n-1 index into g_history from newest to oldest.
@@ -232,14 +206,6 @@ namespace OverlayConsole
         std::vector<std::string> g_acMatches;
         std::string              g_acPrefix;            // buffer text kept before the completed token (e.g. "set ")
         bool                     g_acShowAll = false;   // Tab-on-empty → list everything
-        bool                     g_focusInput = false;  // re-grab input focus next frame (after a click)
-        // Last g_logSeq the draw loop observed; auto-scroll pins only when this
-        // changes (new lines arrived), so idle scroll-up works with it checked.
-        uint64_t                 g_lastLogSeq = 0;
-        // Pin-to-bottom countdown. GetScrollMaxY() lags one frame behind content
-        // growth (ContentSize is finalized at End), so a single same-frame pin lands
-        // a batch short; hold the pin a couple extra frames to settle on the bottom.
-        int                      g_pinFrames = 0;
 
         ImVec4 LevelColor(spdlog::level::level_enum lvl)
         {
@@ -425,12 +391,50 @@ namespace OverlayConsole
             std::sort(g_acMatches.begin(), g_acMatches.end());
         }
 
-        void DrawConsoleTab()
+        // ── Tab registry ─────────────────────────────────────────────────────────
+        // Each overlay tab derives OverlayTab<Derived>; constructing one self-registers
+        // a {name, draw} entry (type-erased — no virtuals on the tab). DrawPanel iterates
+        // the registry in construction order. Tab instances are constructed once
+        // (overlay-session lifetime) in Init; per-tab UI state lives as members, not
+        // file-scope statics. Derived must provide `static constexpr char* kName` + Draw().
+        struct OverlayTabEntry { const char* name; std::function<void()> draw; };
+        std::vector<OverlayTabEntry> g_tabs;
+
+        template<class Derived>
+        struct OverlayTab
         {
+            OverlayTab()
+            {
+                g_tabs.push_back({ Derived::kName,
+                                   [self = static_cast<Derived*>(this)] { self->Draw(); } });
+            }
+        };
+
+        // ── Console tab — log pane + live filter + command input/autocomplete ───
+        // Owns only its private view state; the input buffer, history, completion
+        // candidates and RunCommand stay file-scope (shared input infra, see above).
+        struct ConsoleTab : OverlayTab<ConsoleTab>
+        {
+            static constexpr const char* kName = "Console";
+
+            char logFilter[128] = {};   // log-pane live filter (substring, case-insensitive)
+            bool autoScroll   = true;
+            bool scrollBottom = false;
+            bool focusInput   = false;  // re-grab input focus next frame (after a click)
+            // Last g_logSeq the draw loop observed; auto-scroll pins only when this
+            // changes (new lines arrived), so idle scroll-up works with it checked.
+            uint64_t lastLogSeq = 0;
+            // Pin-to-bottom countdown. GetScrollMaxY() lags one frame behind content
+            // growth (ContentSize is finalized at End), so a single same-frame pin lands
+            // a batch short; hold the pin a couple extra frames to settle on the bottom.
+            int  pinFrames = 0;
+
+            void Draw()
+            {
             // Filter row (CLI Ctrl+F parity): live substring filter over the log pane.
             ImGui::SetNextItemWidth(-1.f);
-            ImGui::InputTextWithHint("##logfilter", "filter log (substring)...", g_logFilter, sizeof(g_logFilter));
-            std::string lfilter = g_logFilter;
+            ImGui::InputTextWithHint("##logfilter", "filter log (substring)...", logFilter, sizeof(logFilter));
+            std::string lfilter = logFilter;
 
             // Derive the variants pane from the current input every frame: command
             // names, or first-arg values for commands whose args are known.
@@ -466,8 +470,8 @@ namespace OverlayConsole
                 std::lock_guard lk(g_logMutex);
                 // Only auto-pin when new lines actually arrived this frame; otherwise
                 // the user can't scroll up to read history while Auto-scroll is on.
-                const bool grew = g_logSeq != g_lastLogSeq;
-                g_lastLogSeq = g_logSeq;
+                const bool grew = g_logSeq != lastLogSeq;
+                lastLogSeq = g_logSeq;
                 if (lfilter.empty())
                 {
                     ImGuiListClipper clipper;
@@ -502,9 +506,9 @@ namespace OverlayConsole
                 // Arm the pin when new content arrived (grew) or right after running
                 // a command; hold it a couple frames so ScrollMax (one frame behind)
                 // catches up to the real bottom. Idle scroll-up still works.
-                if (g_scrollBottom || (g_autoScroll && grew)) g_pinFrames = 2;
-                if (g_pinFrames > 0) { ImGui::SetScrollY(ImGui::GetScrollMaxY()); --g_pinFrames; }
-                g_scrollBottom = false;
+                if (scrollBottom || (autoScroll && grew)) pinFrames = 2;
+                if (pinFrames > 0) { ImGui::SetScrollY(ImGui::GetScrollMaxY()); --pinFrames; }
+                scrollBottom = false;
             }
             ImGui::EndChild();
 
@@ -527,7 +531,7 @@ namespace OverlayConsole
                         {
                             // Keep the prefix (e.g. "set ") and insert the chosen token.
                             strncpy_s(g_input, sizeof(g_input), (g_acPrefix + m).c_str(), _TRUNCATE);
-                            g_focusInput = true;   // jump back into the input box
+                            focusInput = true;   // jump back into the input box
                         }
                         x += (x > 0.f ? sp : 0.f) + iw;
                     }
@@ -536,7 +540,7 @@ namespace OverlayConsole
                 ImGui::EndChild();
             }
 
-            if (g_focusInput) { ImGui::SetKeyboardFocusHere(); g_focusInput = false; }
+            if (focusInput) { ImGui::SetKeyboardFocusHere(); focusInput = false; }
             ImGui::SetNextItemWidth(-255.f);
             const ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue
                                             | ImGuiInputTextFlags_CallbackCompletion   // Tab
@@ -577,25 +581,36 @@ namespace OverlayConsole
                 ImGui::SetClipboardText(out.c_str());
             }
             ImGui::SameLine();
-            ImGui::Checkbox("Auto-scroll", &g_autoScroll);
+            ImGui::Checkbox("Auto-scroll", &autoScroll);
 
             if (enter || run)
             {
                 RunCommand(g_input);
                 g_input[0] = '\0';
-                g_scrollBottom = true;
+                scrollBottom = true;
                 ImGui::SetKeyboardFocusHere(-1);   // keep focus in the input box
             }
-        }
+            }
+        };
 
-        void DrawCommandsTab()
+        // ── Commands tab — browse registered commands by category + arg runner ──
+        struct CommandsTab : OverlayTab<CommandsTab>
         {
+            static constexpr const char* kName = "Commands";
+
+            char        filterBuf[128] = {};   // command-name filter
+            char        args[512]      = {};   // args for the selected command
+            std::string selCmd;                // currently selected command
+            std::string selDesc;
+
+            void Draw()
+            {
             auto* h = g_handler.load();
             if (!h) { ImGui::TextDisabled("(no command handler bound)"); return; }
 
             ImGui::SetNextItemWidth(-1.f);
-            ImGui::InputTextWithHint("##filter", "filter commands...", g_filter, sizeof(g_filter));
-            std::string filter = g_filter;
+            ImGui::InputTextWithHint("##filter", "filter commands...", filterBuf, sizeof(filterBuf));
+            std::string filter = filterBuf;
             std::transform(filter.begin(), filter.end(), filter.begin(), ::tolower);
 
             // Group by category (sorted).
@@ -614,7 +629,7 @@ namespace OverlayConsole
             // selected name) + the args input row only when a command is selected.
             const float footerH = ImGui::GetStyle().ItemSpacing.y * 2.f
                                 + ImGui::GetTextLineHeightWithSpacing()
-                                + (g_selCmd.empty() ? 0.f : ImGui::GetFrameHeightWithSpacing());
+                                + (selCmd.empty() ? 0.f : ImGui::GetFrameHeightWithSpacing());
 
             if (ImGui::BeginChild("##cmds", ImVec2(0, -footerH)))
             {
@@ -627,11 +642,11 @@ namespace OverlayConsole
                             ImGui::PushID(name.c_str());
                             if (ImGui::SmallButton("Run")) RunCommand(name);   // quick no-arg run
                             ImGui::SameLine();
-                            if (ImGui::Selectable(name.c_str(), g_selCmd == name))
+                            if (ImGui::Selectable(name.c_str(), selCmd == name))
                             {
-                                g_selCmd = name;       // select → args footer targets it
-                                g_selDesc = desc;
-                                g_args[0] = '\0';
+                                selCmd = name;       // select → args footer targets it
+                                selDesc = desc;
+                                args[0] = '\0';
                             }
                             if (!desc.empty() && ImGui::IsItemHovered())
                                 ImGui::SetTooltip("%s", desc.c_str());
@@ -643,39 +658,53 @@ namespace OverlayConsole
 
             // ── Selected-command runner (with arguments) ─────────────────────────
             ImGui::Separator();
-            if (g_selCmd.empty())
+            if (selCmd.empty())
             {
                 ImGui::TextDisabled("Select a command to pass arguments, or use Run for no-arg commands.");
             }
             else
             {
-                ImGui::TextColored(ImVec4(0.55f, 0.80f, 1.0f, 1.f), "%s", g_selCmd.c_str());
-                if (!g_selDesc.empty())
+                ImGui::TextColored(ImVec4(0.55f, 0.80f, 1.0f, 1.f), "%s", selCmd.c_str());
+                if (!selDesc.empty())
                 {
                     ImGui::SameLine();
-                    ImGui::TextDisabled("— %s", g_selDesc.c_str());
+                    ImGui::TextDisabled("— %s", selDesc.c_str());
                 }
                 ImGui::SetNextItemWidth(-60.f);
                 bool enter = ImGui::InputTextWithHint("##args", "arguments (e.g. 0 0 0)...",
-                                                      g_args, sizeof(g_args), ImGuiInputTextFlags_EnterReturnsTrue);
+                                                      args, sizeof(args), ImGuiInputTextFlags_EnterReturnsTrue);
                 ImGui::SameLine();
                 if (ImGui::Button("Run##sel") || enter)
                 {
-                    std::string line = g_selCmd;
-                    if (g_args[0]) { line += ' '; line += g_args; }
+                    std::string line = selCmd;
+                    if (args[0]) { line += ' '; line += args; }
                     RunCommand(line);
                 }
             }
-        }
+            }
+        };
 
-        // Commit a var change through the normal command path (game-thread safe).
-        void SetVar(const std::string& name, const std::string& value)
+        // ── Vars tab — VarSystem viewer/editor (snapshot read, edits via `set`) ──
+        struct VarsTab : OverlayTab<VarsTab>
         {
-            RunCommand("set " + name + " " + value);
-        }
+            static constexpr const char* kName = "Vars";
 
-        void DrawVarsTab()
-        {
+            // Persistent per-row edit state so dragging/typing isn't clobbered by the
+            // 0.5 s snapshot refresh while a widget is active.
+            std::unordered_map<std::string, float>       editF;
+            std::unordered_map<std::string, int>         editI;
+            std::unordered_map<std::string, std::string> editS;
+            char addName[128] = {};
+            char addVal[256]  = {};
+
+            // Commit a var change through the normal command path (game-thread safe).
+            static void SetVar(const std::string& name, const std::string& value)
+            {
+                RunCommand("set " + name + " " + value);
+            }
+
+            void Draw()
+            {
             std::vector<VarSnap> vars = g_vars.read();
             std::sort(vars.begin(), vars.end(),
                       [](const VarSnap& a, const VarSnap& b) { return a.name < b.name; });
@@ -721,7 +750,7 @@ namespace OverlayConsole
                     }
                     case VT::Float:
                     {
-                        float& f = g_varEditF[v.name];
+                        float& f = editF[v.name];
                         ImGui::DragFloat("##f", &f, 0.1f);
                         if (ImGui::IsItemDeactivatedAfterEdit()) SetVar(v.name, std::to_string(f));
                         if (!ImGui::IsItemActive()) f = SafeStof(v.token);
@@ -729,7 +758,7 @@ namespace OverlayConsole
                     }
                     case VT::Int32:
                     {
-                        int& i = g_varEditI[v.name];
+                        int& i = editI[v.name];
                         ImGui::DragInt("##i", &i);
                         if (ImGui::IsItemDeactivatedAfterEdit()) SetVar(v.name, std::to_string(i));
                         if (!ImGui::IsItemActive()) i = (int)SafeStoll(v.token);
@@ -737,7 +766,7 @@ namespace OverlayConsole
                     }
                     default:   // String / Vector / Rotator / Name / Object → editable text
                     {
-                        std::string& s = g_varEditS[v.name];
+                        std::string& s = editS[v.name];
                         char buf[256];
                         strncpy_s(buf, sizeof(buf), s.c_str(), _TRUNCATE);
                         if (ImGui::InputText("##s", buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue))
@@ -759,22 +788,33 @@ namespace OverlayConsole
 
             // Add-row: name + value → set.
             ImGui::SetNextItemWidth(160.f);
-            ImGui::InputTextWithHint("##addvname", "name", g_varAddName, sizeof(g_varAddName));
+            ImGui::InputTextWithHint("##addvname", "name", addName, sizeof(addName));
             ImGui::SameLine();
             ImGui::SetNextItemWidth(-90.f);
-            bool addEnter = ImGui::InputTextWithHint("##addvval", "value", g_varAddVal, sizeof(g_varAddVal),
+            bool addEnter = ImGui::InputTextWithHint("##addvval", "value", addVal, sizeof(addVal),
                                                      ImGuiInputTextFlags_EnterReturnsTrue);
             ImGui::SameLine();
-            if ((ImGui::Button("Set##addv") || addEnter) && g_varAddName[0] && g_varAddVal[0])
+            if ((ImGui::Button("Set##addv") || addEnter) && addName[0] && addVal[0])
             {
-                RunCommand(std::string("set ") + g_varAddName + " " + g_varAddVal);
-                g_varAddName[0] = '\0';
-                g_varAddVal[0]  = '\0';
+                RunCommand(std::string("set ") + addName + " " + addVal);
+                addName[0] = '\0';
+                addVal[0]  = '\0';
             }
-        }
+            }
+        };
 
-        void DrawKeybindsTab()
+        // ── Keybinds tab — list/rebind/unbind + add-row, and the overlay toggle key ──
+        struct KeybindsTab : OverlayTab<KeybindsTab>
         {
+            static constexpr const char* kName = "Keybinds";
+
+            // Per-row chord edit buffer (idle-seeded), plus the add-row.
+            std::unordered_map<std::string, std::string> kbChordEdit;
+            char kbAddChord[64] = {};
+            char kbAddCmd[256]  = {};
+
+            void Draw()
+            {
             // Overlay toggle key — owned by Overlay; setting it re-registers the global
             // show-binding and updates the overlay window's close key (single source).
             {
@@ -828,7 +868,7 @@ namespace OverlayConsole
                     if (b.cli)
                     {
                         // Editable chord; Enter rebinds (unbind old + bind new).
-                        std::string& s = g_kbChordEdit[b.chord];
+                        std::string& s = kbChordEdit[b.chord];
                         char buf[64];
                         strncpy_s(buf, sizeof(buf), s.c_str(), _TRUNCATE);
                         ImGui::SetNextItemWidth(-1.f);
@@ -869,39 +909,51 @@ namespace OverlayConsole
 
             // Add-row: chord + command → bind.
             ImGui::SetNextItemWidth(140.f);
-            ImGui::InputTextWithHint("##addchord", "key (e.g. F3)", g_kbAddChord, sizeof(g_kbAddChord));
+            ImGui::InputTextWithHint("##addchord", "key (e.g. F3)", kbAddChord, sizeof(kbAddChord));
             ImGui::SameLine();
             ImGui::SetNextItemWidth(-90.f);
-            bool addEnter = ImGui::InputTextWithHint("##addcmd", "command...", g_kbAddCmd, sizeof(g_kbAddCmd),
+            bool addEnter = ImGui::InputTextWithHint("##addcmd", "command...", kbAddCmd, sizeof(kbAddCmd),
                                                      ImGuiInputTextFlags_EnterReturnsTrue);
             ImGui::SameLine();
-            if ((ImGui::Button("Bind") || addEnter) && g_kbAddChord[0] && g_kbAddCmd[0])
+            if ((ImGui::Button("Bind") || addEnter) && kbAddChord[0] && kbAddCmd[0])
             {
-                RunCommand(std::string("bind ") + g_kbAddChord + " " + g_kbAddCmd);
-                g_kbAddChord[0] = '\0';
-                g_kbAddCmd[0]   = '\0';
+                RunCommand(std::string("bind ") + kbAddChord + " " + kbAddCmd);
+                kbAddChord[0] = '\0';
+                kbAddCmd[0]   = '\0';
             }
-        }
+            }
+        };
 
-        // Does row r pass the class-filter (mode + target text)?
-        bool ClassFilterPass(const ActorList::Row& r)
+        // ── Actors tab — live GObjects snapshot, filterable/sortable table ──────
+        struct ActorsTab : OverlayTab<ActorsTab>
         {
-            const std::string t = g_fClass;
-            if (t.empty()) return true;
-            const std::string token = "/" + t + "/";   // for subclass chain match
-            switch (g_classMode)
+            static constexpr const char* kName = "Actors";
+
+            char  fClass[128] = {}, fName[128] = {}, fOuter[128] = {}, fOwner[128] = {}, fInst[128] = {};
+            int   classMode = 0;          // 0 Contains, 1 Is, 2 Is+Sub, 3 Not, 4 NotSub
+            int   repMode   = 0;          // 0 All, 1 Replicated, 2 Not replicated
+            uint64_t actorGotoAddr = 0;   // pending jump-to actor (by unique addr)
+            uint64_t actorSelAddr  = 0;   // highlighted row (by unique addr)
+
+            // Does row r pass the class-filter (mode + target text)?
+            bool ClassFilterPass(const ActorList::Row& r)
             {
-            case 0: return IContains(r.className, t);                 // Contains
-            case 1: return IEquals(r.className, t);                 // Is (exact)
-            case 2: return IContains(r.classChain, token);           // Is or subclass
-            case 3: return !IEquals(r.className, t);                // Not (exact)
-            case 4: return !IContains(r.classChain, token);          // Not class or subclasses
+                const std::string t = fClass;
+                if (t.empty()) return true;
+                const std::string token = "/" + t + "/";   // for subclass chain match
+                switch (classMode)
+                {
+                case 0: return IContains(r.className, t);                 // Contains
+                case 1: return IEquals(r.className, t);                 // Is (exact)
+                case 2: return IContains(r.classChain, token);           // Is or subclass
+                case 3: return !IEquals(r.className, t);                // Not (exact)
+                case 4: return !IContains(r.classChain, token);          // Not class or subclasses
+                }
+                return true;
             }
-            return true;
-        }
 
-        void DrawActorsTab()
-        {
+            void Draw()
+            {
             g_actors.beat(NowMs());   // heartbeat: auto-refresh only runs while this is live
 
             // ── Controls + per-field filters ─────────────────────────────────────
@@ -911,29 +963,29 @@ namespace OverlayConsole
             if (ImGui::Checkbox("Auto", &autoOn)) g_actors.setAuto(autoOn);
             ImGui::SameLine();
             ImGui::SetNextItemWidth(120.f);
-            ImGui::Combo("##rep", &g_repMode, "net: all\0replicated\0not replicated\0");
+            ImGui::Combo("##rep", &repMode, "net: all\0replicated\0not replicated\0");
 
             ImGui::SameLine();
             ImGui::TextDisabled("(right-click a header to show/hide columns)");
 
             // Per-field filters (one input each).
             ImGui::SetNextItemWidth(90.f);
-            ImGui::Combo("##cmode", &g_classMode, "contains\0is\0is+sub\0not\0not+sub\0");
+            ImGui::Combo("##cmode", &classMode, "contains\0is\0is+sub\0not\0not+sub\0");
             ImGui::SameLine(); ImGui::SetNextItemWidth(150.f);
-            ImGui::InputTextWithHint("##fclass", "class", g_fClass, sizeof(g_fClass));
+            ImGui::InputTextWithHint("##fclass", "class", fClass, sizeof(fClass));
             ImGui::SameLine(); ImGui::SetNextItemWidth(130.f);
-            ImGui::InputTextWithHint("##fname", "name", g_fName, sizeof(g_fName));
+            ImGui::InputTextWithHint("##fname", "name", fName, sizeof(fName));
             ImGui::SameLine(); ImGui::SetNextItemWidth(120.f);
-            ImGui::InputTextWithHint("##fouter", "outer", g_fOuter, sizeof(g_fOuter));
+            ImGui::InputTextWithHint("##fouter", "outer", fOuter, sizeof(fOuter));
             ImGui::SameLine(); ImGui::SetNextItemWidth(120.f);
-            ImGui::InputTextWithHint("##fowner", "owner", g_fOwner, sizeof(g_fOwner));
+            ImGui::InputTextWithHint("##fowner", "owner", fOwner, sizeof(fOwner));
             ImGui::SameLine(); ImGui::SetNextItemWidth(-1.f);
-            ImGui::InputTextWithHint("##finst", "instigator", g_fInst, sizeof(g_fInst));
+            ImGui::InputTextWithHint("##finst", "instigator", fInst, sizeof(fInst));
 
             std::vector<ActorList::Row> rows = g_actors.read();
             if (rows.empty()) g_actors.request();   // populate on first view
 
-            const std::string fName = g_fName, fOuter = g_fOuter, fOwner = g_fOwner, fInst = g_fInst;
+            const std::string fNameF = fName, fOuterF = fOuter, fOwnerF = fOwner, fInstF = fInst;
 
             size_t shown = 0;
             const ImGuiTableFlags tf = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg
@@ -960,13 +1012,13 @@ namespace OverlayConsole
                 for (int i = 0; i < (int)rows.size(); ++i)
                 {
                     const auto& r = rows[i];
-                    if (g_repMode == 1 && !r.replicated) continue;
-                    if (g_repMode == 2 &&  r.replicated) continue;
+                    if (repMode == 1 && !r.replicated) continue;
+                    if (repMode == 2 &&  r.replicated) continue;
                     if (!ClassFilterPass(r))                            continue;
-                    if (!fName.empty()  && !IContains(r.name,  fName)) continue;
-                    if (!fOuter.empty() && !IContains(r.outer, fOuter))continue;
-                    if (!fOwner.empty() && !IContains(r.owner, fOwner))continue;
-                    if (!fInst.empty()  && !IContains(r.instigator, fInst)) continue;
+                    if (!fNameF.empty()  && !IContains(r.name,  fNameF)) continue;
+                    if (!fOuterF.empty() && !IContains(r.outer, fOuterF))continue;
+                    if (!fOwnerF.empty() && !IContains(r.owner, fOwnerF))continue;
+                    if (!fInstF.empty()  && !IContains(r.instigator, fInstF)) continue;
                     idx.push_back(i);
                 }
                 shown = idx.size();
@@ -998,18 +1050,18 @@ namespace OverlayConsole
                 // Pending jump-to (outer/owner/instigator click): find its row by the
                 // unique addr, force it visible past the clipper, scroll + select it.
                 int gotoPos = -1;
-                if (g_actorGotoAddr)
+                if (actorGotoAddr)
                     for (int k = 0; k < (int)idx.size(); ++k)
-                        if (rows[idx[k]].addr == g_actorGotoAddr) { gotoPos = k; break; }
+                        if (rows[idx[k]].addr == actorGotoAddr) { gotoPos = k; break; }
 
                 // Jump targets a specific instance by addr; clear filters so it's
                 // reachable next frame regardless of the current view.
-                auto jumpTo = [](uint64_t targetAddr)
+                auto jumpTo = [this](uint64_t targetAddr)
                 {
                     if (!targetAddr) return;
-                    g_actorGotoAddr = targetAddr; g_actorSelAddr = targetAddr;
-                    g_fName[0] = g_fOuter[0] = g_fOwner[0] = g_fInst[0] = g_fClass[0] = '\0';
-                    g_repMode = 0;
+                    actorGotoAddr = targetAddr; actorSelAddr = targetAddr;
+                    fName[0] = fOuter[0] = fOwner[0] = fInst[0] = fClass[0] = '\0';
+                    repMode = 0;
                 };
 
                 ImGuiListClipper clipper;
@@ -1022,14 +1074,14 @@ namespace OverlayConsole
                         ImGui::TableNextRow();
                         ImGui::PushID(idx[row]);
 
-                        const bool sel = (r.addr && r.addr == g_actorSelAddr);
+                        const bool sel = (r.addr && r.addr == actorSelAddr);
                         if (sel) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, IM_COL32(60, 90, 130, 120));
 
                         ImGui::TableSetColumnIndex(0); ImGui::TextUnformatted(r.className.c_str());
 
                         ImGui::TableSetColumnIndex(1);
                         if (ImGui::Selectable(r.name.c_str(), sel, ImGuiSelectableFlags_SpanAllColumns))
-                            g_actorSelAddr = r.addr;
+                            actorSelAddr = r.addr;
 
                         ImGui::TableSetColumnIndex(2);
                         if (r.replicated) ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.f), "rep");
@@ -1051,98 +1103,104 @@ namespace OverlayConsole
                         if (gotoPos == row) ImGui::SetScrollHereY(0.5f);
                         ImGui::PopID();
                     }
-                if (gotoPos >= 0) g_actorGotoAddr = 0;   // resolved; a fresh click stays pending
+                if (gotoPos >= 0) actorGotoAddr = 0;   // resolved; a fresh click stays pending
                 ImGui::EndTable();
             }
             ImGui::TextDisabled("%zu shown / %zu actors", shown, rows.size());
-        }
-
-        // ImGui has no real tab stops — it renders '\t' as a fixed advance of 4 space
-        // widths. Matching that here makes the tab→space conversion visually identical.
-        constexpr int kTabWidth = 4;
-
-        // YAML forbids tabs for indentation, but the editor allows typing/pasting them
-        // (ImGuiInputTextFlags_AllowTabInput). Expand each '\t' to kTabWidth spaces so a
-        // Save can't write an unparseable file.
-        std::string ExpandTabs(const char* s)
-        {
-            std::string out;
-            for (const char* p = s; *p; ++p)
-            {
-                if (*p == '\t') out.append(kTabWidth, ' ');
-                else            out.push_back(*p);
             }
-            return out;
-        }
+        };
 
-        void ConfigLoad()
+        // ── Config tab — raw config.yaml editor ──────────────────────────────────
+        struct ConfigTab : OverlayTab<ConfigTab>
         {
-            g_cfgLoaded = true;
-            g_cfgText[0] = '\0';
-            const std::string path = NetLogConfig::ConfigPath();
-            if (path.empty()) { g_cfgStatus = "config path unresolved"; return; }
-            std::ifstream f(path, std::ios::binary);
-            if (!f) { g_cfgStatus = "not found (Save creates it): " + path; return; }
-            std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-            if (text.size() >= sizeof(g_cfgText)) { g_cfgStatus = "file too large to edit here"; return; }
-            std::copy(text.begin(), text.end(), g_cfgText);
-            g_cfgText[text.size()] = '\0';
-            g_cfgStatus = "loaded " + path;
-        }
+            static constexpr const char* kName = "Config";
 
-        void ConfigSave()
-        {
-            const std::string path = NetLogConfig::ConfigPath();
-            if (path.empty()) { g_cfgStatus = "config path unresolved"; return; }
-            const std::string text = ExpandTabs(g_cfgText);   // YAML safety: no literal tabs
-            std::ofstream f(path, std::ios::binary | std::ios::trunc);
-            if (!f) { g_cfgStatus = "save FAILED: " + path; return; }
-            f << text;
-            g_cfgStatus = "saved " + path;
-            // Reflect the normalized text back into the editor so the buffer matches disk
-            // (only when it still fits the fixed-size buffer).
-            if (text.size() < sizeof(g_cfgText))
+            // ImGui renders '\t' as a fixed 4-space advance; expanding to this many spaces
+            // keeps indentation visually identical.
+            static constexpr int kTabWidth = 4;
+
+            char        text[32768] = {};
+            bool        loaded = false;
+            std::string status;
+
+            // YAML forbids tabs for indentation, but the editor allows typing/pasting them
+            // (ImGuiInputTextFlags_AllowTabInput). Expand each '\t' so Save can't write an
+            // unparseable file (also catches pastes).
+            static std::string ExpandTabs(const char* s)
             {
-                std::copy(text.begin(), text.end(), g_cfgText);
-                g_cfgText[text.size()] = '\0';
+                std::string out;
+                for (const char* p = s; *p; ++p)
+                {
+                    if (*p == '\t') out.append(kTabWidth, ' ');
+                    else            out.push_back(*p);
+                }
+                return out;
             }
-        }
 
-        void DrawConfigTab()
-        {
-            if (!g_cfgLoaded) ConfigLoad();
-
-            if (ImGui::Button("Save"))   ConfigSave();
-            ImGui::SameLine();
-            if (ImGui::Button("Reload")) ConfigLoad();
-            ImGui::SameLine();
-            if (ImGui::Button("Apply in-game"))   // re-read skip lists + re-run autorun
+            void Load()
             {
-                RunCommand("reloadnetlog");
-                RunCommand("runcfg");
-                g_cfgStatus = "applied (reloadnetlog + runcfg) — Save first to persist";
+                loaded = true;
+                text[0] = '\0';
+                const std::string path = NetLogConfig::ConfigPath();
+                if (path.empty()) { status = "config path unresolved"; return; }
+                std::ifstream f(path, std::ios::binary);
+                if (!f) { status = "not found (Save creates it): " + path; return; }
+                std::string body((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                if (body.size() >= sizeof(text)) { status = "file too large to edit here"; return; }
+                std::copy(body.begin(), body.end(), text);
+                text[body.size()] = '\0';
+                status = "loaded " + path;
             }
-            ImGui::SameLine();
-            ImGui::TextDisabled("edits config.yaml on disk (persists)");
 
-            if (!g_cfgStatus.empty()) ImGui::TextDisabled("%s", g_cfgStatus.c_str());
+            void Save()
+            {
+                const std::string path = NetLogConfig::ConfigPath();
+                if (path.empty()) { status = "config path unresolved"; return; }
+                const std::string body = ExpandTabs(text);   // YAML safety: no literal tabs
+                std::ofstream f(path, std::ios::binary | std::ios::trunc);
+                if (!f) { status = "save FAILED: " + path; return; }
+                f << body;
+                status = "saved " + path;
+                // Reflect the normalized text back into the editor so the buffer matches disk.
+                if (body.size() < sizeof(text))
+                {
+                    std::copy(body.begin(), body.end(), text);
+                    text[body.size()] = '\0';
+                }
+            }
 
-            const float foot = ImGui::GetFrameHeightWithSpacing();
-            ImGui::InputTextMultiline("##cfg", g_cfgText, sizeof(g_cfgText),
-                                      ImVec2(-1.f, -foot), ImGuiInputTextFlags_AllowTabInput);
-            ImGui::TextDisabled("Save writes to disk; Apply reloads it in-game. Full reload still needed for some settings.");
-        }
+            void Draw()
+            {
+                if (!loaded) Load();
+
+                if (ImGui::Button("Save"))   Save();
+                ImGui::SameLine();
+                if (ImGui::Button("Reload")) Load();
+                ImGui::SameLine();
+                if (ImGui::Button("Apply in-game"))   // re-read skip lists + re-run autorun
+                {
+                    RunCommand("reloadnetlog");
+                    RunCommand("runcfg");
+                    status = "applied (reloadnetlog + runcfg) — Save first to persist";
+                }
+                ImGui::SameLine();
+                ImGui::TextDisabled("edits config.yaml on disk (persists)");
+
+                if (!status.empty()) ImGui::TextDisabled("%s", status.c_str());
+
+                const float foot = ImGui::GetFrameHeightWithSpacing();
+                ImGui::InputTextMultiline("##cfg", text, sizeof(text),
+                                          ImVec2(-1.f, -foot), ImGuiInputTextFlags_AllowTabInput);
+                ImGui::TextDisabled("Save writes to disk; Apply reloads it in-game. Full reload still needed for some settings.");
+            }
+        };
 
         void DrawPanel()
         {
             if (ImGui::BeginTabBar("##octabs"))
             {
-                if (ImGui::BeginTabItem("Console"))  { DrawConsoleTab();   ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("Commands")) { DrawCommandsTab();  ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("Vars"))     { DrawVarsTab();      ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("Keybinds")) { DrawKeybindsTab();  ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("Actors"))   { DrawActorsTab();    ImGui::EndTabItem(); }
-                if (ImGui::BeginTabItem("Config"))   { DrawConfigTab();    ImGui::EndTabItem(); }
+                for (auto& t : g_tabs)
+                    if (ImGui::BeginTabItem(t.name)) { t.draw(); ImGui::EndTabItem(); }
                 ImGui::EndTabBar();
             }
         }
@@ -1191,6 +1249,16 @@ namespace OverlayConsole
         static bool s_panelRegistered = false;
         if (s_panelRegistered) return;
         s_panelRegistered = true;
+
+        // Build the tab registry once (overlay-session lifetime), in display order.
+        // Each tab self-registers a {name, draw} entry via its OverlayTab<> base when
+        // constructed; DrawPanel iterates g_tabs in this construction order.
+        static ConsoleTab  s_consoleTab;  // self-registers as "Console"
+        static CommandsTab s_commandsTab; // self-registers as "Commands"
+        static VarsTab     s_varsTab;     // self-registers as "Vars"
+        static KeybindsTab s_keybindsTab; // self-registers as "Keybinds"
+        static ActorsTab   s_actorsTab;   // self-registers as "Actors"
+        static ConfigTab   s_configTab;   // self-registers as "Config" (last)
 
         // Mirror command responses (scan/list dumps, etc.) into the console pane —
         // they otherwise only travel over IPC to the CLI. Split on newlines so a
