@@ -172,10 +172,9 @@ namespace OverlayConsole
 
         // Shared services live in OverlayConsole::detail (defined at the bottom of
         // this TU, declared in OverlayTabs.h, and consumed by the per-tab TUs). Bring
-        // the few used unqualified into scope so the console/completion code reads
-        // naturally; the heavier ones are called qualified.
+        // the two the console/completion code reads unqualified into scope; the rest
+        // are called qualified.
         using detail::RunCommand;
-        using detail::NowMs;
         using detail::VarSnap;
 
         // ── VarSystem snapshot (game thread writes, overlay reads) ───────────────
