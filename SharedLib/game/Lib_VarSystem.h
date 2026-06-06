@@ -57,10 +57,14 @@ namespace VarSystem
         bool             isValid = true;
     };
 
-    extern std::unordered_map<std::string, Var> g_Vars;
+    // The variable store + the binding table. Function-local statics (Meyers
+    // singletons) so they're constructed on first use — a Saveable<T> declared as a
+    // file-scope static in any TU can register into Vars() during static init without
+    // depending on (unspecified) cross-TU init order.
+    std::unordered_map<std::string, Var>& Vars();
 
     using BindingFn = std::function<ExpandResult()>;
-    extern std::unordered_map<std::string, BindingFn> g_Bindings;
+    std::unordered_map<std::string, BindingFn>& Bindings();
 
     // Core operations
     void Clear();

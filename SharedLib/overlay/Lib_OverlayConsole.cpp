@@ -4,7 +4,7 @@
 #include "Lib_Overlay.h"
 #include "Lib_CommandHandler.h"
 #include "Lib_GameHooks.h"     // EnqueueOnce, EnqueueEveryNTicks
-#include "Lib_VarSystem.h"     // g_Vars snapshot for the Vars tab
+#include "Lib_VarSystem.h"     // VarSystem::Vars() store snapshot for the Vars tab
 #include "Lib_KeyBindings.h"   // SnapshotCli for the Keybinds tab
 #include "Lib_ActorList.h"     // actor snapshot for the Actors tab
 #include "Lib_NetLogConfig.h"  // ConfigPath for the Config tab
@@ -644,8 +644,8 @@ namespace OverlayConsole
         EnqueueEveryNTicks(30, []
         {
             std::vector<detail::VarSnap> snap;
-            snap.reserve(VarSystem::g_Vars.size());
-            for (const auto& [name, v] : VarSystem::g_Vars)
+            snap.reserve(VarSystem::Vars().size());
+            for (const auto& [name, v] : VarSystem::Vars())
                 snap.push_back({ name, v.ToString(), v.Type() });
             detail::Vars().store(std::move(snap));
 

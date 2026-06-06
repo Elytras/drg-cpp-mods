@@ -25,8 +25,17 @@ namespace VarSystem
     // Global Storage Definitions
     // =========================================================================
 
-    std::unordered_map<std::string, Var> g_Vars;
-    std::unordered_map<std::string, BindingFn> g_Bindings;
+    std::unordered_map<std::string, Var>& Vars()
+    {
+        static std::unordered_map<std::string, Var> s_vars;
+        return s_vars;
+    }
+
+    std::unordered_map<std::string, BindingFn>& Bindings()
+    {
+        static std::unordered_map<std::string, BindingFn> s_bindings;
+        return s_bindings;
+    }
 
     // =========================================================================
     // Type Name Lookup
@@ -105,12 +114,12 @@ namespace VarSystem
 
     void Clear()
     {
-        g_Vars.clear();
+        Vars().clear();
     }
 
     void RegisterBinding(const std::string& name, BindingFn fn)
     {
-        g_Bindings[name] = std::move(fn);
+        Bindings()[name] = std::move(fn);
     }
 
     // =========================================================================
@@ -227,8 +236,8 @@ namespace VarSystem
         if (token.size() > 3 && token.substr(0, 3) == "fn:")
         {
             std::string name = token.substr(3);
-            auto it = g_Bindings.find(name);
-            if (it == g_Bindings.end())
+            auto it = Bindings().find(name);
+            if (it == Bindings().end())
             {
                 warn("[var] fn:'{}' not registered", name);
                 return { "", nullptr, false };
@@ -250,8 +259,8 @@ namespace VarSystem
         if (token.size() > 4 && token.substr(0, 4) == "var:")
         {
             std::string name = token.substr(4);
-            auto it = g_Vars.find(name);
-            if (it == g_Vars.end())
+            auto it = Vars().find(name);
+            if (it == Vars().end())
             {
                 warn("[var] '{}' not defined", name);
                 return { "", nullptr, false };
@@ -263,7 +272,7 @@ namespace VarSystem
                 if (!o || !Kismet::IsValid(o))
                 {
                     warn("[var] '{}' points to destroyed object — clearing", name);
-                    g_Vars.erase(it);
+                    Vars().erase(it);
                     return { "", nullptr, false };
                 }
                 info("[var] '{}' → object '{}'", name, o->GetName());
@@ -317,7 +326,7 @@ namespace VarSystem
             raw += ' ' + ctx.Arg(i);
 
         Var v = Parse(raw);
-        g_Vars[name] = v;
+        Vars()[name] = v;
         Print(name, v);
     }
 
@@ -329,8 +338,8 @@ namespace VarSystem
             return;
         }
         const std::string& name = ctx.Arg(1);
-        auto it = g_Vars.find(name);
-        if (it == g_Vars.end())
+        auto it = Vars().find(name);
+        if (it == Vars().end())
         {
             warn("[var] '{}' not defined", name);
             return;
@@ -346,7 +355,7 @@ namespace VarSystem
             return;
         }
         const std::string& name = ctx.Arg(1);
-        if (g_Vars.erase(name))
+        if (Vars().erase(name))
             info("[var] '{}' unset", name);
         else
             warn("[var] '{}' was not defined", name);
@@ -354,21 +363,21 @@ namespace VarSystem
 
     void Cmd_Vars(const CommandContext&)
     {
-        if (g_Vars.empty() && g_Bindings.empty())
+        if (Vars().empty() && Bindings().empty())
         {
             info("[var] No variables defined.");
             return;
         }
-        if (!g_Vars.empty())
+        if (!Vars().empty())
         {
-            info("[var] {} variable(s):", g_Vars.size());
-            for (const auto& [n, v] : g_Vars)
+            info("[var] {} variable(s):", Vars().size());
+            for (const auto& [n, v] : Vars())
                 Print(n, v);
         }
-        if (!g_Bindings.empty())
+        if (!Bindings().empty())
         {
-            info("[var] {} binding(s) (fn:<n>):", g_Bindings.size());
-            for (const auto& [n, fn] : g_Bindings)
+            info("[var] {} binding(s) (fn:<n>):", Bindings().size());
+            for (const auto& [n, fn] : Bindings())
             {
                 ExpandResult r = fn();
                 if (!r.isValid)
