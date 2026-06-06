@@ -4,9 +4,11 @@
 #include "Lib_GameHooks.h"
 #include "StringLib.h"
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <random>
+#include <variant>
 
 inline const UC::TArray<SDK::APlayerCharacter*>GetAllPlayers()
 {
@@ -44,6 +46,57 @@ namespace VarSystem
         case VarType::Object:  return "object";
         default:               return "unknown";
         }
+    }
+
+    // =========================================================================
+    // Var value access (typed store ⇄ string form)
+    // =========================================================================
+
+    std::string Var::ToString() const
+    {
+        switch (type)
+        {
+        case VarType::Bool:
+            { auto* p = std::get_if<bool>(&value); return (p && *p) ? "true" : "false"; }
+        case VarType::Int32:
+            { auto* p = std::get_if<int32_t>(&value); return std::to_string(p ? *p : 0); }
+        case VarType::Float:
+            {
+                auto* p = std::get_if<float>(&value);
+                char buf[32];
+                snprintf(buf, sizeof(buf), "%g", p ? *p : 0.f);
+                return buf;
+            }
+        case VarType::Object:
+            { UObject* o = AsObject(); return (o && Kismet::IsValid(o)) ? o->GetName() : ""; }
+        default:   // String / Vector / Rotator / Name — stored verbatim
+            { auto* p = std::get_if<std::string>(&value); return p ? *p : std::string{}; }
+        }
+    }
+
+    bool Var::AsBool() const
+    {
+        if (auto* p = std::get_if<bool>(&value)) return *p;
+        const std::string s = ToString();
+        return s == "true" || s == "1" || s == "True";
+    }
+
+    int32_t Var::AsInt() const
+    {
+        if (auto* p = std::get_if<int32_t>(&value)) return *p;
+        return (int32_t)SafeStoll(ToString());
+    }
+
+    float Var::AsFloat() const
+    {
+        if (auto* p = std::get_if<float>(&value)) return *p;
+        return SafeStof(ToString());
+    }
+
+    UObject* Var::AsObject() const
+    {
+        auto* p = std::get_if<UObject*>(&value);
+        return p ? *p : nullptr;
     }
 
     // =========================================================================
@@ -108,7 +161,8 @@ namespace VarSystem
 
     Var Parse(const std::string& raw)
     {
-        // Check for vec: prefix
+        // Check for vec: prefix — validate "x,y,z", store the inner text verbatim
+        // (vectors are consumed as strings; commands reparse them).
         if (raw.size() > 4 && raw.substr(0, 4) == "vec:")
         {
             std::string inner = raw.substr(4);
@@ -133,8 +187,8 @@ namespace VarSystem
             return { VarType::Name, raw.substr(5) };
 
         // Check for boolean
-        if (raw == "true" || raw == "false")
-            return { VarType::Bool, raw };
+        if (raw == "true")  return { VarType::Bool, true };
+        if (raw == "false") return { VarType::Bool, false };
 
         // Check for int32
         {
@@ -146,7 +200,7 @@ namespace VarSystem
                 if (!isdigit((unsigned char)raw[i]))
                     isInt = false;
             if (isInt)
-                return { VarType::Int32, raw };
+                return { VarType::Int32, (int32_t)SafeStoll(raw) };
         }
 
         // Check for float
@@ -155,9 +209,9 @@ namespace VarSystem
             try
             {
                 size_t pos;
-                (void)std::stof(raw, &pos);
+                float f = std::stof(raw, &pos);
                 if (pos == raw.size())
-                    return { VarType::Float, raw };
+                    return { VarType::Float, f };
             }
             catch (...)
             {
@@ -205,16 +259,17 @@ namespace VarSystem
             const Var& v = it->second;
             if (v.type == VarType::Object)
             {
-                if (!v.object || !Kismet::IsValid(v.object))
+                UObject* o = v.AsObject();
+                if (!o || !Kismet::IsValid(o))
                 {
                     warn("[var] '{}' points to destroyed object — clearing", name);
                     g_Vars.erase(it);
                     return { "", nullptr, false };
                 }
-                info("[var] '{}' → object '{}'", name, v.object->GetName());
-                return { "", v.object, true };
+                info("[var] '{}' → object '{}'", name, o->GetName());
+                return { "", o, true };
             }
-            return { v.token, nullptr, true };
+            return { v.ToString(), nullptr, true };
         }
 
         return { token, nullptr, true };
@@ -225,23 +280,26 @@ namespace VarSystem
         switch (v.type)
         {
         case VarType::Vector:
-            info("[var] {} = vec:{} (vector)", name, v.token);
+            info("[var] {} = vec:{} (vector)", name, v.ToString());
             break;
         case VarType::Rotator:
-            info("[var] {} = rot:{} (rotator)", name, v.token);
+            info("[var] {} = rot:{} (rotator)", name, v.ToString());
             break;
         case VarType::Name:
-            info("[var] {} = name:{} (fname)", name, v.token);
+            info("[var] {} = name:{} (fname)", name, v.ToString());
             break;
         case VarType::Object:
-            if (v.object && Kismet::IsValid(v.object))
-                info("[var] {} = [object] {} ({})", name, v.object->GetName(),
-                    v.object->Class ? v.object->Class->GetName() : "?");
+        {
+            UObject* o = v.AsObject();
+            if (o && Kismet::IsValid(o))
+                info("[var] {} = [object] {} ({})", name, o->GetName(),
+                    o->Class ? o->Class->GetName() : "?");
             else
                 info("[var] {} = [object] <stale/null>", name);
             break;
+        }
         default:
-            info("[var] {} = {} ({})", name, v.token, TypeName(v.type));
+            info("[var] {} = {} ({})", name, v.ToString(), TypeName(v.type));
             break;
         }
     }

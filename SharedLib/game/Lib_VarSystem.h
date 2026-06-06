@@ -1,9 +1,11 @@
 ﻿#pragma once
 // Lib_VarSystem.h — Session-scoped variable storage + function bindings.
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include "Lib_Forward.h"
 
 struct CommandContext;
@@ -15,11 +17,37 @@ namespace VarSystem
     // Type name lookup
     const char* TypeName(VarType t);
 
+    // Persistence/visibility attributes — orthogonal to type. The cvar foundation:
+    // a `Saveable<T>` (next step) sets Persistent so the entry round-trips to the
+    // settings file. Nothing consumes these yet; they exist so the store is ready.
+    namespace VarFlags { enum : uint32_t { None = 0, Persistent = 1u << 0, ReadOnly = 1u << 1, Hidden = 1u << 2 }; }
+
+    // Canonical typed value. Scalars (Bool/Int32/Float) and Object are stored typed;
+    // String/Vector/Rotator/Name share the std::string alternative — they're consumed
+    // as strings everywhere (commands reparse them via Expand), and storing them typed
+    // would drag UE4-vs-UE5 FVector divergence + eager FName interning into the store
+    // for no reader. The `type` tag distinguishes the string-family members.
+    using Value = std::variant<std::string, bool, int32_t, float, SDK::UObject*>;
+
     struct Var
     {
-        VarType          type = VarType::String;
-        std::string      token;
-        SDK::UObject*    object = nullptr;
+        VarType   type  = VarType::String;
+        Value     value = std::string{};
+        uint32_t  flags = 0;
+
+        VarType Type() const { return type; }
+
+        // Display / serialize form. Scalars are formatted (Float via %g, so 90.0 → "90");
+        // String/Vector/Rotator/Name return their stored text verbatim; Object → name.
+        std::string ToString() const;
+
+        // Typed reads. If the stored alternative differs from T, coerce from ToString()
+        // so a Saveable<T> can sit over a differently-typed entry.
+        bool          AsBool()   const;
+        int32_t       AsInt()    const;
+        float         AsFloat()  const;
+        std::string   AsString() const { return ToString(); }
+        SDK::UObject* AsObject() const;
     };
 
     struct ExpandResult

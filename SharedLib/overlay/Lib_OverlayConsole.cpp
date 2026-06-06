@@ -646,7 +646,7 @@ namespace OverlayConsole
             std::vector<detail::VarSnap> snap;
             snap.reserve(VarSystem::g_Vars.size());
             for (const auto& [name, v] : VarSystem::g_Vars)
-                snap.push_back({ name, v.token, v.type });
+                snap.push_back({ name, v.ToString(), v.Type() });
             detail::Vars().store(std::move(snap));
 
             // Actor snapshot — walking GObjects is heavy, so only when explicitly
