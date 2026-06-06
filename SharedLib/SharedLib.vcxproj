@@ -144,6 +144,9 @@
     <ClCompile Include="overlay\tabs\ActorsTab.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="overlay\tabs\VarsTab.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="hooks\Lib_EasyHook.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
