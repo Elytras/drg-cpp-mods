@@ -150,6 +150,9 @@
     <ClCompile Include="overlay\tabs\KeybindsTab.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="overlay\tabs\CommandsTab.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="hooks\Lib_EasyHook.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
