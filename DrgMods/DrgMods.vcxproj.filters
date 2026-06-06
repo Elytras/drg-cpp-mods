@@ -156,6 +156,9 @@
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\ConfigTab.cpp">
       <Filter>External</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\ActorsTab.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Lib_Forward.h">

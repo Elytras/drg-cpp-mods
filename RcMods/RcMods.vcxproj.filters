@@ -114,6 +114,9 @@
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\ConfigTab.cpp">
       <Filter>External</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\ActorsTab.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_ActorList.cpp">
       <Filter>Source Files\LibraryImplementations</Filter>
     </ClCompile>

@@ -190,6 +190,7 @@
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\Lib_Overlay.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\Lib_OverlayConsole.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\ConfigTab.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\ActorsTab.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_NetLogConfig.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\hooks\Lib_EasyHook.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\hooks\Lib_GameHooks.cpp" />
