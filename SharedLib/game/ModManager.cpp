@@ -124,6 +124,7 @@ void ModManager::LoadModsGameThread()
     OnModsLoaded();             // game-specific (RC: BpModLoader::Install)
     OverlayConsole::Init(&cmdHandler);   // in-game CLI panels (no-op if overlay isn't started)
     InitDefaultCallbacks();
+    VarSystem::LoadSettings();  // apply persisted settings before autorun reads them
     RunConfig(cmdHandler);
     if constexpr (UseThreads) {
         shouldStop.store(false);
@@ -145,6 +146,7 @@ void ModManager::UnloadMods()
     info("----------------------------------------");
     info("[ModManager] Unloading...");
     OnModsUnloading();          // game-specific (DRG: JsonHook::Teardown; RC: BpModLoader::Uninstall)
+    VarSystem::FlushSettings(); // persist any dirty settings before teardown
     TickSystem::Reset();
     ResetCallbackHandles();
     GameHooks::ResetAllToggles();   // forget all HookToggle handles before the hooks tear down
