@@ -1,12 +1,21 @@
-﻿#include "Lib_VarSystem.h"
+﻿#ifndef NOMINMAX
+#define NOMINMAX               // keep std::min/max usable alongside <Windows.h>
+#endif
+#define WIN32_LEAN_AND_MEAN
+#include "Lib_VarSystem.h"
+#include "Saveable.h"
 #include "Lib_Utils.h"
 #include "Lib_CommandHandler.h"
 #include "Lib_GameHooks.h"
 #include "StringLib.h"
+#include <Windows.h>           // GetModuleHandleEx/GetModuleFileName for settings path
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <nlohmann/json.hpp>
 #include <random>
 #include <variant>
 
@@ -114,7 +123,15 @@ namespace VarSystem
 
     void Clear()
     {
-        Vars().clear();
+        // Keep Persistent (config) vars across a reload/`retry`; wipe only session
+        // scratch vars. Keeping the live entries also preserves their declared types
+        // for the Saveable handles (whose statics don't re-run on an in-process reload).
+        auto& vars = Vars();
+        for (auto it = vars.begin(); it != vars.end(); )
+        {
+            if (it->second.flags & VarFlags::Persistent) ++it;
+            else it = vars.erase(it);
+        }
     }
 
     void RegisterBinding(const std::string& name, BindingFn fn)
@@ -326,7 +343,11 @@ namespace VarSystem
             raw += ' ' + ctx.Arg(i);
 
         Var v = Parse(raw);
-        Vars()[name] = v;
+        auto& vars = Vars();
+        if (auto it = vars.find(name); it != vars.end())
+            v.flags = it->second.flags;   // preserve persistence/visibility across a re-set
+        vars[name] = v;
+        if (v.flags & VarFlags::Persistent) MarkSettingsDirty();
         Print(name, v);
     }
 
@@ -391,4 +412,113 @@ namespace VarSystem
         }
     }
 
+    // =========================================================================
+    // Settings persistence (Persistent vars ⇄ settings.json)
+    // =========================================================================
+
+    namespace
+    {
+        bool s_settingsDirty = false;
+
+        // settings.json next to the containing DLL (resolved via this function's own
+        // address, so DrgMods.dll and RcMods.dll each get their own file).
+        std::string SettingsPath()
+        {
+            wchar_t buf[MAX_PATH]{};
+            HMODULE hm = nullptr;
+            GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&SettingsPath), &hm);
+            if (!hm) return {};
+            GetModuleFileNameW(hm, buf, MAX_PATH);
+            std::filesystem::path p(buf);
+            if (p.empty()) return {};
+            return (p.parent_path() / L"settings.json").string();
+        }
+    }
+
+    void MarkSettingsDirty() { s_settingsDirty = true; }
+
+    void SaveSettings()
+    {
+        const std::string path = SettingsPath();
+        if (path.empty()) { warn("[settings] cannot resolve settings.json path"); return; }
+
+        nlohmann::json j = nlohmann::json::object();
+        for (const auto& [name, v] : Vars())
+        {
+            if (!(v.flags & VarFlags::Persistent)) continue;
+            switch (v.type)
+            {
+            case VarType::Bool:   j[name] = v.AsBool();  break;
+            case VarType::Int32:  j[name] = v.AsInt();   break;
+            case VarType::Float:  j[name] = v.AsFloat(); break;
+            case VarType::Object: break;                 // runtime pointer — not serializable
+            default:              j[name] = v.ToString(); break;  // String/Vector/Rotator/Name
+            }
+        }
+
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        if (!f) { warn("[settings] save FAILED: {}", path); return; }
+        f << j.dump(2);
+        s_settingsDirty = false;
+        info("[settings] saved {} ({} entr{})", path, j.size(), j.size() == 1 ? "y" : "ies");
+    }
+
+    void FlushSettings(bool force)
+    {
+        if (force || s_settingsDirty) SaveSettings();
+    }
+
+    void LoadSettings()
+    {
+        const std::string path = SettingsPath();
+        if (path.empty()) return;
+        std::ifstream f(path, std::ios::binary);
+        if (!f) return;   // no settings file yet — first run
+
+        nlohmann::json j;
+        try { f >> j; }
+        catch (const nlohmann::json::exception& e)
+        {
+            warn("[settings] parse error in '{}': {}", path, e.what());
+            return;
+        }
+        if (!j.is_object()) return;
+
+        // Apply each value in its JSON-natural type, flagged Persistent. The typed
+        // Saveable<T> accessors coerce on read, and a Saveable's ctor re-normalises the
+        // entry to its declared T — so load order vs. Saveable static-init doesn't matter.
+        auto& vars = Vars();
+        size_t n = 0;
+        for (auto it = j.begin(); it != j.end(); ++it)
+        {
+            const auto& val = it.value();
+            Var v;
+            if      (val.is_boolean())         { v.type = VarType::Bool;   v.value = val.get<bool>(); }
+            else if (val.is_number_integer())  { v.type = VarType::Int32;  v.value = (int32_t)val.get<long long>(); }
+            else if (val.is_number())          { v.type = VarType::Float;  v.value = val.get<float>(); }
+            else if (val.is_string())          { v.type = VarType::String; v.value = val.get<std::string>(); }
+            else continue;
+            v.flags = VarFlags::Persistent;
+            if (auto vit = vars.find(it.key()); vit != vars.end())
+                v.flags |= vit->second.flags;   // keep any flags a Saveable already set
+            vars[it.key()] = std::move(v);
+            ++n;
+        }
+        info("[settings] loaded {} ({} entr{})", path, n, n == 1 ? "y" : "ies");
+    }
+
 } // namespace VarSystem
+
+// Validation: force-instantiate the supported Saveable<T> specialisations so their
+// members are fully type-checked even before a real client exists. Remove once a
+// feature owns Saveable members.
+namespace VarSystem
+{
+    template class Saveable<bool>;
+    template class Saveable<int32_t>;
+    template class Saveable<float>;
+    template class Saveable<std::string>;
+}

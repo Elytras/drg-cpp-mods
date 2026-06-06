@@ -85,4 +85,13 @@ namespace VarSystem
     void Cmd_Unset  (const CommandContext& ctx);
     void Cmd_Vars   (const CommandContext& ctx);
 
+    // ── Settings persistence (Persistent vars ⇄ settings.json next to the DLL) ──
+    // Only entries flagged Persistent serialize (typically via Saveable<T>); dynamic
+    // `set` scratch vars are not saved. Object vars are skipped (runtime pointers).
+    void LoadSettings();                      // read settings.json, apply onto entries
+    void SaveSettings();                      // write all Persistent entries (unconditional)
+    void FlushSettings(bool force = false);   // SaveSettings() if dirty (or force) — the
+                                              // hook to wire into unload / world-change
+    void MarkSettingsDirty();                 // note a Persistent change (drives FlushSettings)
+
 } // namespace VarSystem

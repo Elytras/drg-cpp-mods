@@ -23,6 +23,9 @@
     <ClInclude Include="overlay\OverlayTabs.h">
       <Filter>Headers</Filter>
     </ClInclude>
+    <ClInclude Include="game\Saveable.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
     <ClInclude Include="hooks\Lib_EasyHook.h">
       <Filter>Headers</Filter>
     </ClInclude>

@@ -109,6 +109,7 @@
     <ClInclude Include="overlay\Lib_Overlay.h" />
     <ClInclude Include="overlay\Lib_OverlayConsole.h" />
     <ClInclude Include="overlay\OverlayTabs.h" />
+    <ClInclude Include="game\Saveable.h" />
     <ClInclude Include="hooks\Lib_EasyHook.h" />
     <ClInclude Include="hooks\Lib_GameHooks.h" />
     <ClInclude Include="game\Lib_Json.h" />
