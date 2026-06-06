@@ -14,6 +14,7 @@
 #include "StringLib.h"         // IEquals / IContains (canonical CI helpers)
 #include "CoreUtils.h"         // SafeStof / SafeStoll (canonical parsers)
 #include "GameThreadSnapshot.h" // double-buffered game-thread→UI snapshot
+#include "OverlayTabs.h"        // detail:: shared services + tab registry (per-tab TUs)
 #include "Common.h"
 
 #include <fstream>
@@ -169,23 +170,25 @@ namespace OverlayConsole
         spdlog::sink_ptr               g_sink;
         std::atomic<CommandHandler*>   g_handler{ nullptr };
 
+        // Shared services live in OverlayConsole::detail (defined at the bottom of
+        // this TU, declared in OverlayTabs.h, and consumed by the per-tab TUs). Bring
+        // the few used unqualified into scope so the console/completion code reads
+        // naturally; the heavier ones are called qualified.
+        using detail::RunCommand;
+        using detail::NowMs;
+        using detail::VarSnap;
+
         // ── VarSystem snapshot (game thread writes, overlay reads) ───────────────
         // g_Vars is owned by the game thread; iterating it from the overlay thread
         // would race a concurrent insert/rehash. A periodic game-thread tick copies
         // it into g_vars; the Vars tab reads only this copy and pushes edits back as
-        // `set <name> <value>` commands (game-thread safe).
-        struct VarSnap { std::string name, token; VarSystem::VarType type; };
+        // `set <name> <value>` commands (game-thread safe). Exposed to the Vars/Actors
+        // tab TUs via detail::Vars()/detail::Actors().
         GameThreadSnapshot<std::vector<VarSnap>> g_vars;   // refreshes unconditionally
         // Actors tab: game-thread-built snapshot. Heavy GObjects walk, so the snapshot
         // gates auto-refresh on a recent beat() (tab actually rendered) to avoid spiking
         // frametime when you aren't looking at the tab.
         GameThreadSnapshot<std::vector<ActorList::Row>> g_actors;
-
-        uint64_t NowMs()
-        {
-            using namespace std::chrono;
-            return (uint64_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
-        }
 
         // ── Console input + completion state (overlay thread only) ───────────────
         // Shared infra: read/written by the ImGui input callback, the completion
@@ -218,21 +221,6 @@ namespace OverlayConsole
             case spdlog::level::trace:    return ImVec4(0.60f, 0.60f, 0.60f, 1.f);
             default:                      return ImVec4(0.86f, 0.86f, 0.86f, 1.f);
             }
-        }
-
-        void RunCommand(std::string line)
-        {
-            if (line.empty()) return;
-            PushLine(spdlog::level::info, "> " + line);   // echo
-            // Record in history (drop a consecutive duplicate of the last entry).
-            if (g_history.empty() || g_history.back() != line) g_history.push_back(line);
-            g_historyPos = -1;
-            g_acMatches.clear();
-            g_acShowAll = false;
-            EnqueueOnce([line]
-            {
-                if (auto* h = g_handler.load()) h->Dispatch(line, 0);
-            });
         }
 
         // Longest common prefix of a set of command names (case-sensitive).
@@ -391,29 +379,10 @@ namespace OverlayConsole
             std::sort(g_acMatches.begin(), g_acMatches.end());
         }
 
-        // ── Tab registry ─────────────────────────────────────────────────────────
-        // Each overlay tab derives OverlayTab<Derived>; constructing one self-registers
-        // a {name, draw} entry (type-erased — no virtuals on the tab). DrawPanel iterates
-        // the registry in construction order. Tab instances are constructed once
-        // (overlay-session lifetime) in Init; per-tab UI state lives as members, not
-        // file-scope statics. Derived must provide `static constexpr char* kName` + Draw().
-        struct OverlayTabEntry { const char* name; std::function<void()> draw; };
-        std::vector<OverlayTabEntry> g_tabs;
-
-        template<class Derived>
-        struct OverlayTab
-        {
-            OverlayTab()
-            {
-                g_tabs.push_back({ Derived::kName,
-                                   [self = static_cast<Derived*>(this)] { self->Draw(); } });
-            }
-        };
-
         // ── Console tab — log pane + live filter + command input/autocomplete ───
         // Owns only its private view state; the input buffer, history, completion
         // candidates and RunCommand stay file-scope (shared input infra, see above).
-        struct ConsoleTab : OverlayTab<ConsoleTab>
+        struct ConsoleTab : detail::OverlayTab<ConsoleTab>
         {
             static constexpr const char* kName = "Console";
 
@@ -594,7 +563,7 @@ namespace OverlayConsole
         };
 
         // ── Commands tab — browse registered commands by category + arg runner ──
-        struct CommandsTab : OverlayTab<CommandsTab>
+        struct CommandsTab : detail::OverlayTab<CommandsTab>
         {
             static constexpr const char* kName = "Commands";
 
@@ -685,7 +654,7 @@ namespace OverlayConsole
         };
 
         // ── Vars tab — VarSystem viewer/editor (snapshot read, edits via `set`) ──
-        struct VarsTab : OverlayTab<VarsTab>
+        struct VarsTab : detail::OverlayTab<VarsTab>
         {
             static constexpr const char* kName = "Vars";
 
@@ -804,7 +773,7 @@ namespace OverlayConsole
         };
 
         // ── Keybinds tab — list/rebind/unbind + add-row, and the overlay toggle key ──
-        struct KeybindsTab : OverlayTab<KeybindsTab>
+        struct KeybindsTab : detail::OverlayTab<KeybindsTab>
         {
             static constexpr const char* kName = "Keybinds";
 
@@ -925,7 +894,7 @@ namespace OverlayConsole
         };
 
         // ── Actors tab — live GObjects snapshot, filterable/sortable table ──────
-        struct ActorsTab : OverlayTab<ActorsTab>
+        struct ActorsTab : detail::OverlayTab<ActorsTab>
         {
             static constexpr const char* kName = "Actors";
 
@@ -1110,101 +1079,70 @@ namespace OverlayConsole
             }
         };
 
-        // ── Config tab — raw config.yaml editor ──────────────────────────────────
-        struct ConfigTab : OverlayTab<ConfigTab>
-        {
-            static constexpr const char* kName = "Config";
-
-            // ImGui renders '\t' as a fixed 4-space advance; expanding to this many spaces
-            // keeps indentation visually identical.
-            static constexpr int kTabWidth = 4;
-
-            char        text[32768] = {};
-            bool        loaded = false;
-            std::string status;
-
-            // YAML forbids tabs for indentation, but the editor allows typing/pasting them
-            // (ImGuiInputTextFlags_AllowTabInput). Expand each '\t' so Save can't write an
-            // unparseable file (also catches pastes).
-            static std::string ExpandTabs(const char* s)
-            {
-                std::string out;
-                for (const char* p = s; *p; ++p)
-                {
-                    if (*p == '\t') out.append(kTabWidth, ' ');
-                    else            out.push_back(*p);
-                }
-                return out;
-            }
-
-            void Load()
-            {
-                loaded = true;
-                text[0] = '\0';
-                const std::string path = NetLogConfig::ConfigPath();
-                if (path.empty()) { status = "config path unresolved"; return; }
-                std::ifstream f(path, std::ios::binary);
-                if (!f) { status = "not found (Save creates it): " + path; return; }
-                std::string body((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-                if (body.size() >= sizeof(text)) { status = "file too large to edit here"; return; }
-                std::copy(body.begin(), body.end(), text);
-                text[body.size()] = '\0';
-                status = "loaded " + path;
-            }
-
-            void Save()
-            {
-                const std::string path = NetLogConfig::ConfigPath();
-                if (path.empty()) { status = "config path unresolved"; return; }
-                const std::string body = ExpandTabs(text);   // YAML safety: no literal tabs
-                std::ofstream f(path, std::ios::binary | std::ios::trunc);
-                if (!f) { status = "save FAILED: " + path; return; }
-                f << body;
-                status = "saved " + path;
-                // Reflect the normalized text back into the editor so the buffer matches disk.
-                if (body.size() < sizeof(text))
-                {
-                    std::copy(body.begin(), body.end(), text);
-                    text[body.size()] = '\0';
-                }
-            }
-
-            void Draw()
-            {
-                if (!loaded) Load();
-
-                if (ImGui::Button("Save"))   Save();
-                ImGui::SameLine();
-                if (ImGui::Button("Reload")) Load();
-                ImGui::SameLine();
-                if (ImGui::Button("Apply in-game"))   // re-read skip lists + re-run autorun
-                {
-                    RunCommand("reloadnetlog");
-                    RunCommand("runcfg");
-                    status = "applied (reloadnetlog + runcfg) — Save first to persist";
-                }
-                ImGui::SameLine();
-                ImGui::TextDisabled("edits config.yaml on disk (persists)");
-
-                if (!status.empty()) ImGui::TextDisabled("%s", status.c_str());
-
-                const float foot = ImGui::GetFrameHeightWithSpacing();
-                ImGui::InputTextMultiline("##cfg", text, sizeof(text),
-                                          ImVec2(-1.f, -foot), ImGuiInputTextFlags_AllowTabInput);
-                ImGui::TextDisabled("Save writes to disk; Apply reloads it in-game. Full reload still needed for some settings.");
-            }
-        };
+        // The Config tab lives in overlay/tabs/ConfigTab.cpp (registered via
+        // detail::RegisterConfigTab()).
 
         void DrawPanel()
         {
             if (ImGui::BeginTabBar("##octabs"))
             {
-                for (auto& t : g_tabs)
+                for (auto& t : detail::Tabs())
                     if (ImGui::BeginTabItem(t.name)) { t.draw(); ImGui::EndTabItem(); }
                 ImGui::EndTabBar();
             }
         }
     } // anonymous namespace
+
+    // ── Shared services (declared in OverlayTabs.h, consumed by the tab TUs) ──────
+    // Defined here, in the overlay core, because they wrap this TU's private state
+    // (log ring buffer, command handler, snapshots, completion history). External
+    // linkage so overlay/tabs/*.cpp can call them.
+    namespace detail
+    {
+        void RunCommand(std::string line)
+        {
+            if (line.empty()) return;
+            PushLine(spdlog::level::info, "> " + line);   // echo
+            // Record in history (drop a consecutive duplicate of the last entry).
+            if (g_history.empty() || g_history.back() != line) g_history.push_back(line);
+            g_historyPos = -1;
+            g_acMatches.clear();
+            g_acShowAll = false;
+            EnqueueOnce([line]
+            {
+                if (auto* h = g_handler.load()) h->Dispatch(line, 0);
+            });
+        }
+
+        CommandHandler* Handler() { return g_handler.load(); }
+
+        uint64_t NowMs()
+        {
+            using namespace std::chrono;
+            return (uint64_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+        }
+
+        GameThreadSnapshot<std::vector<VarSnap>>&        Vars()   { return g_vars; }
+        GameThreadSnapshot<std::vector<ActorList::Row>>& Actors() { return g_actors; }
+
+        // Function-local static so the registry is alive before any tab self-registers,
+        // independent of cross-TU static-init order.
+        std::vector<OverlayTabEntry>& Tabs()
+        {
+            static std::vector<OverlayTabEntry> t;
+            return t;
+        }
+
+        // ConsoleTab stays in this core TU (it owns the log/completion infra); its
+        // registrar lives here too. As each other tab is split into overlay/tabs/*.cpp,
+        // its registrar moves to that TU; the ones still here register tabs still
+        // defined in this file.
+        void RegisterConsoleTab()  { static ConsoleTab  s; (void)s; }
+        void RegisterCommandsTab() { static CommandsTab s; (void)s; }
+        void RegisterVarsTab()     { static VarsTab     s; (void)s; }
+        void RegisterKeybindsTab() { static KeybindsTab s; (void)s; }
+        void RegisterActorsTab()   { static ActorsTab   s; (void)s; }
+    }
 
     spdlog::sink_ptr GetSink()
     {
@@ -1228,16 +1166,16 @@ namespace OverlayConsole
         // are once-only because the overlay callback list survives the reload.)
         EnqueueEveryNTicks(30, []
         {
-            std::vector<VarSnap> snap;
+            std::vector<detail::VarSnap> snap;
             snap.reserve(VarSystem::g_Vars.size());
             for (const auto& [name, v] : VarSystem::g_Vars)
                 snap.push_back({ name, v.token, v.type });
-            g_vars.store(std::move(snap));
+            detail::Vars().store(std::move(snap));
 
             // Actor snapshot — walking GObjects is heavy, so only when explicitly
             // requested, or auto AND the Actors tab was rendered in the last ~700ms.
-            if (g_actors.due(NowMs(), 700))
-                g_actors.store(ActorList::Snapshot());
+            if (detail::Actors().due(detail::NowMs(), 700))
+                detail::Actors().store(ActorList::Snapshot());
             return true;
         });
 
@@ -1251,14 +1189,17 @@ namespace OverlayConsole
         s_panelRegistered = true;
 
         // Build the tab registry once (overlay-session lifetime), in display order.
-        // Each tab self-registers a {name, draw} entry via its OverlayTab<> base when
-        // constructed; DrawPanel iterates g_tabs in this construction order.
-        static ConsoleTab  s_consoleTab;  // self-registers as "Console"
-        static CommandsTab s_commandsTab; // self-registers as "Commands"
-        static VarsTab     s_varsTab;     // self-registers as "Vars"
-        static KeybindsTab s_keybindsTab; // self-registers as "Keybinds"
-        static ActorsTab   s_actorsTab;   // self-registers as "Actors"
-        static ConfigTab   s_configTab;   // self-registers as "Config" (last)
+        // Each Register* call constructs that tab's session-lifetime instance, which
+        // self-registers a {name, draw} entry via its OverlayTab<> base; DrawPanel
+        // iterates detail::Tabs() in this call order. Registrars live in each tab's TU
+        // (Console here in the core TU), so the order is fixed deterministically here
+        // rather than by cross-TU static-init order.
+        detail::RegisterConsoleTab();   // "Console"
+        detail::RegisterCommandsTab();  // "Commands"
+        detail::RegisterVarsTab();      // "Vars"
+        detail::RegisterKeybindsTab();  // "Keybinds"
+        detail::RegisterActorsTab();    // "Actors"
+        detail::RegisterConfigTab();    // "Config" (last)
 
         // Mirror command responses (scan/list dumps, etc.) into the console pane —
         // they otherwise only travel over IPC to the CLI. Split on newlines so a

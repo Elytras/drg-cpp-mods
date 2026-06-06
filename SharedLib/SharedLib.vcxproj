@@ -108,6 +108,7 @@
     <ClInclude Include="game\Lib_CommandHandler.h" />
     <ClInclude Include="overlay\Lib_Overlay.h" />
     <ClInclude Include="overlay\Lib_OverlayConsole.h" />
+    <ClInclude Include="overlay\OverlayTabs.h" />
     <ClInclude Include="hooks\Lib_EasyHook.h" />
     <ClInclude Include="hooks\Lib_GameHooks.h" />
     <ClInclude Include="game\Lib_Json.h" />
@@ -135,6 +136,9 @@
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="overlay\Lib_OverlayConsole.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="overlay\tabs\ConfigTab.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="hooks\Lib_EasyHook.cpp">

@@ -20,6 +20,9 @@
     <ClInclude Include="overlay\Lib_OverlayConsole.h">
       <Filter>Headers</Filter>
     </ClInclude>
+    <ClInclude Include="overlay\OverlayTabs.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
     <ClInclude Include="hooks\Lib_EasyHook.h">
       <Filter>Headers</Filter>
     </ClInclude>
@@ -83,6 +86,9 @@
       <Filter>Source</Filter>
     </ClCompile>
     <ClCompile Include="overlay\Lib_OverlayConsole.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="overlay\tabs\ConfigTab.cpp">
       <Filter>Source</Filter>
     </ClCompile>
     <ClCompile Include="hooks\Lib_EasyHook.cpp">
