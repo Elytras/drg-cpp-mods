@@ -18,6 +18,8 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <vector>
 
 #include "StringLib.h"          // StringLib::IContains (FilterMatch — canonical CI substring)
 #include "Lib_Overlay.h"        // Overlay key-capture (KeybindButton)
@@ -69,6 +71,37 @@ namespace UI
     inline bool FilterMatch(const std::string& filter, std::string_view text)
     {
         return filter.empty() || StringLib::IContains(text, filter);
+    }
+
+    // A combo backed by a vector<string>. Sets *index to the chosen item and returns true
+    // when the selection changes. `searchable` adds a per-combo filter box inside the popup
+    // (FilterMatch). Replaces the hand-rolled BeginCombo + Selectable loop (+ ImGuiTextFilter).
+    inline bool ComboFromList(const char* label, int* index, const std::vector<std::string>& items,
+                              bool searchable = false)
+    {
+        const char* preview = (*index >= 0 && *index < (int)items.size()) ? items[*index].c_str() : "";
+        bool changed = false;
+        if (ImGui::BeginCombo(label, preview))
+        {
+            std::string* filter = nullptr;
+            if (searchable)
+            {
+                static std::unordered_map<ImGuiID, std::string> s_filters;   // per-combo, popup-scoped
+                filter = &s_filters[ImGui::GetID(label)];
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                InputTextString("##combosearch", *filter, 0, "search…");
+                ImGui::Separator();
+            }
+            for (int i = 0; i < (int)items.size(); ++i)
+            {
+                if (filter && !FilterMatch(*filter, items[i])) continue;
+                const bool sel = (*index == i);
+                if (ImGui::Selectable(items[i].c_str(), sel)) { *index = i; changed = true; }
+                if (sel) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+        return changed;
     }
 
     // Press-to-capture rebind button. Shows the current key's label; on click it listens

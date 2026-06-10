@@ -1,4 +1,5 @@
 #include "../OverlayTabs.h"
+#include "../Lib_OverlayUI.h"      // UI::ComboFromList
 
 #include <imgui.h>
 
@@ -18,7 +19,6 @@ namespace OverlayConsole
             static constexpr const char* kName = "Negotiations";
 
             int selected = 0;
-            ImGuiTextFilter filter;
 
             void Draw()
             {
@@ -30,51 +30,18 @@ namespace OverlayConsole
                 }
 
                 choices.push_back("Random");
-
                 if (selected >= static_cast<int>(choices.size()))
                     selected = 0;
 
-                ImGui::SetNextItemWidth(260.f);
-                ImGui::SetNextWindowSizeConstraints(ImVec2(0.f, 0.f), ImVec2(FLT_MAX, ImGui::GetTextLineHeightWithSpacing() * 15.f));
-
-                const char* preview =
-                    (selected >= 0 && selected < static_cast<int>(choices.size()))
-                    ? choices[selected].c_str()
-                    : "None";
-                
                 if (ImGui::Button("Run action"))
                 {
                     const std::string cmd = choices[selected] == "Random" ? "randneg" : "negotiation " + choices[selected];
                     detail::RunCommand(cmd);
                 }
-                
-                if (ImGui::BeginCombo("Selection", preview))
-                {
-                    filter.Draw("Search", 240.f);
 
-                    ImGui::Separator();
-
-                    for (int i = 0; i < static_cast<int>(choices.size()); ++i)
-                    {
-                        const std::string& item = choices[i];
-
-                        // Filter check
-                        if (!filter.PassFilter(item.c_str()))
-                            continue;
-
-                        const bool isSelected = (selected == i);
-
-                        if (ImGui::Selectable(item.c_str(), isSelected))
-                            selected = i;
-
-                        if (isSelected)
-                            ImGui::SetItemDefaultFocus();
-                    }
-
-                    ImGui::EndCombo();
-                }
-
-                
+                ImGui::SetNextItemWidth(260.f);
+                ImGui::SetNextWindowSizeConstraints(ImVec2(0.f, 0.f), ImVec2(FLT_MAX, ImGui::GetTextLineHeightWithSpacing() * 15.f));
+                UI::ComboFromList("Selection", &selected, choices, /*searchable*/ true);
             }
         };
 
@@ -85,7 +52,7 @@ namespace OverlayConsole
             int amount = 0;
             int choice = 0;
 
-            const char* const Choices[3] = { "Add XP", "Add XP Player", "Add Levels" };
+            const std::vector<std::string> Choices = { "Add XP", "Add XP Player", "Add Levels" };
             const char* const Functions[3] = { "Cheat_AddXP", "Cheat_AddXP_Player", "Cheat_LevelUp" };
 
             void Draw()
@@ -99,20 +66,7 @@ namespace OverlayConsole
                     ImVec2(0.f, 0.f),
                     ImVec2(FLT_MAX, ImGui::GetTextLineHeightWithSpacing() * 15.f)
                 );
-
-                if (ImGui::BeginCombo("Selection", Choices[choice]))
-                {
-                    for (int i = 0; i < IM_ARRAYSIZE(Choices); ++i)
-                    {
-                        const bool isSelected = choice == i;
-                        if (ImGui::Selectable(Choices[i], isSelected))
-                            choice = i;
-                        if (isSelected)
-                            ImGui::SetItemDefaultFocus();
-                    }
-
-                    ImGui::EndCombo();
-                }
+                UI::ComboFromList("Selection", &choice, Choices);
 
                 if  (ImGui::Button("Run"))
                 {
