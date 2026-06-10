@@ -17,7 +17,9 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
+#include "StringLib.h"          // StringLib::IContains (FilterMatch — canonical CI substring)
 #include "Lib_Overlay.h"        // Overlay key-capture (KeybindButton)
 #include "Lib_KeyBindings.h"    // Key / Mod / ChordLabel (KeybindButton label)
 
@@ -51,6 +53,22 @@ namespace UI
         return hint
             ? ImGui::InputTextWithHint(label, hint, s.data(), s.capacity() + 1, flags, detail::StringResizeCb, &s)
             : ImGui::InputText(label, s.data(), s.capacity() + 1, flags, detail::StringResizeCb, &s);
+    }
+
+    // A filter text box (std::string-backed, with a hint). `width` < 0 stretches to fill.
+    // Pair with FilterMatch() for the test, so every tab filters the same (case-insensitive
+    // substring via the canonical StringLib::IContains) instead of hand-rolling tolower+find.
+    inline bool FilterBox(const char* id, std::string& text, float width = -1.f,
+                          const char* hint = "filter…")
+    {
+        if (width != 0.f) ImGui::SetNextItemWidth(width);
+        return InputTextString(id, text, 0, hint);
+    }
+
+    // Case-insensitive substring test; an empty filter matches everything.
+    inline bool FilterMatch(const std::string& filter, std::string_view text)
+    {
+        return filter.empty() || StringLib::IContains(text, filter);
     }
 
     // Press-to-capture rebind button. Shows the current key's label; on click it listens

@@ -4,6 +4,7 @@
 // Layer: game (Layer 3). Registered via detail::RegisterCommandsTab().
 
 #include "../OverlayTabs.h"
+#include "../Lib_OverlayUI.h"                 // UI::FilterBox / FilterMatch
 #include "../../game/Lib_CommandHandler.h"   // CommandHandler::GetEntries / CommandEntry
 
 #include <imgui.h>
@@ -25,7 +26,7 @@ namespace OverlayConsole
         {
             static constexpr const char* kName = "Commands";
 
-            char        filterBuf[128] = {};   // command-name filter
+            std::string filter;                // command-name filter
             char        args[512]      = {};   // args for the selected command
             std::string selCmd;                // currently selected command
             std::string selDesc;
@@ -35,18 +36,13 @@ namespace OverlayConsole
             auto* h = detail::Handler();
             if (!h) { ImGui::TextDisabled("(no command handler bound)"); return; }
 
-            ImGui::SetNextItemWidth(-1.f);
-            ImGui::InputTextWithHint("##filter", "filter commands...", filterBuf, sizeof(filterBuf));
-            std::string filter = filterBuf;
-            std::transform(filter.begin(), filter.end(), filter.begin(), ::tolower);
+            UI::FilterBox("##filter", filter, -1.f, "filter commands...");
 
             // Group by category (sorted).
             std::map<std::string, std::vector<std::pair<std::string, std::string>>> byCat;
             for (const auto& [name, entry] : h->GetEntries())
             {
-                std::string lname = name;
-                std::transform(lname.begin(), lname.end(), lname.begin(), ::tolower);
-                if (!filter.empty() && lname.find(filter) == std::string::npos) continue;
+                if (!UI::FilterMatch(filter, name)) continue;
                 byCat[entry.category].push_back({ name, entry.description });
             }
 
