@@ -31,6 +31,16 @@ namespace OverlayConsole
             std::unordered_map<std::string, float>       editF;
             std::unordered_map<std::string, int>         editI;
             std::unordered_map<std::string, std::string> editS;
+            // Optimistic "committed, awaiting snapshot" values. `set` dispatches async to
+            // the game thread, so the snapshot still holds the OLD value for up to ~0.5 s
+            // after a commit. Without this, re-seeding from the snapshot snaps the widget
+            // back to the old value (the flicker) until the set propagates. While a pending
+            // value differs from the snapshot, we keep showing the committed value; once the
+            // snapshot matches, we clear it and resume seeding.
+            std::unordered_map<std::string, float>       pendF;
+            std::unordered_map<std::string, int>         pendI;
+            std::unordered_map<std::string, std::string> pendS;
+            std::unordered_map<std::string, bool>        pendB;
             char addName[128] = {};
             char addVal[256]  = {};
 
@@ -81,24 +91,48 @@ namespace OverlayConsole
                     {
                     case VT::Bool:
                     {
-                        bool b = (v.token == "true" || v.token == "1" || v.token == "True");
-                        if (ImGui::Checkbox("##b", &b)) SetVar(v.name, b ? "true" : "false");
+                        const bool snapB = (v.token == "true" || v.token == "1" || v.token == "True");
+                        bool b = snapB;
+                        if (auto it = pendB.find(v.name); it != pendB.end())
+                        {
+                            if (snapB == it->second) pendB.erase(it);   // snapshot caught up
+                            else b = it->second;                        // show committed value
+                        }
+                        if (ImGui::Checkbox("##b", &b)) { SetVar(v.name, b ? "true" : "false"); pendB[v.name] = b; }
                         break;
                     }
                     case VT::Float:
                     {
                         float& f = editF[v.name];
                         ImGui::DragFloat("##f", &f, 0.1f);
-                        if (ImGui::IsItemDeactivatedAfterEdit()) SetVar(v.name, std::to_string(f));
-                        if (!ImGui::IsItemActive()) f = SafeStof(v.token);
+                        if (ImGui::IsItemDeactivatedAfterEdit()) { SetVar(v.name, std::to_string(f)); pendF[v.name] = f; }
+                        if (!ImGui::IsItemActive())
+                        {
+                            const float snap = SafeStof(v.token);
+                            if (auto it = pendF.find(v.name); it != pendF.end())
+                            {
+                                if (NearlyEqual(snap, it->second, 1e-4)) { pendF.erase(it); f = snap; }
+                                else f = it->second;
+                            }
+                            else f = snap;
+                        }
                         break;
                     }
                     case VT::Int32:
                     {
                         int& i = editI[v.name];
                         ImGui::DragInt("##i", &i);
-                        if (ImGui::IsItemDeactivatedAfterEdit()) SetVar(v.name, std::to_string(i));
-                        if (!ImGui::IsItemActive()) i = (int)SafeStoll(v.token);
+                        if (ImGui::IsItemDeactivatedAfterEdit()) { SetVar(v.name, std::to_string(i)); pendI[v.name] = i; }
+                        if (!ImGui::IsItemActive())
+                        {
+                            const int snap = (int)SafeStoll(v.token);
+                            if (auto it = pendI.find(v.name); it != pendI.end())
+                            {
+                                if (snap == it->second) { pendI.erase(it); i = snap; }
+                                else i = it->second;
+                            }
+                            else i = snap;
+                        }
                         break;
                     }
                     default:   // String / Vector / Rotator / Name / Object → editable text
@@ -107,9 +141,17 @@ namespace OverlayConsole
                         char buf[256];
                         strncpy_s(buf, sizeof(buf), s.c_str(), _TRUNCATE);
                         if (ImGui::InputText("##s", buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue))
-                            SetVar(v.name, buf);
+                        { SetVar(v.name, buf); pendS[v.name] = buf; }
                         s = buf;
-                        if (!ImGui::IsItemActive()) s = v.token;
+                        if (!ImGui::IsItemActive())
+                        {
+                            if (auto it = pendS.find(v.name); it != pendS.end())
+                            {
+                                if (v.token == it->second) { pendS.erase(it); s = v.token; }
+                                else s = it->second;
+                            }
+                            else s = v.token;
+                        }
                         break;
                     }
                     }

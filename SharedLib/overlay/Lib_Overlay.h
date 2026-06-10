@@ -55,6 +55,14 @@ namespace Overlay
     void     SetToggleKey(uint16_t vk);
     uint16_t GetToggleKey();
 
+    // Key-capture for a "press a key" rebind widget. BeginKeyCapture() makes the overlay
+    // grab the next real key / mouse button (Esc cancels); poll TakeCapturedKey() each
+    // frame — it returns true once with the captured VK (which is a Key, since Key==VK).
+    void BeginKeyCapture();
+    void CancelKeyCapture();
+    bool IsCapturingKey();
+    bool TakeCapturedKey(uint16_t* outVk);
+
     // Convenience: register a self-contained ImGui window. `draw` is called
     // between ImGui::Begin(name)/End() each frame while the overlay is visible —
     // the easy way to add a panel without touching the render loop. `windowFlags`

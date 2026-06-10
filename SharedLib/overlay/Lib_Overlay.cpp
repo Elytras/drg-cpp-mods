@@ -74,9 +74,19 @@ namespace Overlay
         // g_toggleKeyCvar mirrors it into VarSystem so the choice survives reload. The
         // atomic is seeded from the cvar in Start() (after LoadSettings has run on the
         // game thread); SetToggleKey writes both.
-        VarSystem::Saveable<int32_t> g_toggleKeyCvar{ "overlay.togglekey", (int32_t)Key::End };
+        // Hidden: it stores a VK as a raw int, which is meaningless in the generic Vars
+        // tab — the Keybinds tab is its editor (capture widget). Still Persistent.
+        VarSystem::Saveable<int32_t> g_toggleKeyCvar{ "overlay.togglekey", (int32_t)Key::End,
+                                                      VarSystem::VarFlags::Persistent | VarSystem::VarFlags::Hidden };
         std::atomic<uint16_t>        g_toggleKey{ (uint16_t)Key::End };
         BindingHandle                s_toggleBind = 0;
+
+        // Key-capture mode for the Keybind widget: while g_capturing, the WndProc grabs
+        // the next real key / mouse button (VK) instead of routing it to ImGui or the
+        // toggle/close logic. Key enum values ARE VKs, so the captured VK is a Key.
+        std::atomic<bool>            g_capturing{ false };
+        std::atomic<bool>            g_haveCaptured{ false };
+        std::atomic<uint16_t>        g_capturedKey{ 0 };
 
         // (Re)register the global KeyBindings press that shows the overlay. Focus::Game
         // (fires while the game has focus → opens); closing while the overlay is
@@ -210,6 +220,31 @@ namespace Overlay
         // ── WndProc ─────────────────────────────────────────────────────────────
         LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
         {
+            // Key-capture (Keybind widget): intercept the next key/mouse BEFORE ImGui so
+            // it's grabbed even when ImGui wants keyboard. Esc cancels; modifier-only
+            // presses keep listening (the toggle key is a single VK, mods aren't stored).
+            if (g_capturing.load())
+            {
+                auto isMod = [](WPARAM vk) {
+                    return vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU ||
+                           (vk >= VK_LSHIFT && vk <= VK_RMENU) || vk == VK_LWIN || vk == VK_RWIN;
+                };
+                auto capture = [](uint16_t vk) {
+                    g_capturedKey.store(vk); g_haveCaptured.store(true); g_capturing.store(false);
+                };
+                switch (msg)
+                {
+                case WM_KEYDOWN: case WM_SYSKEYDOWN:
+                    if (w == VK_ESCAPE) { g_capturing.store(false); return 0; }
+                    if (isMod(w)) return 0;
+                    capture((uint16_t)w); return 0;
+                case WM_XBUTTONDOWN:
+                    capture(HIWORD(w) == XBUTTON1 ? VK_XBUTTON1 : VK_XBUTTON2); return TRUE;
+                case WM_RBUTTONDOWN:  capture(VK_RBUTTON); return TRUE;
+                case WM_MBUTTONDOWN:  capture(VK_MBUTTON); return TRUE;
+                }
+            }
+
             if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, w, l)) return TRUE;
             switch (msg)
             {
@@ -526,6 +561,16 @@ namespace Overlay
         if (g_running.load()) RegisterToggleBind();   // re-register the global show-key
     }
     uint16_t GetToggleKey() { return g_toggleKey.load(); }
+
+    void BeginKeyCapture()  { g_haveCaptured.store(false); g_capturing.store(true); }
+    void CancelKeyCapture() { g_capturing.store(false); }
+    bool IsCapturingKey()   { return g_capturing.load(); }
+    bool TakeCapturedKey(uint16_t* outVk)
+    {
+        if (!g_haveCaptured.exchange(false)) return false;
+        if (outVk) *outVk = g_capturedKey.load();
+        return true;
+    }
 
     void SetTargetFps(int fps) { g_targetFps.store(std::clamp(fps, 1, 1000)); }
     int  GetTargetFps()        { return g_targetFps.load(); }

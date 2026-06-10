@@ -582,6 +582,8 @@ namespace OverlayConsole
     // linkage so overlay/tabs/*.cpp can call them.
     namespace detail
     {
+
+        //Only use this to run commands from the overlay. For some reason if you do it directly even through EnqueueOnce or other methods, you get disconnected as client, and i have no idea why.
         void RunCommand(std::string line)
         {
             if (line.empty()) return;
@@ -646,7 +648,10 @@ namespace OverlayConsole
             std::vector<detail::VarSnap> snap;
             snap.reserve(VarSystem::Vars().size());
             for (const auto& [name, v] : VarSystem::Vars())
+            {
+                if (v.flags & VarSystem::VarFlags::Hidden) continue;   // e.g. overlay.togglekey
                 snap.push_back({ name, v.ToString(), v.Type() });
+            }
             detail::Vars().store(std::move(snap));
 
             // Actor snapshot — walking GObjects is heavy, so only when explicitly

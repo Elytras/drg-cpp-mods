@@ -40,36 +40,24 @@ namespace OverlayConsole
             {
             // Overlay toggle key — owned by Overlay; setting it re-registers the global
             // show-binding and updates the overlay window's close key (single source).
+            // Press-to-capture: click the button, then press any key / mouse button (the
+            // overlay grabs the next press; Esc cancels). No typing.
             {
-                static char     s_otk[32]  = {};
-                static uint16_t s_otkShown = 0xFFFF;   // last binding mirrored into s_otk; 0xFFFF forces an initial seed
                 ImGui::TextUnformatted("Overlay toggle:");
                 ImGui::SameLine();
-                ImGui::SetNextItemWidth(120.f);
-                const bool ed = ImGui::InputText("##otk", s_otk, sizeof(s_otk),
-                                                 ImGuiInputTextFlags_EnterReturnsTrue);
-                const bool active = ImGui::IsItemActive();
-                ImGui::SameLine();
-                const bool set = ImGui::Button("Set##otk");
-                if ((set || ed) && s_otk[0])
-                {
-                    Key k; Mod m;
-                    if (KeyBindings::ParseChord(s_otk, k, m)) Overlay::SetToggleKey((uint16_t)k);
-                    else info("[overlay] unknown key '{}'", s_otk);
-                }
-                // Mirror the live binding into the edit buffer only when it actually
-                // CHANGES (external rebind, or our own Set above) and the user isn't typing
-                // — never on idle frames. Refreshing every frame would wipe the typed value
-                // on the Set button's mouse-DOWN frame: the field deactivates there, one
-                // frame before the button fires on mouse-up, so the commit would re-parse
-                // the old key. Gating on "value changed" closes that window.
-                const uint16_t curKey = Overlay::GetToggleKey();
-                if (curKey != s_otkShown && !active)
-                {
-                    strncpy_s(s_otk, sizeof(s_otk),
-                              KeyBindings::ChordLabel((Key)curKey, Mod::None).c_str(), _TRUNCATE);
-                    s_otkShown = curKey;
-                }
+                const bool listening = Overlay::IsCapturingKey();
+                const std::string label = listening
+                    ? "press a key…  (Esc cancels)"
+                    : KeyBindings::ChordLabel((Key)Overlay::GetToggleKey(), Mod::None);
+                if (listening) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.35f, 0.22f, 0.05f, 1.f));
+                if (ImGui::Button((label + "###otk").c_str(), ImVec2(200.f, 0.f)) && !listening)
+                    Overlay::BeginKeyCapture();
+                if (listening) ImGui::PopStyleColor();
+                if (ImGui::IsItemHovered() && !listening)
+                    ImGui::SetTooltip("Click, then press any key or mouse button to rebind");
+
+                uint16_t captured;
+                if (Overlay::TakeCapturedKey(&captured)) Overlay::SetToggleKey(captured);
             }
             ImGui::Separator();
 
