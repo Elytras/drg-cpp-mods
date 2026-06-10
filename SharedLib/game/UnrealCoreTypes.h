@@ -32,7 +32,7 @@ class UnrealAllocator
     UnrealAllocator() = default;
 
     static GCreateMallocFn GetCreateMalloc()
-    {
+    {   
         // GCreateMalloc unique prologue.
         //   UE 4.27 (DRG): sub rsp, 0xA8 ; mov rax, gs:[0x58] ; mov ecx, [rel tls_index]
         //                  The tls_index load follows the gs read. Exact rsp size + trailing

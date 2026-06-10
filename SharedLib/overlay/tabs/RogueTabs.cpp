@@ -44,17 +44,8 @@ namespace OverlayConsole
                 
                 if (ImGui::Button("Run action"))
                 {
-                    if (choices[selected] == "Random")
-                    {
-                        detail::RunCommand("randneg");
-                    }
-                    else
-                    {
-                        detail::RunCommand(
-                            "call Cheat_StartNegotiation :: fn:localplayer " +
-                            choices[selected]
-                        );
-                    }
+                    const std::string cmd = choices[selected] == "Random" ? "randneg" : "negotiation " + choices[selected];
+                    detail::RunCommand(cmd);
                 }
                 
                 if (ImGui::BeginCombo("Selection", preview))

@@ -27,6 +27,7 @@ inline const UC::TArray<SDK::APlayerCharacter*>GetAllPlayers()
     return ActorLib::GetAllPlayerCharacters(GetWorld());
 #endif
 }
+
 namespace VarSystem
 {
     using namespace SDK;  // re-declare here so .cpp can use SDK types unqualified
@@ -160,15 +161,26 @@ namespace VarSystem
 
     void RegisterBuiltinBindings()
     {
-        RegisterBinding("localplayer", []() {
-            return BindObject(reinterpret_cast<UObject*>(GetLocalPlayer()));
-            });
+        RegisterBinding(
+            "localplayer", 
+            []() 
+            {
+            return BindObject(GetLocalPlayer());
+            }
+        );
 
-        RegisterBinding("world", []() {
-            return BindObject(reinterpret_cast<UObject*>(GetWorld()));
-            });
+        RegisterBinding(
+            "world"
+            , []() 
+            {
+            return BindObject(GetWorld());
+            }
+        );
 
-        RegisterBinding("randomplayer", []() {
+        RegisterBinding(
+            "randomplayer", 
+            []() 
+            {
             auto Players = GetAllPlayers();
             std::vector<APlayerCharacter*> validPlayers;
             for (auto p : Players)
@@ -181,8 +193,22 @@ namespace VarSystem
             static thread_local std::mt19937 rng{ std::random_device{}() };
             std::uniform_int_distribution<size_t> dist(0, validPlayers.size() - 1);
             APlayerCharacter* randomPlayer = validPlayers[dist(rng)];
-            return BindObject(reinterpret_cast<UObject*>(randomPlayer));
-            });
+            return BindObject(randomPlayer);
+            }
+        );
+
+        RegisterBinding("localstate", 
+            []() 
+            {
+            return BindObject(GetLocalPlayerState());
+            }
+        );
+
+        RegisterBinding("localcontroller", []() 
+            {
+            return BindObject(GetLocalController());
+            }
+        );
     }
 
     Var Parse(const std::string& raw)

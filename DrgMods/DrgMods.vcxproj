@@ -260,7 +260,6 @@
     <ClInclude Include="$(SolutionDir)SharedLib\hooks\Lib_EasyHook.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\hooks\Lib_GameHooks.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\hooks\Lib_VTableHook.h" />
-    <ClInclude Include="$(SolutionDir)SharedLib\overlay\Lib_Overlay.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\overlay\Lib_OverlayConsole.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\overlay\OverlayTabs.h" />
   </ItemGroup>

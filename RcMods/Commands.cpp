@@ -213,6 +213,29 @@ namespace Scan
 
 namespace RcCmd
 {
+    static void Negotiation(const CommandContext& ctx)
+    {
+        if (ctx.ArgCount() < 2) { warn("[cmd:negotiation] usage: negotiation <collection>"); return; }
+        std::string collectionName = ctx.Arg(1);
+        UBXEUnlockCollection* collection = nullptr;
+        for (auto c : GObjectsOf<UBXEUnlockCollection>())
+            {
+            if (!c) continue;
+            if (c->GetName() == collectionName)
+            {
+                collection = c;
+                break;
+            }
+        }
+        if (!collection) { warn("[cmd:negotiation] collection '{}' not found", collectionName); return; }
+        auto State = GetLocalPlayerState();
+        if (!IsValidOf<AFSDPlayerState>(State)) {
+            warn("[cmd:negotiation] local player state not found");
+            return;
+        }
+        State->BXEStateComponent->Cheat_StartNegotiation(State, collection);
+    }
+
     static void LevelUp(const CommandContext& ctx)
     {
         constexpr const int maxLevel = 28;
@@ -774,6 +797,8 @@ void RegisterCommands(CommandHandler& handler)
         R"(Toggle fly mode)");
     handler.Register("levelup", RcCmd::LevelUp,        "Player",
         R"(Level up: levelup <n> — max level is 28)");
+    handler.Register("negotiation", RcCmd::Negotiation, "Player",
+        R"(Start a negotiation: negotiation <collection>)");
     // Keybindings
     KeyBindings::RegisterCommands(handler);
 }

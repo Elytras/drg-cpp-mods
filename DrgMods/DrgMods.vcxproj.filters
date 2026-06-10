@@ -168,6 +168,9 @@
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\CommandsTab.cpp">
       <Filter>External</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_ActorList.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Lib_Forward.h">
@@ -282,9 +285,6 @@
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)SharedLib\hooks\Lib_VTableHook.h">
-      <Filter>Header Files\LibraryHeaders</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)SharedLib\overlay\Lib_Overlay.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)SharedLib\overlay\Lib_OverlayConsole.h">
