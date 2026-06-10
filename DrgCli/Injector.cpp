@@ -288,6 +288,42 @@ void CleanupSharedMemory()
 //  Inject / Unload
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Probe that the SOURCE DLL is fully written (the linker holds it exclusively while
+// linking). Used as the "confirm before unload" check: we can't pre-copy the
+// *_copy.dll (it's the mapped DLL, locked until we unload), so instead we verify the
+// source is readable. Returns false only if it stays locked — meaning a build is in
+// progress and the caller should keep the current mod loaded.
+static bool SourceReady()
+{
+    for (int i = 0; i < 10; ++i)
+    {
+        HANDLE h = CreateFileW(g_SourceDllPath.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                               nullptr, OPEN_EXISTING, 0, nullptr);
+        if (h != INVALID_HANDLE_VALUE) { CloseHandle(h); return true; }
+        if (GetLastError() != ERROR_SHARING_VIOLATION) break;
+        Log("Reload: source still being written, waiting... (" + std::to_string(i + 1) + "/10)");
+        Sleep(500);
+    }
+    Log("Reload: source DLL not readable (err " + std::to_string(GetLastError()) + ")");
+    return false;
+}
+
+// Copy the source DLL to the *_copy.dll the game loads. Call only when the copy is NOT
+// mapped (i.e. after UnloadDLL) — otherwise the destination is locked. Records the
+// source mtime as the injection baseline so HotReload doesn't immediately re-fire.
+static bool CopySourceToCopy()
+{
+    if (!CopyFileW(g_SourceDllPath.c_str(), g_CopyDllPath.c_str(), FALSE))
+    {
+        Log("Failed to copy DLL (err " + std::to_string(GetLastError()) + ")");
+        return false;
+    }
+    WIN32_FILE_ATTRIBUTE_DATA info{};
+    if (GetFileAttributesExW(g_SourceDllPath.c_str(), GetFileExInfoStandard, &info))
+        g_LastInjectedTime = info.ftLastWriteTime;
+    return true;
+}
+
 bool InjectDLL()
 {
     std::lock_guard<std::mutex> lock(g_InjectionMutex);
@@ -345,23 +381,10 @@ bool InjectDLL()
         }
     }
 
-    bool copied = false;
-    for (int i = 0; i < 10; ++i)
-    {
-        if (CopyFileW(g_SourceDllPath.c_str(), g_CopyDllPath.c_str(), FALSE))
-        {
-            copied = true;
-            break;
-        }
-        if (GetLastError() != ERROR_SHARING_VIOLATION) break;
-        Log("DLL copy locked, retrying... (" + std::to_string(i + 1) + "/10)");
-        Sleep(500);
-    }
-    if (!copied) { Log("Failed to copy DLL (err " + std::to_string(GetLastError()) + ")"); return false; }
-
-    WIN32_FILE_ATTRIBUTE_DATA info{};
-    if (GetFileAttributesExW(g_SourceDllPath.c_str(), GetFileExInfoStandard, &info))
-        g_LastInjectedTime = info.ftLastWriteTime;
+    // Copy source → *_copy.dll. The copy is unmapped at this point (cold inject, or a
+    // reload that already unloaded), so the destination isn't locked.
+    if (!CopySourceToCopy())
+        return false;
 
     pid = GetProcId(g_Profile->targetProcess);
     if (!pid) { Log("Target process not found."); return false; }
@@ -543,6 +566,38 @@ void UnloadDLL(bool suppress)
     CloseHandle(g_hProcess); g_hProcess = NULL;
     g_InjState.store(suppress ? InjectionState::Suppressed : InjectionState::Watching);
     Log("UnloadDLL: complete.");
+}
+
+// Reload safely: stage the new copy BEFORE unloading, and honor an 'unload' that
+// races the reload. Used by both the 'reload' command and HotReloadThread.
+//  - Copy-first: if the source is still locked (mid-compile) the copy fails and we
+//    KEEP the current mod loaded rather than unloading into nothing.
+//  - Suppress-aware: if an explicit 'unload' lands during the unload/sleep window
+//    (state → Suppressed), we leave the mod unloaded instead of resurrecting it.
+bool ReloadDLL()
+{
+    {
+        std::lock_guard<std::mutex> lock(g_InjectionMutex);
+        // Confirm the source is fully written BEFORE unloading. We can't pre-copy onto the
+        // *_copy.dll — it's the mapped DLL and locked until we unload — so we read-probe the
+        // source instead. If a build is still in progress, keep the current mod loaded
+        // rather than unloading into a copy we can't refresh.
+        if (DllActive() && !SourceReady())
+        {
+            Log("Reload: source not ready (still compiling?) — keeping current mod loaded.");
+            return false;
+        }
+    }
+
+    UnloadDLL(false);   // unmaps the *_copy.dll, releasing the file lock
+    Sleep(300);
+
+    if (g_InjState.load() == InjectionState::Suppressed)
+    {
+        Log("Reload: 'unload' requested mid-reload — staying unloaded.");
+        return false;
+    }
+    return InjectDLL();   // copies source → *_copy.dll (now unlocked) and loads it
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -735,13 +790,12 @@ void HotReloadThread()
     {
         InterruptibleSleep(kWatchPollMs);
         if (!DllActive() || g_SourceDllPath.empty()) continue;
+        if (g_InjState.load() == InjectionState::Suppressed) continue;   // honor an explicit 'unload'
 
         if (SourceDllUpdated())
         {
             Log("HotReload: newer DLL detected, reloading...");
-            UnloadDLL(false);
-            Sleep(300);
-            InjectDLL();
+            ReloadDLL();   // copy-first + suppress-aware
         }
     }
 }

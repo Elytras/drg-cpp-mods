@@ -23,6 +23,8 @@ void CleanupSharedMemory();
 // ── Inject / Unload ───────────────────────────────────────────────────────────
 bool InjectDLL();
 void UnloadDLL(bool suppress = false);
+// Copy-first, suppress-aware reload (used by the 'reload' command + HotReloadThread).
+bool ReloadDLL();
 
 // ── Launch ────────────────────────────────────────────────────────────────────
 // Start the active profile's game exe (g_Profile->exePath) with its launchArgs,

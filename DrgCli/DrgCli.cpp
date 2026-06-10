@@ -115,7 +115,17 @@ static uint32_t DispatchCommand(const std::string& cmd)
         }
         return 0;
     }
-    if (cmd == "reload") { UnloadDLL(false); Sleep(500); InjectDLL(); return 0; }
+    if (cmd == "reload")
+    {
+        // Clear a prior 'unload' suppression so an explicit reload re-injects — but ONLY
+        // when Suppressed. Do NOT clobber Active → Watching: that makes DllActive() false,
+        // so ReloadDLL skips the copy and UnloadDLL no-ops, leaving the adopted DLL to be
+        // re-adopted instead of actually reloaded.
+        InjectionState expected = InjectionState::Suppressed;
+        g_InjState.compare_exchange_strong(expected, InjectionState::Watching);
+        ReloadDLL();                                  // copy-first; keeps the mod if the source is still locked
+        return 0;
+    }
     if (cmd == "launch") { LaunchGame(); return 0; }
     if (cmd == "d7l")    { LoadDumper7();   return 0; }
     if (cmd == "d7u")    { UnloadDumper7(); return 0; }
