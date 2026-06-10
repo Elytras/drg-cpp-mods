@@ -78,28 +78,32 @@ namespace UI
     // button that started the capture shows "listening" and consumes the result.
     inline bool KeybindButton(const char* id, uint16_t* vk, float width = 200.f)
     {
-        static std::string s_active;   // id of the button currently capturing ("" = none)
+        static std::string s_active;   // id of the button that started the capture ("" = none)
 
-        const bool mine = Overlay::IsCapturingKey() && s_active == id;
-        const std::string label = mine
+        const bool listening = Overlay::IsCapturingKey() && s_active == id;
+        const std::string label = listening
             ? "press a key…  (Esc cancels)"
             : KeyBindings::ChordLabel((Key)*vk, Mod::None);
 
-        if (mine) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.35f, 0.22f, 0.05f, 1.f));
+        if (listening) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.35f, 0.22f, 0.05f, 1.f));
         if (ImGui::Button((label + "###" + id).c_str(), ImVec2(width, 0.f)) && !Overlay::IsCapturingKey())
         {
             Overlay::BeginKeyCapture();
             s_active = id;
         }
-        if (mine) ImGui::PopStyleColor();
-        if (ImGui::IsItemHovered() && !mine)
+        if (listening) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered() && !listening)
             ImGui::SetTooltip("Click, then press any key or mouse button to rebind");
 
-        if (mine)
+        // Consume the result if THIS button started the capture. The capture clears the
+        // "capturing" flag the instant a key arrives, so gate on ownership (s_active) — NOT
+        // on IsCapturingKey(), which is already false by the time we read the result, leaving
+        // the captured key forever unconsumed and the rebind a silent no-op.
+        if (s_active == id)
         {
             uint16_t captured;
             if (Overlay::TakeCapturedKey(&captured)) { *vk = captured; s_active.clear(); return true; }
-            if (!Overlay::IsCapturingKey()) s_active.clear();   // Esc/cancel
+            if (!Overlay::IsCapturingKey()) s_active.clear();   // Esc/cancel with no capture
         }
         return false;
     }
