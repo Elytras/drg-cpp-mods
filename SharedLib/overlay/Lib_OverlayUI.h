@@ -110,6 +110,34 @@ namespace UI
         return item;
     }
 
+    namespace detail
+    {
+        // RAII red styling for destructive buttons (unset / unbind / destroy).
+        struct DangerColors
+        {
+            DangerColors()
+            {
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.55f, 0.15f, 0.15f, 1.f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.70f, 0.20f, 0.20f, 1.f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.80f, 0.25f, 0.25f, 1.f));
+            }
+            ~DangerColors() { ImGui::PopStyleColor(3); }
+        };
+    }
+
+    // Red-styled buttons for destructive actions, so "delete"-class controls look the same
+    // everywhere instead of each tab re-pushing colors (or shipping a plain button).
+    inline bool DangerButton(const char* label, const ImVec2& size = ImVec2(0, 0))
+    {
+        detail::DangerColors c;
+        return ImGui::Button(label, size);
+    }
+    inline bool DangerSmallButton(const char* label)
+    {
+        detail::DangerColors c;
+        return ImGui::SmallButton(label);
+    }
+
     // A dimmed "(?)" that shows `text` as a wrapped tooltip on hover — the classic ImGui
     // demo helper, so it lives in one place instead of being re-pasted per tab.
     inline void HelpMarker(const char* text)

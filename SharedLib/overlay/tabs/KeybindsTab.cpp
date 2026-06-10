@@ -111,7 +111,7 @@ namespace OverlayConsole
                     }
 
                     UI::TableSetColumnIndex(2);
-                    if (b.cli) { if (UI::SmallButton("Unbind")) RunCommand("unbind " + b.chord); }
+                    if (b.cli) { if (UI::DangerSmallButton("Unbind")) RunCommand("unbind " + b.chord); }
                     else         UI::TextDisabled("code");
 
                     UI::PopID();

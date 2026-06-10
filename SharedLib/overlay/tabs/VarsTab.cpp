@@ -155,7 +155,7 @@ namespace OverlayConsole
                     }
 
                     UI::TableSetColumnIndex(3);
-                    if (UI::SmallButton("x")) RunCommand("unset " + v.name);
+                    if (UI::DangerSmallButton("x")) RunCommand("unset " + v.name);
                     if (UI::IsItemHovered()) UI::SetTooltip("unset %s", v.name.c_str());
 
                     UI::PopID();
