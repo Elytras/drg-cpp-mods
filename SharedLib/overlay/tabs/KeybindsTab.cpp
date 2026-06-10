@@ -44,8 +44,7 @@ namespace OverlayConsole
             // Press-to-capture via UI::KeybindButton: click, then press any key / mouse
             // button (Esc cancels). No typing.
             {
-                UI::TextUnformatted("Overlay toggle:");
-                UI::SameLine();
+                UI::FieldRow("Overlay toggle:", 0.f, /*fillControl*/ false);
                 uint16_t k = Overlay::GetToggleKey();
                 if (UI::KeybindButton("otk", &k)) Overlay::SetToggleKey(k);
             }

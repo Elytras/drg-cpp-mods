@@ -138,6 +138,18 @@ namespace UI
         return ImGui::SmallButton(label);
     }
 
+    // Lay out a labeled control on one line: frame-aligns `label`, then SameLine so the
+    // following widget sits next to it. `labelW` > 0 fixes the control's start column (a
+    // poor-man's two-column form across rows); `fillControl` sizes the next item to the
+    // row's remaining width (leave false for widgets that size themselves, e.g. buttons).
+    inline void FieldRow(const char* label, float labelW = 0.f, bool fillControl = true)
+    {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(label);
+        ImGui::SameLine(labelW);
+        if (fillControl) ImGui::SetNextItemWidth(-FLT_MIN);
+    }
+
     // A dimmed "(?)" that shows `text` as a wrapped tooltip on hover — the classic ImGui
     // demo helper, so it lives in one place instead of being re-pasted per tab.
     inline void HelpMarker(const char* text)
