@@ -12,6 +12,7 @@
 // Aim_Internal.h — they drive if-constexpr branches and cannot be runtime.
 
 #include "Aim_Internal.h"
+#include "Saveable.h"   // VarSystem::Saveable<T> — scalar tunables are cvars now
 
 #include <atomic>
 #include <cctype>
@@ -30,6 +31,18 @@ using namespace SDK;
 
 namespace AimAssist {
 namespace Config {
+
+// ── Scalar tunables: cvars (persisted to settings.json) ─────────────────────────
+// Formerly GlobalConfig fields parsed from aimbot.yaml's `globals:` section. Now
+// VarSystem cvars: typed, persistent, editable live via `set aim.* …` / the overlay
+// Vars tab / `get aim.*`. Read live (game-thread) by the Resolve*/accessors below —
+// no snapshot rebuild, no reloadaimcfg needed for a value to take effect.
+static VarSystem::Saveable<float> g_aimFov              { "aim.fov",                   0.f   };
+static VarSystem::Saveable<float> g_silentFov           { "aim.silent_fov",            360.f };
+static VarSystem::Saveable<float> g_bodyRadiusScale     { "aim.body_radius_scale",     0.75f };
+static VarSystem::Saveable<float> g_bodyRadiusFallback  { "aim.body_radius_fallback",  15.f  };
+static VarSystem::Saveable<float> g_gimbalFlipThreshold { "aim.gimbal_flip_threshold", 90.f  };
+static VarSystem::Saveable<bool>  g_silentRequireLos    { "aim.silent_require_los",    false };
 
 // ── Storage ───────────────────────────────────────────────────────────────────
 
@@ -255,16 +268,8 @@ static std::shared_ptr<const ConfigSnapshot> BuildSnapshot()
         return finalize();
     }
 
-    // ── globals ──────────────────────────────────────────────────────────────
-    if (const auto g = root["globals"]; g && g.IsMap())
-    {
-        if (auto v = g["AimbotFOVDeg"];          v) cfg.AimbotFOVDeg          = v.as<float>(cfg.AimbotFOVDeg);
-        if (auto v = g["SilentAimFOVDeg"];       v) cfg.SilentAimFOVDeg       = v.as<float>(cfg.SilentAimFOVDeg);
-        if (auto v = g["BodyRadiusScale"];        v) cfg.BodyRadiusScale        = v.as<float>(cfg.BodyRadiusScale);
-        if (auto v = g["BodyRadiusFallback"];     v) cfg.BodyRadiusFallback     = v.as<float>(cfg.BodyRadiusFallback);
-        if (auto v = g["GimbalFlipThresholdDeg"]; v) cfg.GimbalFlipThresholdDeg = v.as<float>(cfg.GimbalFlipThresholdDeg);
-        if (auto v = g["SilentAimRequireLOS"];    v) cfg.SilentAimRequireLOS    = v.as<bool>(cfg.SilentAimRequireLOS);
-    }
+    // The former `globals:` scalars are cvars now (see g_aim* above) — read live,
+    // persisted to settings.json. aimbot.yaml keeps only the list/keybind sections.
 
     // ── wp_sample_offsets ────────────────────────────────────────────────────
     if (const auto n = root["wp_sample_offsets"]; n && n.IsSequence())
@@ -352,7 +357,7 @@ float ResolveAimbotFOV(AItem* eq)
         if (auto it = snap->weaponOverrides.find(eq->Class->Name.ToString());
             it != snap->weaponOverrides.end() && it->second.AimbotFOVDeg)
             return *it->second.AimbotFOVDeg;
-    return snap->globals.AimbotFOVDeg;
+    return g_aimFov.get();
 }
 
 float ResolveSilentAimFOV(AItem* eq)
@@ -362,7 +367,7 @@ float ResolveSilentAimFOV(AItem* eq)
         if (auto it = snap->weaponOverrides.find(eq->Class->Name.ToString());
             it != snap->weaponOverrides.end() && it->second.SilentAimFOVDeg)
             return *it->second.SilentAimFOVDeg;
-    return snap->globals.SilentAimFOVDeg;
+    return g_silentFov.get();
 }
 
 bool ResolveSilentAimRequireLOS(AItem* eq)
@@ -372,7 +377,7 @@ bool ResolveSilentAimRequireLOS(AItem* eq)
         if (auto it = snap->weaponOverrides.find(eq->Class->Name.ToString());
             it != snap->weaponOverrides.end() && it->second.SilentAimRequireLOS)
             return *it->second.SilentAimRequireLOS;
-    return snap->globals.SilentAimRequireLOS;
+    return g_silentRequireLos.get();
 }
 
 Targeting::SelectorFn ResolveTargetSelector(AItem* eq)
@@ -384,6 +389,11 @@ Targeting::SelectorFn ResolveTargetSelector(AItem* eq)
             return Targeting::Get(*it->second.TargetSelector);
     return Targeting::Get("default");
 }
+
+// ── Scalar cvar accessors (no per-weapon layer; live game-thread reads) ─────────
+float BodyRadiusScale()     { return g_bodyRadiusScale.get(); }
+float BodyRadiusFallback()  { return g_bodyRadiusFallback.get(); }
+float GimbalFlipThreshold() { return g_gimbalFlipThreshold.get(); }
 
 } // namespace Config
 } // namespace AimAssist

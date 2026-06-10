@@ -4,31 +4,21 @@
 #   1. Next to DrgMods.dll  — place here for distribution / in-game use
 #   2. Two directories up   — place here for development (next to Drgmods.sln)
 #
-# Hot-reload: edit this file, then run 'reloadaimcfg' in the CLI.
+# Hot-reload: edit this file, then run 'reloadaimcfg' in the CLI (reloads the
+# sampling offsets, keybinds, class lists, and weapon overrides below).
 # Note: keybind changes only take effect after a full DLL reload (they are
 # registered once at startup).
-
-# ── Global tunables ───────────────────────────────────────────────────────────
-
-globals:
-  # FOV cone for aimbot snap (MouseLeft held, silent aim off).
-  # 0 = snap to any enemy in view; 45 = within 45° of crosshair.
-  AimbotFOVDeg: 0.0
-
-  # FOV cone for silent aim (bullet redirect on fire).
-  # 360 = redirect to any enemy regardless of crosshair angle.
-  SilentAimFOVDeg: 360.0
-
-  # Weakpoint body radius: physics-body radius × scale; fallback if no physics body.
-  BodyRadiusScale: 0.75
-  BodyRadiusFallback: 15.0
-
-  # RCS: single-frame yaw/pitch delta beyond this (degrees) is treated as a
-  # gimbal flip and skipped rather than applied as recoil compensation.
-  GimbalFlipThresholdDeg: 90.0
-
-  # Whether silent aim requires line-of-sight to the weakpoint.
-  SilentAimRequireLOS: false
+#
+# The former `globals:` scalar tunables are now cvars (persisted to settings.json),
+# editable live without reloadaimcfg:
+#   aim.fov                    FOV cone for aimbot snap (0 = any enemy in view)
+#   aim.silent_fov             FOV cone for silent aim (360 = any enemy)
+#   aim.body_radius_scale      weakpoint body radius = physics radius × this
+#   aim.body_radius_fallback   body radius when no physics body
+#   aim.gimbal_flip_threshold  RCS: single-frame yaw/pitch delta (deg) skipped as a flip
+#   aim.silent_require_los     whether silent aim requires LOS to the weakpoint
+# Set them with e.g. `set aim.fov 45`, inspect with `get aim.fov`, or use the
+# overlay Vars tab; changes apply on the next shot.
 
 # ── Weakpoint sampling offsets ────────────────────────────────────────────────
 # Each entry is [x, y, z] in bone-radius units. The first visible candidate

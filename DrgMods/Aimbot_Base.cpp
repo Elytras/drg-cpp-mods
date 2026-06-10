@@ -133,7 +133,7 @@ namespace AimAssist
                     const float ctrlYawDelta   = normP(ctrlYaw   - RCSPrevCtrlYaw);
                     const float pitchOffset    = camPitch - ctrlPitch;
                     const float yawOffset      = normP(camYaw - ctrlYaw);
-                    const float gimbalThresh = Config::GetGlobals()->GimbalFlipThresholdDeg;
+                    const float gimbalThresh = Config::GimbalFlipThreshold();
                     if (std::abs(yawOffset)    > gimbalThresh ||
                         std::abs(ctrlYawDelta) > gimbalThresh ||
                         std::abs(pitchOffset)  > gimbalThresh)

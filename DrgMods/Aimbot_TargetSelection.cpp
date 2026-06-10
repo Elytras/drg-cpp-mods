@@ -270,8 +270,7 @@ namespace AimAssist
                 r = std::max(r, Body->AggGeom.SphereElems[i].Radius);
             for (int32 i = 0; i < Body->AggGeom.SphylElems.Num(); ++i)
                 r = std::max(r, Body->AggGeom.SphylElems[i].Radius);
-            auto g = Config::GetGlobals();
-            return r > 0.f ? r * g->BodyRadiusScale : g->BodyRadiusFallback;
+            return r > 0.f ? r * Config::BodyRadiusScale() : Config::BodyRadiusFallback();
         }
 
         struct FDamageInfo

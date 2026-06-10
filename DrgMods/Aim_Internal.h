@@ -69,15 +69,18 @@ namespace AimAssist
         //  effect after a full DLL reload (they are registered once at startup).
         // ─────────────────────────────────────────────────────────────────────
 
+        // The scalar tunables (FOV cones, body-radius sampling, gimbal-flip
+        // threshold, silent-aim LOS) are no longer fields here — they are cvars
+        // (VarSystem Saveable<T>, persisted to settings.json): aim.fov,
+        // aim.silent_fov, aim.body_radius_scale, aim.body_radius_fallback,
+        // aim.gimbal_flip_threshold, aim.silent_require_los. Read them live via the
+        // Resolve*/accessor functions below (all game-thread, so the live VarSystem
+        // read is safe and always current — `set aim.fov 30` applies on the next
+        // shot, no reloadaimcfg needed). This struct now holds only the list/keybind
+        // config still sourced from aimbot.yaml.
         struct GlobalConfig
         {
-            // ── FOV cones (degrees) ──────────────────────────────────────────
-            float AimbotFOVDeg           = 0.f;     // 0 = disabled
-            float SilentAimFOVDeg        = 360.f;   // 360 = always redirect
-
-            // ── Weakpoint sampling ───────────────────────────────────────────
-            float BodyRadiusScale        = 0.75f;
-            float BodyRadiusFallback     = 15.f;
+            // ── Weakpoint sampling offsets ───────────────────────────────────
             // Tried in order; first visible candidate wins as the aim position.
             std::vector<SDK::FVector> WpSampleOffsets = {
                 { 0., 0., 0.},
@@ -85,12 +88,6 @@ namespace AimAssist
                 { 0., 1., 0.}, { 0.,-1., 0.},
                 { 0., 0., 1.}, { 0., 0.,-1.},
             };
-
-            // ── RCS gimbal-flip threshold (degrees) ──────────────────────────
-            float GimbalFlipThresholdDeg = 90.f;
-
-            // ── Silent aim ───────────────────────────────────────────────────
-            bool  SilentAimRequireLOS   = false;
 
             // ── Keybinds (read once at RegisterKeybinds; reload needs restart)
             Key   AimbotKey             = Key::MouseLeft;
@@ -146,6 +143,11 @@ namespace AimAssist
         float                 ResolveSilentAimFOV(SDK::AItem* eq);
         bool                  ResolveSilentAimRequireLOS(SDK::AItem* eq);
         Targeting::SelectorFn ResolveTargetSelector(SDK::AItem* eq);
+
+        // Live reads of the scalar cvars (no per-weapon override layer). Game-thread.
+        float BodyRadiusScale();      // aim.body_radius_scale
+        float BodyRadiusFallback();   // aim.body_radius_fallback
+        float GimbalFlipThreshold();  // aim.gimbal_flip_threshold
     }
 
     // ─────────────────────────────────────────────────────────────────────────
