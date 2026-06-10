@@ -3,8 +3,13 @@
 
 #include <cstdint>
 #include <string_view>
-#include "Lib_Forward.h"
-#include "Lib_Utils.h"
+#ifdef RogueCore // Im so done with intellisense failing to deduce types that are sdk dependant
+#include "../../RcMods/Lib_Forward.h"
+#include "../../RcMods/Lib_Utils.h"
+#else
+#include "../../DrgMods/Lib_Forward.h"
+#include "../../DrgMods/Lib_Utils.h"
+#endif
 
 // =========================================================================
 // EInternalObjectFlags
@@ -40,10 +45,11 @@ struct FFrame
     uint8_t*      Code;        // 0x20 — current bytecode pointer
     uint8_t*      Locals;      // 0x28 — parameter / locals buffer
 };
-static_assert(offsetof(FFrame, Node)   == 0x10);
-static_assert(offsetof(FFrame, Object) == 0x18);
-static_assert(offsetof(FFrame, Code)   == 0x20);
-static_assert(offsetof(FFrame, Locals) == 0x28);
+
+static_assert((offsetof(FFrame, Node))   == 0x10, "Invalid offset of FFrame.Node"   );
+static_assert((offsetof(FFrame, Object)) == 0x18, "Invalid offset of FFrame.Object" );
+static_assert((offsetof(FFrame, Code))   == 0x20, "Invalid offset of FFrame.Code"   );
+static_assert((offsetof(FFrame, Locals)) == 0x28, "Invalid offset of FFrame.Locals" );
 
 // =========================================================================
 // FStaticConstructObjectParameters
@@ -64,12 +70,12 @@ struct FStaticConstructObjectParameters
     SDK::UPackage*                ExternalPackage;
 };
 
-static_assert(offsetof(FStaticConstructObjectParameters, Name) == 0x10);
-static_assert(offsetof(FStaticConstructObjectParameters, SetFlags) == 0x18);
-static_assert(offsetof(FStaticConstructObjectParameters, InternalSetFlags) == 0x1C);
-static_assert(offsetof(FStaticConstructObjectParameters, bCopyTransientsFromClassDefaults) == 0x20);
-static_assert(offsetof(FStaticConstructObjectParameters, bAssumeTemplateIsArchetype) == 0x21);
-static_assert(offsetof(FStaticConstructObjectParameters, Template) == 0x28);
+static_assert((offsetof(FStaticConstructObjectParameters, Name))                                == 0x10 , "Invalid Offset of FStaticConstructObjectParameters.Name"                            );
+static_assert((offsetof(FStaticConstructObjectParameters, SetFlags))                            == 0x18 , "Invalid Offset of FStaticConstructObjectParameters.SetFlags"                        );
+static_assert((offsetof(FStaticConstructObjectParameters, InternalSetFlags))                    == 0x1C , "Invalid Offset of FStaticConstructObjectParameters.InternalSetFlags"                );
+static_assert((offsetof(FStaticConstructObjectParameters, bCopyTransientsFromClassDefaults))    == 0x20 , "Invalid Offset of FStaticConstructObjectParameters.bCopyTransientsFromClassDefaults");
+static_assert((offsetof(FStaticConstructObjectParameters, bAssumeTemplateIsArchetype))          == 0x21 , "Invalid Offset of FStaticConstructObjectParameters.bAssumeTemplateIsArchetype"      );
+static_assert((offsetof(FStaticConstructObjectParameters, Template))                            == 0x28 , "Invalid Offset of FStaticConstructObjectParameters.Template"                        );
 
 // =========================================================================
 // ObjectFactory

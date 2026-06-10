@@ -1,7 +1,7 @@
 ﻿#pragma once
-#include <string_view>
 #include <string>
 #include <exception>
+#include <string_view>
 using uint64 = unsigned long long;
 using int64 = signed long long;
 using int32 = signed int;
@@ -25,9 +25,9 @@ extern int Utf8ToWide(const char* src, wchar* dst, int capacity);
 extern void* FindPattern(const wchar_t* moduleName, std::string_view pattern);
 class UnrealAllocator
 {
-    static inline uint64 RVA = 0;
-    static inline UnrealAllocator* Cached = nullptr;
-    static inline bool Failed = false;
+    inline static uint64 RVA = 0;
+    inline static UnrealAllocator* Cached = nullptr;
+    inline static bool Failed = false;
 
     UnrealAllocator() = default;
 

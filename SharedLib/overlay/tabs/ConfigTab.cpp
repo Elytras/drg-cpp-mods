@@ -3,8 +3,8 @@
 // Layer: game (Layer 3). Registered via detail::RegisterConfigTab() (called from
 // OverlayConsole::Init in display order). Shared services come from OverlayTabs.h.
 
-#include "OverlayTabs.h"
-#include "Lib_NetLogConfig.h"   // NetLogConfig::ConfigPath
+#include "../OverlayTabs.h"
+#include "../../game/Lib_NetLogConfig.h"   // NetLogConfig::ConfigPath
 
 #include <imgui.h>
 

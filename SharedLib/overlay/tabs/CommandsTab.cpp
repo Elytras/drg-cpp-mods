@@ -3,8 +3,8 @@
 //
 // Layer: game (Layer 3). Registered via detail::RegisterCommandsTab().
 
-#include "OverlayTabs.h"
-#include "Lib_CommandHandler.h"   // CommandHandler::GetEntries / CommandEntry
+#include "../OverlayTabs.h"
+#include "../../game/Lib_CommandHandler.h"   // CommandHandler::GetEntries / CommandEntry
 
 #include <imgui.h>
 

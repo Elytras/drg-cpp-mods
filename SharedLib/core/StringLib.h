@@ -1,6 +1,6 @@
 ﻿#pragma once
-#ifndef EXTRA_LEAN
-#define EXTRA_LEAN
+#ifndef NOMINMAX
+#define NOMINMAX
 #endif
 
 #include <Windows.h>

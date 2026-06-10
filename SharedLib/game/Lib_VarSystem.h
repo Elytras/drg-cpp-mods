@@ -6,7 +6,11 @@
 #include <string>
 #include <unordered_map>
 #include <variant>
-#include "Lib_Forward.h"
+#ifdef RogueCore // Im so done with intellisense failing to deduce types that are sdk dependant
+#include "../../RcMods/Lib_Forward.h"
+#else
+#include "../../DrgMods/Lib_Forward.h"
+#endif
 
 struct CommandContext;
 

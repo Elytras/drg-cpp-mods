@@ -31,10 +31,16 @@
 #include <unordered_map>
 #include <vector>
 #include <Windows.h>
-#include "Lib_Forward.h"
-#include "Lib_Utils.h"
+#ifdef RogueCore // Im so done with intellisense failing to deduce types that are sdk dependant
+#include "../../RcMods/Lib_Forward.h"
+#include "../../RcMods/Lib_Utils.h"
+#include "../../RcMods/Common.h"
+#else
+#include "../../DrgMods/Lib_Forward.h"
+#include "../../DrgMods/Lib_Utils.h"
+#include "../../DrgMods/Common.h"
+#endif
 #include "Lib_EasyHook.h"
-#include "Common.h"
 #ifdef HOOKALIASES
 #include "Lib_VTableInfo.h"
 #endif

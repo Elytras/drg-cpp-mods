@@ -8,8 +8,16 @@
 // these to the right game's headers (DrgMods/ for DrgMods builds, RcMods/
 // for RcMods builds). Hardcoding "../DrgMods/" here breaks RcMods because
 // it pulls in both games' Common.h / SDK in the same translation unit.
-#include "Lib_Forward.h"
-#include "Common.h"
+// The comment above is stale. but i cba editing it yet
+
+#ifdef RogueCore // Im so done with intellisense failing to deduce types that are sdk dependant
+#include "../../RcMods/Lib_Forward.h"
+#include "../../RcMods/Common.h"
+#else
+#include "../../DrgMods/Lib_Forward.h"
+#include "../../DrgMods/Common.h"
+#endif
+#include "../core/IpcProtocol.h"   // ResponseBuffer
 
 // =========================================================================
 // Command contexts  (was Lib_Context.h)

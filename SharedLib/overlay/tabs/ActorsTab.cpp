@@ -5,11 +5,11 @@
 // game-thread-built actor snapshot through detail::Actors(); the producing tick
 // lives in OverlayConsole::Init.
 
-#include "OverlayTabs.h"
 #ifndef NOMINMAX
 #define NOMINMAX               // StringLib pulls <Windows.h>; keep std::min/max usable
 #endif
-#include "StringLib.h"         // IEquals / IContains (canonical CI helpers)
+#include "../OverlayTabs.h"
+#include "../../core/StringLib.h"         // IEquals / IContains (canonical CI helpers)
 
 #include <imgui.h>
 
