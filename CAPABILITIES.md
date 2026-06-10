@@ -46,6 +46,9 @@ a row here**.
 | Send a response to the CLI | `SendResponse(seq, msg)`; mirror via `g_responseTap` | `Lib_CommandHandler.h` | — |
 | Keybinding | `KeyBindings::Register(...)` / CLI `bind`; parse via `ParseChord` | `Lib_KeyBindings.h` | raw LL hooks |
 | Read config.yaml | `NetLogConfig::Load()` / `ConfigPath()` | `Lib_NetLogConfig.h` | bespoke YAML loaders |
+| Overlay UI (ImGui + the bits it lacks) | **`UI::`** (= `ImGui::` via `using namespace ImGui;` **plus** our widgets); e.g. `UI::KeybindButton` (press-to-capture key) | `Lib_OverlayUI.h` | `ImGui::` in overlay/tab code; re-hand-rolling key-capture / filter / combo / std::string-InputText widgets |
+
+**Overlay convention:** in `overlay/**`, write **`UI::`**, not `ImGui::` — `UI` re-exports all of ImGui *and* the shared extensions, so one prefix covers both and a missing-but-common widget lands in `Lib_OverlayUI.h` once instead of per-tab. Only add to `UI::` what ImGui genuinely lacks (never re-wrap a 1:1 call).
 
 ---
 

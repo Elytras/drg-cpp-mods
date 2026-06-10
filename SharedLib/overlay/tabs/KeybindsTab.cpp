@@ -13,6 +13,7 @@
 
 #include "../../game/Lib_KeyBindings.h"     // KeyBindings, Key, Mod
 #include "../Lib_Overlay.h"                 // Overlay::Get/SetToggleKey
+#include "../Lib_OverlayUI.h"               // UI:: (ImGui + UI::KeybindButton)
 
 #include <imgui.h>
 
@@ -40,24 +41,13 @@ namespace OverlayConsole
             {
             // Overlay toggle key — owned by Overlay; setting it re-registers the global
             // show-binding and updates the overlay window's close key (single source).
-            // Press-to-capture: click the button, then press any key / mouse button (the
-            // overlay grabs the next press; Esc cancels). No typing.
+            // Press-to-capture via UI::KeybindButton: click, then press any key / mouse
+            // button (Esc cancels). No typing.
             {
                 ImGui::TextUnformatted("Overlay toggle:");
                 ImGui::SameLine();
-                const bool listening = Overlay::IsCapturingKey();
-                const std::string label = listening
-                    ? "press a key…  (Esc cancels)"
-                    : KeyBindings::ChordLabel((Key)Overlay::GetToggleKey(), Mod::None);
-                if (listening) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.35f, 0.22f, 0.05f, 1.f));
-                if (ImGui::Button((label + "###otk").c_str(), ImVec2(200.f, 0.f)) && !listening)
-                    Overlay::BeginKeyCapture();
-                if (listening) ImGui::PopStyleColor();
-                if (ImGui::IsItemHovered() && !listening)
-                    ImGui::SetTooltip("Click, then press any key or mouse button to rebind");
-
-                uint16_t captured;
-                if (Overlay::TakeCapturedKey(&captured)) Overlay::SetToggleKey(captured);
+                uint16_t k = Overlay::GetToggleKey();
+                if (UI::KeybindButton("otk", &k)) Overlay::SetToggleKey(k);
             }
             ImGui::Separator();
 
