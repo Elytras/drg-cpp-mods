@@ -3,10 +3,16 @@
 //
 // Layer: game (Layer 3). Registered via detail::RegisterKeybindsTab().
 
-#include "OverlayTabs.h"
-#include "Lib_Forward.h"        // info/warn/error
-#include "Lib_KeyBindings.h"    // KeyBindings, Key, Mod
-#include "Lib_Overlay.h"        // Overlay::Get/SetToggleKey
+#include "../OverlayTabs.h"
+
+#if defined(RogueCore) && RogueCore
+#include "../../../RcMods/Lib_Forward.h"        
+#else 
+#include "../../../DrgMods/Lib_Forward.h"
+#endif
+
+#include "../../game/Lib_KeyBindings.h"     // KeyBindings, Key, Mod
+#include "../Lib_Overlay.h"                 // Overlay::Get/SetToggleKey
 
 #include <imgui.h>
 
@@ -42,14 +48,20 @@ namespace OverlayConsole
                 ImGui::SetNextItemWidth(120.f);
                 const bool ed = ImGui::InputText("##otk", s_otk, sizeof(s_otk),
                                                  ImGuiInputTextFlags_EnterReturnsTrue);
-                if (!ImGui::IsItemActive()) strncpy_s(s_otk, sizeof(s_otk), cur.c_str(), _TRUNCATE);
+                const bool editing = ImGui::IsItemActive();
                 ImGui::SameLine();
-                if ((ImGui::Button("Set##otk") || ed) && s_otk[0])
+                const bool set = ImGui::Button("Set##otk");
+                if ((set || ed) && s_otk[0])
                 {
                     Key k; Mod m;
                     if (KeyBindings::ParseChord(s_otk, k, m)) Overlay::SetToggleKey((uint16_t)k);
                     else info("[overlay] unknown key '{}'", s_otk);
                 }
+                // Reflect the live binding only when not editing/committing — doing this
+                // unconditionally clobbers the typed value on the same frame the Set button
+                // steals focus from the InputText (IsItemActive() flips to false), so the
+                // commit above would re-parse the *old* key and the rebind would no-op.
+                else if (!editing) strncpy_s(s_otk, sizeof(s_otk), cur.c_str(), _TRUNCATE);
             }
             ImGui::Separator();
 

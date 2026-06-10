@@ -213,6 +213,26 @@ namespace Scan
 
 namespace RcCmd
 {
+    static void LevelUp(const CommandContext& ctx)
+    {
+        constexpr const int maxLevel = 28;
+        const int level = std::clamp<int>(SafeStoll(ctx.Arg(1,"0")), 0, maxLevel);
+        if (!level) return;
+        for(int i = 0; i < level; ++i)
+        {
+            EnqueueDelayed<>([]
+            {
+                //While we can get PlayerState from our helpers, this is a broader check to avoid pointless work.
+                auto Player = GetLocalPlayer();
+                if (!IsValidOf<APlayerCharacter>(Player)) return;
+                Player->GetPlayerState()->BXEStateComponent->Cheat_LevelUp();
+            },
+            5 * i
+            );
+        }
+        info("Leveled up {} time(s)", level);
+    }
+
     static void Fly(const CommandContext& = State::dummyCtx)
     {
         static bool flying = false;
@@ -752,7 +772,8 @@ void RegisterCommands(CommandHandler& handler)
         R"(Crash Host)");
     handler.Register("fly",      RcCmd::Fly,            "Player",
         R"(Toggle fly mode)");
-
+    handler.Register("levelup", RcCmd::LevelUp,        "Player",
+        R"(Level up: levelup <n> — max level is 28)");
     // Keybindings
     KeyBindings::RegisterCommands(handler);
 }

@@ -16,6 +16,7 @@
 #include "Common.h"
 #include "Lib_Forward.h"   // info/warn/error
 #include "Lib_KeyBindings.h"
+#include "Saveable.h"      // VarSystem::Saveable<int32_t> — persist the toggle key
 
 #include <thread>
 #include <mutex>
@@ -69,8 +70,13 @@ namespace Overlay
 
         // Overlay toggle key (VK). Default End. Owns the global show-binding and the
         // WndProc close key — single source of truth so a rebind updates both.
-        std::atomic<uint16_t> g_toggleKey{ (uint16_t)Key::End };
-        BindingHandle         s_toggleBind = 0;
+        // The atomic is the hot path (read on the overlay/WndProc thread, lock-free);
+        // g_toggleKeyCvar mirrors it into VarSystem so the choice survives reload. The
+        // atomic is seeded from the cvar in Start() (after LoadSettings has run on the
+        // game thread); SetToggleKey writes both.
+        VarSystem::Saveable<int32_t> g_toggleKeyCvar{ "overlay.togglekey", (int32_t)Key::End };
+        std::atomic<uint16_t>        g_toggleKey{ (uint16_t)Key::End };
+        BindingHandle                s_toggleBind = 0;
 
         // (Re)register the global KeyBindings press that shows the overlay. Focus::Game
         // (fires while the game has focus → opens); closing while the overlay is
@@ -491,7 +497,8 @@ namespace Overlay
         g_mode.store(mode);
         g_stop.store(false);
         g_running.store(true);
-        RegisterToggleBind();                 // global show-key (default End)
+        g_toggleKey.store((uint16_t)g_toggleKeyCvar.get());  // seed from persisted setting
+        RegisterToggleBind();                 // global show-key (persisted, default End)
         g_thread = std::thread(ThreadMain, mode);
         return true;
     }
@@ -515,6 +522,7 @@ namespace Overlay
     {
         if (!vk) return;
         g_toggleKey.store(vk);
+        g_toggleKeyCvar.set((int32_t)vk);             // persist the new choice
         if (g_running.load()) RegisterToggleBind();   // re-register the global show-key
     }
     uint16_t GetToggleKey() { return g_toggleKey.load(); }

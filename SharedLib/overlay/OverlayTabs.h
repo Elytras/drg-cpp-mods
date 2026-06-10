@@ -12,9 +12,9 @@
 #include <string>
 #include <vector>
 
-#include "GameThreadSnapshot.h"  // GameThreadSnapshot<T> (snapshot accessor return types)
-#include "Lib_VarSystem.h"       // VarSystem::VarType (VarSnap)
-#include "Lib_ActorList.h"       // ActorList::Row (Actors() snapshot)
+#include "../core/GameThreadSnapshot.h"  // GameThreadSnapshot<T> (snapshot accessor return types)
+#include "../game/Lib_VarSystem.h"       // VarSystem::VarType (VarSnap)
+#include "../game/Lib_ActorList.h"       // ActorList::Row (Actors() snapshot)
 
 class CommandHandler;
 
@@ -42,6 +42,10 @@ namespace OverlayConsole
         struct VarSnap { std::string name, token; VarSystem::VarType type; };
         GameThreadSnapshot<std::vector<VarSnap>>&        Vars();
         GameThreadSnapshot<std::vector<ActorList::Row>>& Actors();
+
+#if defined(RogueCore) && RogueCore
+        GameThreadSnapshot<std::vector<std::string>>& Negotiations();
+#endif
 
         // ── Tab registry ─────────────────────────────────────────────────────
         // Constructing an OverlayTab<Derived> self-registers a {name, draw} entry
@@ -71,5 +75,9 @@ namespace OverlayConsole
         void RegisterKeybindsTab();
         void RegisterActorsTab();
         void RegisterConfigTab();
+#if defined(RogueCore) && RogueCore
+        void RegisterNegotiationTab();
+        void RegisterResourceTab();
+#endif
     }
 }

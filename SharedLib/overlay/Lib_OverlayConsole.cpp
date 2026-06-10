@@ -653,6 +653,34 @@ namespace OverlayConsole
             // requested, or auto AND the Actors tab was rendered in the last ~700ms.
             if (detail::Actors().due(detail::NowMs(), 700))
                 detail::Actors().store(ActorList::Snapshot());
+
+#if defined(RogueCore) && RogueCore
+            {
+                static bool bInitialized = false;
+                if (!bInitialized)
+                {
+                    std::vector<std::string> negotiations;
+                        static constexpr std::array<std::string_view, 3> skipPrefixes{
+                            "AWP_", "DECK_", "Default__"
+                    };
+
+                    for (auto* c : GObjectsOf<SDK::UBXEUnlockCollection>())
+                    {
+                        if (!c) continue;
+
+                        std::string name = c->GetName();
+                        if (StringLib::StartsWithAnyOf<char>(name, skipPrefixes))
+                            continue;
+
+                        negotiations.push_back(std::move(name));
+                    }
+
+                    std::sort(negotiations.begin(), negotiations.end());
+                    bInitialized = !negotiations.empty();
+                    detail::Negotiations().store(std::move(negotiations));
+                }
+            }
+#endif
             return true;
         });
 
@@ -676,6 +704,11 @@ namespace OverlayConsole
         detail::RegisterVarsTab();      // "Vars"
         detail::RegisterKeybindsTab();  // "Keybinds"
         detail::RegisterActorsTab();    // "Actors"
+
+#if defined(RogueCore) && RogueCore
+        detail::RegisterNegotiationTab();
+        detail::RegisterResourceTab();
+#endif
         detail::RegisterConfigTab();    // "Config" (last)
 
         // Mirror command responses (scan/list dumps, etc.) into the console pane —
