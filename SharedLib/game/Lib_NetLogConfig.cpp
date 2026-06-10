@@ -3,9 +3,11 @@
 
 #include "Lib_NetLogConfig.h"
 #include "Lib_CommandHandler.h"
+#include "Saveable.h"          // VarSystem::Saveable<std::string> — the `autorun` path cvar
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <filesystem>
+#include <fstream>
 #include <yaml-cpp/yaml.h>
 
 namespace NetLogConfig
@@ -26,36 +28,53 @@ namespace NetLogConfig
         return std::filesystem::path(buf).parent_path();
     }
 
-    static std::filesystem::path FindConfig()
+    // Two-path search for a config file by name: next to the DLL first
+    // (distribution), then two directories up (development, next to the .sln).
+    static std::filesystem::path FindFile(const wchar_t* name)
     {
         const auto dir = ModuleDir();
 
-        // 1. Next to the module DLL — distribution / in-game use
-        auto p = dir / L"config.yaml";
+        auto p = dir / name;
         if (std::filesystem::exists(p)) return p;
 
-        // 2. Two directories up — development (next to the solution file)
         std::error_code ec;
-        p = std::filesystem::weakly_canonical(dir / L".." / L".." / L"config.yaml", ec);
+        p = std::filesystem::weakly_canonical(dir / L".." / L".." / name, ec);
         if (!ec && std::filesystem::exists(p)) return p;
 
         return {};
     }
 
-    std::string ConfigPath()
+    // Resolve `name` via the two-path search, falling back to the preferred
+    // (next-to-DLL) location so a UI can create the file on first save.
+    static std::string ResolvePath(const wchar_t* name)
     {
-        const auto found = FindConfig();
+        const auto found = FindFile(name);
         if (!found.empty()) return found.string();
         const auto dir = ModuleDir();
         if (dir.empty()) return {};
-        return (dir / L"config.yaml").string();   // preferred location for first save
+        return (dir / name).string();
+    }
+
+    std::string ConfigPath() { return ResolvePath(L"config.yaml"); }
+
+    // The `autorun` cvar holds an explicit script path (Persistent, archived to
+    // settings.json). Empty (the default) means "use the resolved autorun.cfg".
+    // A non-empty value that names an existing file wins — this enables profiles
+    // (point `autorun` at a different .cfg).
+    static VarSystem::Saveable<std::string> g_autorunPath{ "autorun", std::string{} };
+
+    std::string AutorunPath()
+    {
+        const std::string override = g_autorunPath.get();
+        if (!override.empty() && std::filesystem::exists(override)) return override;
+        return ResolvePath(L"autorun.cfg");
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
     Config Load()
     {
-        const auto path = FindConfig();
+        const auto path = FindFile(L"config.yaml");
         if (path.empty()) return {};
 
         YAML::Node root;
@@ -76,65 +95,44 @@ namespace NetLogConfig
         };
 
         ExtractSkip("netlog", cfg.netSkip);
-
-        // autorun section: list of commands to execute via RunConfig().
-        // Each entry is either:
-        //   - a scalar  → command name, no args (equivalent to dummyCtx)
-        //   - a map     → { command: <name>, args: [arg0, arg1, ...] }
-        const auto autorun = root["autorun"];
-        if (autorun && autorun.IsSequence())
-        {
-            for (const auto& item : autorun)
-            {
-                if (item.IsScalar())
-                {
-                    cfg.autorun.push_back({ item.as<std::string>(), {} });
-                }
-                else if (item.IsMap())
-                {
-                    const auto cmd = item["command"];
-                    if (!cmd || !cmd.IsScalar()) continue;
-                    AutoRunEntry entry;
-                    entry.command = cmd.as<std::string>();
-                    const auto args = item["args"];
-                    if (args && args.IsSequence())
-                        for (const auto& arg : args)
-                            if (arg.IsScalar()) entry.args.push_back(arg.as<std::string>());
-                    cfg.autorun.push_back(std::move(entry));
-                }
-            }
-        }
-
         return cfg;
     }
 
 } // namespace NetLogConfig
 
 // ── RunConfig ─────────────────────────────────────────────────────────────────
+// The autorun script is plain text: one console command per line, dispatched
+// verbatim (same syntax as the overlay/CLI input). Blank lines and lines whose
+// first non-space character starts '#' or '//' are comments. Supersedes the old
+// YAML `autorun:` section — see autorun.cfg.
 
 void RunConfig(CommandHandler& handler)
 {
-    const auto cfg = NetLogConfig::Load();
-    if (cfg.autorun.empty())
+    const std::string path = NetLogConfig::AutorunPath();
+    std::ifstream f(path);
+    if (!f)
     {
-        info("[runcfg] No autorun entries in config.yaml");
+        info("[runcfg] No autorun script at {}", path);
         return;
     }
-    info("[runcfg] Running {} autorun entr{}", cfg.autorun.size(), cfg.autorun.size() == 1 ? "y" : "ies");
-    for (const auto& entry : cfg.autorun)
+
+    info("[runcfg] Running autorun script {}", path);
+    std::string line;
+    size_t n = 0;
+    while (std::getline(f, line))
     {
-        // Build a dispatch string: "command arg0 arg1 ..."
-        // Quote args containing whitespace so CmdSplit reassembles them correctly.
-        std::string msg = entry.command;
-        for (const auto& arg : entry.args)
-        {
-            msg += ' ';
-            if (arg.find_first_of(" \t") != std::string::npos)
-                msg += '"' + arg + '"';
-            else
-                msg += arg;
-        }
-        info("[runcfg]   {}", msg);
-        handler.Dispatch(msg);
+        // Trim leading/trailing ASCII whitespace (incl. a trailing '\r' on CRLF files).
+        const auto first = line.find_first_not_of(" \t\r\n");
+        if (first == std::string::npos) continue;                 // blank
+        const auto last = line.find_last_not_of(" \t\r\n");
+        const std::string cmd = line.substr(first, last - first + 1);
+
+        if (cmd[0] == '#' || cmd.rfind("//", 0) == 0) continue;   // comment
+
+        info("[runcfg]   {}", cmd);
+        handler.Dispatch(cmd);
+        ++n;
     }
+
+    if (n == 0) info("[runcfg] autorun script had no commands");
 }

@@ -1,4 +1,4 @@
-# config.yaml netlog skip lists and startup autorun script.
+# config.yaml — netlog skip list.
 #
 # Searched in two locations (first match wins):
 #   1. Next to the module DLL  — place here for distribution / in-game use
@@ -7,12 +7,8 @@
 # netlog changes take effect the next time a log command is enabled:
 # disable → edit file → re-enable (or run 'reloadnetlog').
 #
-# autorun entries are executed on mod load and whenever 'runcfg' is run.
-# Each entry is either:
-#   - a plain command name (no args — equivalent to calling with dummyCtx)
-#   - a map:  command: <name>
-#             args: [arg0, arg1, ...]   # optional
-# Args follow the same syntax as the CLI (vec:/rot: prefixes, quoted strings, etc.).
+# Startup commands moved out of this file: see autorun.cfg (a plaintext script,
+# one console command per line). Re-run it with 'runcfg'.
 
 netlog:
   skip:
@@ -56,19 +52,3 @@ netlog:
     - Client_ReceiveParticipantCursor
     - Client_ReceiveMinionDamageNumber
     - Server_SetIsPressingMovementInput
-
-autorun:
-  - lognetclient
-  - lognetserver
-  - norecoil
-  # Mouse side buttons → open SpaceRig menus remotely (ramrod)
-  - command: bind
-    args: [mouse5, ramrod, loadout]
-  - command: bind
-    args: [mouse4, ramrod, merit]
-#   - command: call
-#     args: [Server_SetFallVelocity, 0.0]
-#   - command: set
-#     args: [myvar, hello]
-  - command: bind
-    args: [F3, randneg]

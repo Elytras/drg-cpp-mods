@@ -75,7 +75,7 @@ ModManager::ModManager()
         }, "List all registered commands (populates CLI autocomplete)");
     cmdHandler.Register("runcfg", [this](const CommandContext&) {
         RunConfig(cmdHandler);
-        }, "Re-execute autorun entries from config.yaml");
+        }, "Re-execute the autorun.cfg script");
 }
 
 // =========================================================================
