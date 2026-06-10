@@ -61,30 +61,30 @@ namespace OverlayConsole
             const ImGuiTableFlags tf = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg
                                      | ImGuiTableFlags_ScrollY;
             // Reserve the add-row at the bottom.
-            const float footH = ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
-            if (ImGui::BeginTable("##vars", 4, tf, ImVec2(0, -footH)))
+            const float footH = UI::GetFrameHeightWithSpacing() + UI::GetStyle().ItemSpacing.y;
+            if (UI::BeginTable("##vars", 4, tf, ImVec2(0, -footH)))
             {
-                ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthFixed, 170.f);
-                ImGui::TableSetupColumn("type", ImGuiTableColumnFlags_WidthFixed, 60.f);
-                ImGui::TableSetupColumn("value");
-                ImGui::TableSetupColumn("",     ImGuiTableColumnFlags_WidthFixed, 28.f);
-                ImGui::TableHeadersRow();
+                UI::TableSetupColumn("name", ImGuiTableColumnFlags_WidthFixed, 170.f);
+                UI::TableSetupColumn("type", ImGuiTableColumnFlags_WidthFixed, 60.f);
+                UI::TableSetupColumn("value");
+                UI::TableSetupColumn("",     ImGuiTableColumnFlags_WidthFixed, 28.f);
+                UI::TableHeadersRow();
 
                 if (vars.empty())
                 {
-                    ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(0);
-                    ImGui::TextDisabled("(none)");
+                    UI::TableNextRow();
+                    UI::TableSetColumnIndex(0);
+                    UI::TextDisabled("(none)");
                 }
 
                 for (const auto& v : vars)
                 {
-                    ImGui::TableNextRow();
-                    ImGui::PushID(v.name.c_str());
-                    ImGui::TableSetColumnIndex(0); ImGui::TextUnformatted(v.name.c_str());
-                    ImGui::TableSetColumnIndex(1); ImGui::TextDisabled("%s", VarSystem::TypeName(v.type));
-                    ImGui::TableSetColumnIndex(2);
-                    ImGui::SetNextItemWidth(-1.f);
+                    UI::TableNextRow();
+                    UI::PushID(v.name.c_str());
+                    UI::TableSetColumnIndex(0); UI::TextUnformatted(v.name.c_str());
+                    UI::TableSetColumnIndex(1); UI::TextDisabled("%s", VarSystem::TypeName(v.type));
+                    UI::TableSetColumnIndex(2);
+                    UI::SetNextItemWidth(-1.f);
 
                     // Each typed widget seeds from the snapshot when idle and pushes a
                     // `set` only on edit-commit, so the periodic refresh can't fight it.
@@ -99,15 +99,15 @@ namespace OverlayConsole
                             if (snapB == it->second) pendB.erase(it);   // snapshot caught up
                             else b = it->second;                        // show committed value
                         }
-                        if (ImGui::Checkbox("##b", &b)) { SetVar(v.name, b ? "true" : "false"); pendB[v.name] = b; }
+                        if (UI::Checkbox("##b", &b)) { SetVar(v.name, b ? "true" : "false"); pendB[v.name] = b; }
                         break;
                     }
                     case VT::Float:
                     {
                         float& f = editF[v.name];
-                        ImGui::DragFloat("##f", &f, 0.1f);
-                        if (ImGui::IsItemDeactivatedAfterEdit()) { SetVar(v.name, std::to_string(f)); pendF[v.name] = f; }
-                        if (!ImGui::IsItemActive())
+                        UI::DragFloat("##f", &f, 0.1f);
+                        if (UI::IsItemDeactivatedAfterEdit()) { SetVar(v.name, std::to_string(f)); pendF[v.name] = f; }
+                        if (!UI::IsItemActive())
                         {
                             const float snap = SafeStof(v.token);
                             if (auto it = pendF.find(v.name); it != pendF.end())
@@ -122,9 +122,9 @@ namespace OverlayConsole
                     case VT::Int32:
                     {
                         int& i = editI[v.name];
-                        ImGui::DragInt("##i", &i);
-                        if (ImGui::IsItemDeactivatedAfterEdit()) { SetVar(v.name, std::to_string(i)); pendI[v.name] = i; }
-                        if (!ImGui::IsItemActive())
+                        UI::DragInt("##i", &i);
+                        if (UI::IsItemDeactivatedAfterEdit()) { SetVar(v.name, std::to_string(i)); pendI[v.name] = i; }
+                        if (!UI::IsItemActive())
                         {
                             const int snap = (int)SafeStoll(v.token);
                             if (auto it = pendI.find(v.name); it != pendI.end())
@@ -141,7 +141,7 @@ namespace OverlayConsole
                         std::string& s = editS[v.name];
                         if (UI::InputTextString("##s", s, ImGuiInputTextFlags_EnterReturnsTrue))
                         { SetVar(v.name, s); pendS[v.name] = s; }
-                        if (!ImGui::IsItemActive())
+                        if (!UI::IsItemActive())
                         {
                             if (auto it = pendS.find(v.name); it != pendS.end())
                             {
@@ -154,24 +154,24 @@ namespace OverlayConsole
                     }
                     }
 
-                    ImGui::TableSetColumnIndex(3);
-                    if (ImGui::SmallButton("x")) RunCommand("unset " + v.name);
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("unset %s", v.name.c_str());
+                    UI::TableSetColumnIndex(3);
+                    if (UI::SmallButton("x")) RunCommand("unset " + v.name);
+                    if (UI::IsItemHovered()) UI::SetTooltip("unset %s", v.name.c_str());
 
-                    ImGui::PopID();
+                    UI::PopID();
                 }
-                ImGui::EndTable();
+                UI::EndTable();
             }
 
             // Add-row: name + value → set.
-            ImGui::SetNextItemWidth(160.f);
-            ImGui::InputTextWithHint("##addvname", "name", addName, sizeof(addName));
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(-90.f);
-            bool addEnter = ImGui::InputTextWithHint("##addvval", "value", addVal, sizeof(addVal),
+            UI::SetNextItemWidth(160.f);
+            UI::InputTextWithHint("##addvname", "name", addName, sizeof(addName));
+            UI::SameLine();
+            UI::SetNextItemWidth(-90.f);
+            bool addEnter = UI::InputTextWithHint("##addvval", "value", addVal, sizeof(addVal),
                                                      ImGuiInputTextFlags_EnterReturnsTrue);
-            ImGui::SameLine();
-            if ((ImGui::Button("Set##addv") || addEnter) && addName[0] && addVal[0])
+            UI::SameLine();
+            if ((UI::Button("Set##addv") || addEnter) && addName[0] && addVal[0])
             {
                 RunCommand(std::string("set ") + addName + " " + addVal);
                 addName[0] = '\0';

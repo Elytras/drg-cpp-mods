@@ -15,6 +15,7 @@
 
 #include <imgui.h>
 
+#include <functional>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -73,35 +74,40 @@ namespace UI
         return filter.empty() || StringLib::IContains(text, filter);
     }
 
-    // A combo backed by a vector<string>. Sets *index to the chosen item and returns true
-    // when the selection changes. `searchable` adds a per-combo filter box inside the popup
-    // (FilterMatch). Replaces the hand-rolled BeginCombo + Selectable loop (+ ImGuiTextFilter).
-    inline bool ComboFromList(const char* label, int* index, const std::vector<std::string>& items,
-                              bool searchable = false)
+    inline std::unordered_map<std::string, std::string>& GetUiOverrides()
     {
-        const char* preview = (*index >= 0 && *index < (int)items.size()) ? items[*index].c_str() : "";
-        bool changed = false;
-        if (ImGui::BeginCombo(label, preview))
+        static std::unordered_map<std::string, std::string> s_ui_overrides;
+        return s_ui_overrides;
+    }
+
+    inline std::string GetComboItemDisplayName(
+        const char* combo_label,
+        const std::string& item,
+        const std::unordered_map<std::string, std::string>& programmatic_overrides = {},
+        const std::function<std::string(const std::string&)>& override_fn = nullptr)
+    {
+        // 1. Programmatic overrides map
+        auto it = programmatic_overrides.find(item);
+        if (it != programmatic_overrides.end())
+            return it->second;
+
+        // 2. Programmatic override function/lambda
+        if (override_fn)
         {
-            std::string* filter = nullptr;
-            if (searchable)
-            {
-                static std::unordered_map<ImGuiID, std::string> s_filters;   // per-combo, popup-scoped
-                filter = &s_filters[ImGui::GetID(label)];
-                ImGui::SetNextItemWidth(-FLT_MIN);
-                InputTextString("##combosearch", *filter, 0, "search…");
-                ImGui::Separator();
-            }
-            for (int i = 0; i < (int)items.size(); ++i)
-            {
-                if (filter && !FilterMatch(*filter, items[i])) continue;
-                const bool sel = (*index == i);
-                if (ImGui::Selectable(items[i].c_str(), sel)) { *index = i; changed = true; }
-                if (sel) ImGui::SetItemDefaultFocus();
-            }
-            ImGui::EndCombo();
+            std::string res = override_fn(item);
+            if (!res.empty())
+                return res;
         }
-        return changed;
+
+        // 3. UI-edited overrides
+        std::string key = std::string(combo_label) + "##" + item;
+        auto& ui_map = GetUiOverrides();
+        auto it_ui = ui_map.find(key);
+        if (it_ui != ui_map.end())
+            return it_ui->second;
+
+        // 4. Default: original item
+        return item;
     }
 
     // A dimmed "(?)" that shows `text` as a wrapped tooltip on hover — the classic ImGui
@@ -116,6 +122,128 @@ namespace UI
             ImGui::PopTextWrapPos();
             ImGui::EndTooltip();
         }
+    }
+
+    // A combo backed by a vector<string>. Sets *index to the chosen item and returns true
+    // when the selection changes. `searchable` adds a per-combo filter box inside the popup
+    // (FilterMatch). Replaces the hand-rolled BeginCombo + Selectable loop (+ ImGuiTextFilter).
+    // Supports visual overrides both programmatically and via inline right-click menu.
+    inline bool ComboFromList(
+        const char* label,
+        int* index,
+        const std::vector<std::string>& items,
+        bool searchable = false,
+        const std::unordered_map<std::string, std::string>& programmatic_overrides = {},
+        std::function<std::string(const std::string&)> override_fn = nullptr,
+        bool allow_rename = true)
+    {
+        std::string preview = "";
+        if (*index >= 0 && *index < (int)items.size())
+        {
+            preview = GetComboItemDisplayName(label, items[*index], programmatic_overrides, override_fn);
+        }
+
+        bool changed = false;
+        if (ImGui::BeginCombo(label, preview.c_str()))
+        {
+            std::string* filter = nullptr;
+            if (searchable)
+            {
+                static std::unordered_map<ImGuiID, std::string> s_filters;   // per-combo, popup-scoped
+                filter = &s_filters[ImGui::GetID(label)];
+                if (allow_rename)
+                {
+                    ImGui::SetNextItemWidth(std::max(150.f, ImGui::GetWindowWidth() - 60.f));
+                    InputTextString("##combosearch", *filter, 0, "search…");
+                    ImGui::SameLine();
+                    HelpMarker("Right-click any entry below to rename/override display name.");
+                }
+                else
+                {
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    InputTextString("##combosearch", *filter, 0, "search…");
+                }
+                ImGui::Separator();
+            }
+            else if (allow_rename)
+            {
+                HelpMarker("Right-click any entry below to rename/override display name.");
+                ImGui::Separator();
+            }
+
+            // Count matching items to dynamically adjust child height
+            int matching_count = 0;
+            for (int i = 0; i < (int)items.size(); ++i)
+            {
+                const std::string disp_name = GetComboItemDisplayName(label, items[i], programmatic_overrides, override_fn);
+                if (!filter || FilterMatch(*filter, items[i]) || FilterMatch(*filter, disp_name))
+                {
+                    matching_count++;
+                }
+            }
+
+            // Start child scrollable area so searchbar does not scroll away
+            float child_height = ImGui::GetTextLineHeightWithSpacing() * std::max(1, std::min(matching_count, 12)) + 4.f;
+            if (ImGui::BeginChild("##scrollable_items", ImVec2(0, child_height), ImGuiChildFlags_None, ImGuiWindowFlags_None))
+            {
+                if (matching_count == 0)
+                {
+                    ImGui::TextDisabled("No matches");
+                }
+                else
+                {
+                    for (int i = 0; i < (int)items.size(); ++i)
+                    {
+                        const std::string disp_name = GetComboItemDisplayName(label, items[i], programmatic_overrides, override_fn);
+                        if (filter && !FilterMatch(*filter, items[i]) && !FilterMatch(*filter, disp_name)) continue;
+
+                        const bool sel = (*index == i);
+                        if (ImGui::Selectable(disp_name.c_str(), sel)) { *index = i; changed = true; }
+                        if (sel) ImGui::SetItemDefaultFocus();
+
+                        // Unique popup ID for the rename context menu (only if renaming allowed)
+                        if (allow_rename)
+                        {
+                            std::string popup_id = "rename_popup##" + std::string(label) + "##" + items[i];
+                            if (ImGui::BeginPopupContextItem(popup_id.c_str()))
+                            {
+                                static char rename_buf[128] = "";
+                                if (ImGui::IsWindowAppearing())
+                                {
+                                    strncpy_s(rename_buf, disp_name.c_str(), sizeof(rename_buf) - 1);
+                                }
+                                ImGui::Text("Rename '%s'", items[i].c_str());
+                                ImGui::SetNextItemWidth(150.f);
+                                ImGui::InputText("##rename_input", rename_buf, sizeof(rename_buf));
+                                
+                                if (ImGui::Button("Save"))
+                                {
+                                    std::string new_name(rename_buf);
+                                    if (!new_name.empty())
+                                    {
+                                        std::string key = std::string(label) + "##" + items[i];
+                                        GetUiOverrides()[key] = new_name;
+                                    }
+                                    ImGui::CloseCurrentPopup();
+                                }
+                                ImGui::SameLine();
+                                if (ImGui::Button("Reset"))
+                                {
+                                    std::string key = std::string(label) + "##" + items[i];
+                                    GetUiOverrides().erase(key);
+                                    ImGui::CloseCurrentPopup();
+                                }
+                                ImGui::EndPopup();
+                            }
+                        }
+                    }
+                }
+            }
+            ImGui::EndChild();
+
+            ImGui::EndCombo();
+        }
+        return changed;
     }
 
     // Press-to-capture rebind button. Shows the current key's label; on click it listens

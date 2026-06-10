@@ -4,6 +4,7 @@
 // OverlayConsole::Init in display order). Shared services come from OverlayTabs.h.
 
 #include "../OverlayTabs.h"
+#include "../Lib_OverlayUI.h"
 #include "../../game/Lib_NetLogConfig.h"   // NetLogConfig::ConfigPath
 
 #include <imgui.h>
@@ -81,25 +82,25 @@ namespace OverlayConsole
             {
                 if (!loaded) Load();
 
-                if (ImGui::Button("Save"))   Save();
-                ImGui::SameLine();
-                if (ImGui::Button("Reload")) Load();
-                ImGui::SameLine();
-                if (ImGui::Button("Apply in-game"))   // re-read skip lists + re-run autorun
+                if (UI::Button("Save"))   Save();
+                UI::SameLine();
+                if (UI::Button("Reload")) Load();
+                UI::SameLine();
+                if (UI::Button("Apply in-game"))   // re-read skip lists + re-run autorun
                 {
                     RunCommand("reloadnetlog");
                     RunCommand("runcfg");
                     status = "applied (reloadnetlog + runcfg) — Save first to persist";
                 }
-                ImGui::SameLine();
-                ImGui::TextDisabled("edits config.yaml on disk (persists)");
+                UI::SameLine();
+                UI::TextDisabled("edits config.yaml on disk (persists)");
 
-                if (!status.empty()) ImGui::TextDisabled("%s", status.c_str());
+                if (!status.empty()) UI::TextDisabled("%s", status.c_str());
 
-                const float foot = ImGui::GetFrameHeightWithSpacing();
-                ImGui::InputTextMultiline("##cfg", text, sizeof(text),
+                const float foot = UI::GetFrameHeightWithSpacing();
+                UI::InputTextMultiline("##cfg", text, sizeof(text),
                                           ImVec2(-1.f, -foot), ImGuiInputTextFlags_AllowTabInput);
-                ImGui::TextDisabled("Save writes to disk; Apply reloads it in-game. Full reload still needed for some settings.");
+                UI::TextDisabled("Save writes to disk; Apply reloads it in-game. Full reload still needed for some settings.");
             }
         };
     } // anonymous namespace

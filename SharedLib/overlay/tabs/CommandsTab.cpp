@@ -34,7 +34,7 @@ namespace OverlayConsole
             void Draw()
             {
             auto* h = detail::Handler();
-            if (!h) { ImGui::TextDisabled("(no command handler bound)"); return; }
+            if (!h) { UI::TextDisabled("(no command handler bound)"); return; }
 
             UI::FilterBox("##filter", filter, -1.f, "filter commands...");
 
@@ -50,54 +50,54 @@ namespace OverlayConsole
             // list gets the rest (over-reserving shrank it; under-reserving pushed the
             // run row out of view). Footer = separator + one text line (hint, or the
             // selected name) + the args input row only when a command is selected.
-            const float footerH = ImGui::GetStyle().ItemSpacing.y * 2.f
-                                + ImGui::GetTextLineHeightWithSpacing()
-                                + (selCmd.empty() ? 0.f : ImGui::GetFrameHeightWithSpacing());
+            const float footerH = UI::GetStyle().ItemSpacing.y * 2.f
+                                + UI::GetTextLineHeightWithSpacing()
+                                + (selCmd.empty() ? 0.f : UI::GetFrameHeightWithSpacing());
 
-            if (ImGui::BeginChild("##cmds", ImVec2(0, -footerH)))
+            if (UI::BeginChild("##cmds", ImVec2(0, -footerH)))
             {
                 for (auto& [cat, cmds] : byCat)
                 {
                     std::sort(cmds.begin(), cmds.end());
-                    if (ImGui::CollapsingHeader(cat.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
+                    if (UI::CollapsingHeader(cat.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
                         for (auto& [name, desc] : cmds)
                         {
-                            ImGui::PushID(name.c_str());
-                            if (ImGui::SmallButton("Run")) RunCommand(name);   // quick no-arg run
-                            ImGui::SameLine();
-                            if (ImGui::Selectable(name.c_str(), selCmd == name))
+                            UI::PushID(name.c_str());
+                            if (UI::SmallButton("Run")) RunCommand(name);   // quick no-arg run
+                            UI::SameLine();
+                            if (UI::Selectable(name.c_str(), selCmd == name))
                             {
                                 selCmd = name;       // select → args footer targets it
                                 selDesc = desc;
                                 args[0] = '\0';
                             }
-                            if (!desc.empty() && ImGui::IsItemHovered())
-                                ImGui::SetTooltip("%s", desc.c_str());
-                            ImGui::PopID();
+                            if (!desc.empty() && UI::IsItemHovered())
+                                UI::SetTooltip("%s", desc.c_str());
+                            UI::PopID();
                         }
                 }
             }
-            ImGui::EndChild();
+            UI::EndChild();
 
             // ── Selected-command runner (with arguments) ─────────────────────────
-            ImGui::Separator();
+            UI::Separator();
             if (selCmd.empty())
             {
-                ImGui::TextDisabled("Select a command to pass arguments, or use Run for no-arg commands.");
+                UI::TextDisabled("Select a command to pass arguments, or use Run for no-arg commands.");
             }
             else
             {
-                ImGui::TextColored(ImVec4(0.55f, 0.80f, 1.0f, 1.f), "%s", selCmd.c_str());
+                UI::TextColored(ImVec4(0.55f, 0.80f, 1.0f, 1.f), "%s", selCmd.c_str());
                 if (!selDesc.empty())
                 {
-                    ImGui::SameLine();
-                    ImGui::TextDisabled("— %s", selDesc.c_str());
+                    UI::SameLine();
+                    UI::TextDisabled("— %s", selDesc.c_str());
                 }
-                ImGui::SetNextItemWidth(-60.f);
-                bool enter = ImGui::InputTextWithHint("##args", "arguments (e.g. 0 0 0)...",
+                UI::SetNextItemWidth(-60.f);
+                bool enter = UI::InputTextWithHint("##args", "arguments (e.g. 0 0 0)...",
                                                       args, sizeof(args), ImGuiInputTextFlags_EnterReturnsTrue);
-                ImGui::SameLine();
-                if (ImGui::Button("Run##sel") || enter)
+                UI::SameLine();
+                if (UI::Button("Run##sel") || enter)
                 {
                     std::string line = selCmd;
                     if (args[0]) { line += ' '; line += args; }

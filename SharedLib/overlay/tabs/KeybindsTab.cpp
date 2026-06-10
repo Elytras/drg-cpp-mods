@@ -44,90 +44,90 @@ namespace OverlayConsole
             // Press-to-capture via UI::KeybindButton: click, then press any key / mouse
             // button (Esc cancels). No typing.
             {
-                ImGui::TextUnformatted("Overlay toggle:");
-                ImGui::SameLine();
+                UI::TextUnformatted("Overlay toggle:");
+                UI::SameLine();
                 uint16_t k = Overlay::GetToggleKey();
                 if (UI::KeybindButton("otk", &k)) Overlay::SetToggleKey(k);
             }
-            ImGui::Separator();
+            UI::Separator();
 
-            ImGui::TextDisabled("All keybinds. User binds (from `bind`) are editable; code binds are read-only.");
+            UI::TextDisabled("All keybinds. User binds (from `bind`) are editable; code binds are read-only.");
 
             const auto binds = KeyBindings::SnapshotAll();
 
             const ImGuiTableFlags tf = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg
                                      | ImGuiTableFlags_ScrollY;
             // Leave room for the add-row beneath the table.
-            const float footH = ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
+            const float footH = UI::GetFrameHeightWithSpacing() + UI::GetStyle().ItemSpacing.y;
             int rowId = 0;
-            if (ImGui::BeginTable("##kb", 3, tf, ImVec2(0, -footH)))
+            if (UI::BeginTable("##kb", 3, tf, ImVec2(0, -footH)))
             {
-                ImGui::TableSetupColumn("key",     ImGuiTableColumnFlags_WidthFixed, 150.f);
-                ImGui::TableSetupColumn("binding");
-                ImGui::TableSetupColumn("",        ImGuiTableColumnFlags_WidthFixed, 70.f);
-                ImGui::TableHeadersRow();
+                UI::TableSetupColumn("key",     ImGuiTableColumnFlags_WidthFixed, 150.f);
+                UI::TableSetupColumn("binding");
+                UI::TableSetupColumn("",        ImGuiTableColumnFlags_WidthFixed, 70.f);
+                UI::TableHeadersRow();
 
                 if (binds.empty())
                 {
-                    ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(0);
-                    ImGui::TextDisabled("(none)");
+                    UI::TableNextRow();
+                    UI::TableSetColumnIndex(0);
+                    UI::TextDisabled("(none)");
                 }
 
                 for (const auto& b : binds)
                 {
-                    ImGui::TableNextRow();
-                    ImGui::PushID(rowId++);   // chords aren't unique across binds
+                    UI::TableNextRow();
+                    UI::PushID(rowId++);   // chords aren't unique across binds
 
-                    ImGui::TableSetColumnIndex(0);
+                    UI::TableSetColumnIndex(0);
                     if (b.cli)
                     {
                         // Editable chord; Enter rebinds (unbind old + bind new).
                         std::string& s = kbChordEdit[b.chord];
-                        ImGui::SetNextItemWidth(-1.f);
+                        UI::SetNextItemWidth(-1.f);
                         if (UI::InputTextString("##chord", s, ImGuiInputTextFlags_EnterReturnsTrue))
                             if (!s.empty() && b.chord != s)
                             {
                                 RunCommand("unbind " + b.chord);
                                 RunCommand("bind " + s + " " + b.command);
                             }
-                        if (!ImGui::IsItemActive()) s = b.chord;
+                        if (!UI::IsItemActive()) s = b.chord;
                     }
                     else
                     {
-                        ImGui::TextUnformatted(b.chord.c_str());
+                        UI::TextUnformatted(b.chord.c_str());
                     }
 
                     // binding column: command for CLI binds; for code binds show the
                     // human label (what it does) + a dim focus/trigger qualifier.
-                    ImGui::TableSetColumnIndex(1);
+                    UI::TableSetColumnIndex(1);
                     if (b.cli)
-                        ImGui::TextUnformatted(b.command.c_str());
+                        UI::TextUnformatted(b.command.c_str());
                     else
                     {
-                        if (!b.label.empty()) { ImGui::TextUnformatted(b.label.c_str()); ImGui::SameLine(); }
+                        if (!b.label.empty()) { UI::TextUnformatted(b.label.c_str()); UI::SameLine(); }
                         std::string q = "(" + b.focus + " " + b.trigger + (b.suppress ? " suppress" : "") + ")";
-                        ImGui::TextDisabled("%s", q.c_str());
+                        UI::TextDisabled("%s", q.c_str());
                     }
 
-                    ImGui::TableSetColumnIndex(2);
-                    if (b.cli) { if (ImGui::SmallButton("Unbind")) RunCommand("unbind " + b.chord); }
-                    else         ImGui::TextDisabled("code");
+                    UI::TableSetColumnIndex(2);
+                    if (b.cli) { if (UI::SmallButton("Unbind")) RunCommand("unbind " + b.chord); }
+                    else         UI::TextDisabled("code");
 
-                    ImGui::PopID();
+                    UI::PopID();
                 }
-                ImGui::EndTable();
+                UI::EndTable();
             }
 
             // Add-row: chord + command → bind.
-            ImGui::SetNextItemWidth(140.f);
-            ImGui::InputTextWithHint("##addchord", "key (e.g. F3)", kbAddChord, sizeof(kbAddChord));
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(-90.f);
-            bool addEnter = ImGui::InputTextWithHint("##addcmd", "command...", kbAddCmd, sizeof(kbAddCmd),
+            UI::SetNextItemWidth(140.f);
+            UI::InputTextWithHint("##addchord", "key (e.g. F3)", kbAddChord, sizeof(kbAddChord));
+            UI::SameLine();
+            UI::SetNextItemWidth(-90.f);
+            bool addEnter = UI::InputTextWithHint("##addcmd", "command...", kbAddCmd, sizeof(kbAddCmd),
                                                      ImGuiInputTextFlags_EnterReturnsTrue);
-            ImGui::SameLine();
-            if ((ImGui::Button("Bind") || addEnter) && kbAddChord[0] && kbAddCmd[0])
+            UI::SameLine();
+            if ((UI::Button("Bind") || addEnter) && kbAddChord[0] && kbAddCmd[0])
             {
                 RunCommand(std::string("bind ") + kbAddChord + " " + kbAddCmd);
                 kbAddChord[0] = '\0';

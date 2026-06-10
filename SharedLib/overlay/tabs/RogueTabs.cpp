@@ -39,8 +39,8 @@ namespace OverlayConsole
                     detail::RunCommand(cmd);
                 }
 
-                ImGui::SetNextItemWidth(260.f);
-                ImGui::SetNextWindowSizeConstraints(ImVec2(0.f, 0.f), ImVec2(FLT_MAX, ImGui::GetTextLineHeightWithSpacing() * 15.f));
+                UI::SetNextItemWidth(260.f);
+                UI::SetNextWindowSizeConstraints(ImVec2(0.f, 0.f), ImVec2(FLT_MAX, UI::GetTextLineHeightWithSpacing() * 15.f));
                 UI::ComboFromList("Selection", &selected, choices, /*searchable*/ true);
             }
         };
@@ -57,23 +57,26 @@ namespace OverlayConsole
 
             void Draw()
             {
-                ImGui::SetNextItemWidth( 180.f );
-                ImGui::InputInt("Amount", &amount);
+                UI::SetNextItemWidth( 180.f );
+                UI::InputInt("Amount", &amount);
                 amount = amount < 0 ? 0 : amount;
 
-                ImGui::SetNextItemWidth(180.f);
-                ImGui::SetNextWindowSizeConstraints(
+                UI::SetNextItemWidth(180.f);
+                UI::SetNextWindowSizeConstraints(
                     ImVec2(0.f, 0.f),
-                    ImVec2(FLT_MAX, ImGui::GetTextLineHeightWithSpacing() * 15.f)
+                    ImVec2(FLT_MAX, UI::GetTextLineHeightWithSpacing() * 15.f)
                 );
-                UI::ComboFromList("Selection", &choice, Choices);
 
-                if  (ImGui::Button("Run"))
+                if (UI::Button("Run"))
                 {
                     const bool levelup = choice == 2;
                     const std::string cmd = levelup ? "levelup " + std::to_string(amount) : "call " + std::string(Functions[choice]) + " :: " + std::to_string(amount);
                     detail::RunCommand(cmd);
                 }
+
+                UI::ComboFromList("Selection", &choice, Choices, /*searchable*/ false, /*programmatic_overrides*/ {}, /*override_fn*/ nullptr, /*allow_rename*/ false);
+
+                
             }
         };
     }

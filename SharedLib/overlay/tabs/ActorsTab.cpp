@@ -9,6 +9,7 @@
 #define NOMINMAX               // StringLib pulls <Windows.h>; keep std::min/max usable
 #endif
 #include "../OverlayTabs.h"
+#include "../Lib_OverlayUI.h"
 #include "../../core/StringLib.h"         // IEquals / IContains (canonical CI helpers)
 
 #include <imgui.h>
@@ -59,30 +60,30 @@ namespace OverlayConsole
             g_actors.beat(NowMs());   // heartbeat: auto-refresh only runs while this is live
 
             // ── Controls + per-field filters ─────────────────────────────────────
-            if (ImGui::Button("Refresh")) g_actors.request();
-            ImGui::SameLine();
+            if (UI::Button("Refresh")) g_actors.request();
+            UI::SameLine();
             bool autoOn = g_actors.isAuto();
-            if (ImGui::Checkbox("Auto", &autoOn)) g_actors.setAuto(autoOn);
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(120.f);
-            ImGui::Combo("##rep", &repMode, "net: all\0replicated\0not replicated\0");
+            if (UI::Checkbox("Auto", &autoOn)) g_actors.setAuto(autoOn);
+            UI::SameLine();
+            UI::SetNextItemWidth(120.f);
+            UI::Combo("##rep", &repMode, "net: all\0replicated\0not replicated\0");
 
-            ImGui::SameLine();
-            ImGui::TextDisabled("(right-click a header to show/hide columns)");
+            UI::SameLine();
+            UI::TextDisabled("(right-click a header to show/hide columns)");
 
             // Per-field filters (one input each).
-            ImGui::SetNextItemWidth(90.f);
-            ImGui::Combo("##cmode", &classMode, "contains\0is\0is+sub\0not\0not+sub\0");
-            ImGui::SameLine(); ImGui::SetNextItemWidth(150.f);
-            ImGui::InputTextWithHint("##fclass", "class", fClass, sizeof(fClass));
-            ImGui::SameLine(); ImGui::SetNextItemWidth(130.f);
-            ImGui::InputTextWithHint("##fname", "name", fName, sizeof(fName));
-            ImGui::SameLine(); ImGui::SetNextItemWidth(120.f);
-            ImGui::InputTextWithHint("##fouter", "outer", fOuter, sizeof(fOuter));
-            ImGui::SameLine(); ImGui::SetNextItemWidth(120.f);
-            ImGui::InputTextWithHint("##fowner", "owner", fOwner, sizeof(fOwner));
-            ImGui::SameLine(); ImGui::SetNextItemWidth(-1.f);
-            ImGui::InputTextWithHint("##finst", "instigator", fInst, sizeof(fInst));
+            UI::SetNextItemWidth(90.f);
+            UI::Combo("##cmode", &classMode, "contains\0is\0is+sub\0not\0not+sub\0");
+            UI::SameLine(); UI::SetNextItemWidth(150.f);
+            UI::InputTextWithHint("##fclass", "class", fClass, sizeof(fClass));
+            UI::SameLine(); UI::SetNextItemWidth(130.f);
+            UI::InputTextWithHint("##fname", "name", fName, sizeof(fName));
+            UI::SameLine(); UI::SetNextItemWidth(120.f);
+            UI::InputTextWithHint("##fouter", "outer", fOuter, sizeof(fOuter));
+            UI::SameLine(); UI::SetNextItemWidth(120.f);
+            UI::InputTextWithHint("##fowner", "owner", fOwner, sizeof(fOwner));
+            UI::SameLine(); UI::SetNextItemWidth(-1.f);
+            UI::InputTextWithHint("##finst", "instigator", fInst, sizeof(fInst));
 
             std::vector<ActorList::Row> rows = g_actors.read();
             if (rows.empty()) g_actors.request();   // populate on first view
@@ -94,19 +95,19 @@ namespace OverlayConsole
                                      | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable
                                      | ImGuiTableFlags_Sortable | ImGuiTableFlags_Reorderable
                                      | ImGuiTableFlags_Hideable;   // right-click header → show/hide (persists via ini)
-            const float actFooter = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
-            if (ImGui::BeginTable("##actors", 7, tf, ImVec2(0, -actFooter)))
+            const float actFooter = UI::GetTextLineHeightWithSpacing() + UI::GetStyle().ItemSpacing.y;
+            if (UI::BeginTable("##actors", 7, tf, ImVec2(0, -actFooter)))
             {
-                ImGui::TableSetupColumn("class",      ImGuiTableColumnFlags_WidthStretch, 0, 0);
-                ImGui::TableSetupColumn("name",       ImGuiTableColumnFlags_WidthStretch, 0, 1);
-                ImGui::TableSetupColumn("net",        ImGuiTableColumnFlags_WidthFixed,  40, 2);
-                ImGui::TableSetupColumn("outer",      ImGuiTableColumnFlags_WidthStretch, 0, 5);
-                ImGui::TableSetupColumn("owner",      ImGuiTableColumnFlags_WidthStretch, 0, 3);
-                ImGui::TableSetupColumn("instigator", ImGuiTableColumnFlags_WidthStretch, 0, 4);
+                UI::TableSetupColumn("class",      ImGuiTableColumnFlags_WidthStretch, 0, 0);
+                UI::TableSetupColumn("name",       ImGuiTableColumnFlags_WidthStretch, 0, 1);
+                UI::TableSetupColumn("net",        ImGuiTableColumnFlags_WidthFixed,  40, 2);
+                UI::TableSetupColumn("outer",      ImGuiTableColumnFlags_WidthStretch, 0, 5);
+                UI::TableSetupColumn("owner",      ImGuiTableColumnFlags_WidthStretch, 0, 3);
+                UI::TableSetupColumn("instigator", ImGuiTableColumnFlags_WidthStretch, 0, 4);
                 // addr = unique instance id; off by default but available (hideable).
-                ImGui::TableSetupColumn("addr",       ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_DefaultHide, 120, 6);
-                ImGui::TableSetupScrollFreeze(0, 1);
-                ImGui::TableHeadersRow();
+                UI::TableSetupColumn("addr",       ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_DefaultHide, 120, 6);
+                UI::TableSetupScrollFreeze(0, 1);
+                UI::TableHeadersRow();
 
                 // Build the filtered index list (uniform clipper needs a flat list).
                 static std::vector<int> idx;
@@ -126,7 +127,7 @@ namespace OverlayConsole
                 shown = idx.size();
 
                 // Sort per the active column header.
-                if (ImGuiTableSortSpecs* ss = ImGui::TableGetSortSpecs())
+                if (ImGuiTableSortSpecs* ss = UI::TableGetSortSpecs())
                     if (ss->SpecsCount > 0)
                     {
                         const ImGuiTableColumnSortSpecs& sp = ss->Specs[0];
@@ -173,42 +174,42 @@ namespace OverlayConsole
                     for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
                     {
                         const auto& r = rows[idx[row]];
-                        ImGui::TableNextRow();
-                        ImGui::PushID(idx[row]);
+                        UI::TableNextRow();
+                        UI::PushID(idx[row]);
 
                         const bool sel = (r.addr && r.addr == actorSelAddr);
-                        if (sel) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, IM_COL32(60, 90, 130, 120));
+                        if (sel) UI::TableSetBgColor(ImGuiTableBgTarget_RowBg0, IM_COL32(60, 90, 130, 120));
 
-                        ImGui::TableSetColumnIndex(0); ImGui::TextUnformatted(r.className.c_str());
+                        UI::TableSetColumnIndex(0); UI::TextUnformatted(r.className.c_str());
 
-                        ImGui::TableSetColumnIndex(1);
-                        if (ImGui::Selectable(r.name.c_str(), sel, ImGuiSelectableFlags_SpanAllColumns))
+                        UI::TableSetColumnIndex(1);
+                        if (UI::Selectable(r.name.c_str(), sel, ImGuiSelectableFlags_SpanAllColumns))
                             actorSelAddr = r.addr;
 
-                        ImGui::TableSetColumnIndex(2);
-                        if (r.replicated) ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.f), "rep");
-                        else              ImGui::TextDisabled("-");
+                        UI::TableSetColumnIndex(2);
+                        if (r.replicated) UI::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.f), "rep");
+                        else              UI::TextDisabled("-");
 
-                        ImGui::TableSetColumnIndex(3);
-                        if (r.outerAddr)      { if (ImGui::SmallButton(r.outer.c_str()))      jumpTo(r.outerAddr); }
-                        else                    ImGui::TextDisabled("-");
-                        ImGui::TableSetColumnIndex(4);
-                        if (r.ownerAddr)      { if (ImGui::SmallButton(r.owner.c_str()))      jumpTo(r.ownerAddr); }
-                        else                    ImGui::TextDisabled("-");
-                        ImGui::TableSetColumnIndex(5);
-                        if (r.instigatorAddr) { if (ImGui::SmallButton(r.instigator.c_str())) jumpTo(r.instigatorAddr); }
-                        else                    ImGui::TextDisabled("-");
+                        UI::TableSetColumnIndex(3);
+                        if (r.outerAddr)      { if (UI::SmallButton(r.outer.c_str()))      jumpTo(r.outerAddr); }
+                        else                    UI::TextDisabled("-");
+                        UI::TableSetColumnIndex(4);
+                        if (r.ownerAddr)      { if (UI::SmallButton(r.owner.c_str()))      jumpTo(r.ownerAddr); }
+                        else                    UI::TextDisabled("-");
+                        UI::TableSetColumnIndex(5);
+                        if (r.instigatorAddr) { if (UI::SmallButton(r.instigator.c_str())) jumpTo(r.instigatorAddr); }
+                        else                    UI::TextDisabled("-");
 
-                        ImGui::TableSetColumnIndex(6);
-                        ImGui::Text("%llX", (unsigned long long)r.addr);
+                        UI::TableSetColumnIndex(6);
+                        UI::Text("%llX", (unsigned long long)r.addr);
 
-                        if (gotoPos == row) ImGui::SetScrollHereY(0.5f);
-                        ImGui::PopID();
+                        if (gotoPos == row) UI::SetScrollHereY(0.5f);
+                        UI::PopID();
                     }
                 if (gotoPos >= 0) actorGotoAddr = 0;   // resolved; a fresh click stays pending
-                ImGui::EndTable();
+                UI::EndTable();
             }
-            ImGui::TextDisabled("%zu shown / %zu actors", shown, rows.size());
+            UI::TextDisabled("%zu shown / %zu actors", shown, rows.size());
             }
         };
     } // anonymous namespace

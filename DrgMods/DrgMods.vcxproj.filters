@@ -215,8 +215,14 @@
     <ClInclude Include="SDK\SDK\FSD_structs.hpp">
       <Filter>Header Files\SDK Headers</Filter>
     </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\overlay\Lib_Overlay.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\overlay\Lib_OverlayUI.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
     <ClInclude Include="$(SolutionDir)SharedLib\game\SharedCommands.h">
-      <Filter>Header Files</Filter>
+      <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

@@ -167,9 +167,6 @@
     <ClInclude Include="BpModLoader.h">
       <Filter>Header Files\DLL Headers</Filter>
     </ClInclude>
-    <ClInclude Include="NetLogConfig.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_NetLogConfig.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
@@ -181,6 +178,12 @@
     </ClInclude>
     <ClInclude Include="SDK\SDK\Engine_parameters.hpp">
       <Filter>Header Files\SDK Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\overlay\Lib_OverlayUI.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="NetLogConfig.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
