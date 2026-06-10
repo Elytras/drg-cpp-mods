@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -185,5 +185,76 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="$(SolutionDir)config.yaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(SolutionDir)SharedLib\core\CoreUtils.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\core\GameThreadSnapshot.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\core\IpcProtocol.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\core\StringLib.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_ActorList.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_CommandHandler.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_Json.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_KeyBindings.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_ObjectCast.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_ObjectFactory.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_Print.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_PropertyAccess.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_PropertyInspector.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_Scan.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_VarSystem.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Saveable.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\UnrealCoreTypes.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\hooks\Lib_EasyHook.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\hooks\Lib_GameHooks.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\hooks\Lib_VTableHook.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\overlay\Lib_Overlay.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\overlay\Lib_OverlayConsole.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\overlay\OverlayTabs.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

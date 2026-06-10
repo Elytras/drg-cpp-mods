@@ -4,15 +4,10 @@
 #include <optional>
 #include <string>
 #include <vector>
-#ifdef RogueCore // Im so done with intellisense failing to deduce types that are sdk dependant
-#include "../../RcMods/Lib_Forward.h"
-#include "../../RcMods/Lib_Utils.h"
-#else
-#include "../../DrgMods/Lib_Forward.h"
-#include "../../DrgMods/Lib_Utils.h"
-#endif
+#include "Lib_Forward.h"
 #include "Lib_ObjectCast.h"
 #include "Lib_PropertyAccess.h"
+#include "Lib_Utils.h"
 #include "Lib_CommandHandler.h"
 
 namespace PropertyInspector

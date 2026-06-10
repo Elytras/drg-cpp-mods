@@ -3,11 +3,7 @@
 
 #include <string>
 #include <vector>
-#ifdef RogueCore // Im so done with intellisense failing to deduce types that are sdk dependant
-#include "../../RcMods/Lib_Forward.h"
-#else
-#include "../../DrgMods/Lib_Forward.h"
-#endif
+#include "Lib_Forward.h"
 
 // =========================================================================
 // Class chain helpers
