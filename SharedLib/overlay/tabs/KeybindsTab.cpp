@@ -41,14 +41,14 @@ namespace OverlayConsole
             // Overlay toggle key — owned by Overlay; setting it re-registers the global
             // show-binding and updates the overlay window's close key (single source).
             {
-                static char s_otk[32] = {};
-                const std::string cur = KeyBindings::ChordLabel((Key)Overlay::GetToggleKey(), Mod::None);
+                static char     s_otk[32]  = {};
+                static uint16_t s_otkShown = 0xFFFF;   // last binding mirrored into s_otk; 0xFFFF forces an initial seed
                 ImGui::TextUnformatted("Overlay toggle:");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(120.f);
                 const bool ed = ImGui::InputText("##otk", s_otk, sizeof(s_otk),
                                                  ImGuiInputTextFlags_EnterReturnsTrue);
-                const bool editing = ImGui::IsItemActive();
+                const bool active = ImGui::IsItemActive();
                 ImGui::SameLine();
                 const bool set = ImGui::Button("Set##otk");
                 if ((set || ed) && s_otk[0])
@@ -57,11 +57,19 @@ namespace OverlayConsole
                     if (KeyBindings::ParseChord(s_otk, k, m)) Overlay::SetToggleKey((uint16_t)k);
                     else info("[overlay] unknown key '{}'", s_otk);
                 }
-                // Reflect the live binding only when not editing/committing — doing this
-                // unconditionally clobbers the typed value on the same frame the Set button
-                // steals focus from the InputText (IsItemActive() flips to false), so the
-                // commit above would re-parse the *old* key and the rebind would no-op.
-                else if (!editing) strncpy_s(s_otk, sizeof(s_otk), cur.c_str(), _TRUNCATE);
+                // Mirror the live binding into the edit buffer only when it actually
+                // CHANGES (external rebind, or our own Set above) and the user isn't typing
+                // — never on idle frames. Refreshing every frame would wipe the typed value
+                // on the Set button's mouse-DOWN frame: the field deactivates there, one
+                // frame before the button fires on mouse-up, so the commit would re-parse
+                // the old key. Gating on "value changed" closes that window.
+                const uint16_t curKey = Overlay::GetToggleKey();
+                if (curKey != s_otkShown && !active)
+                {
+                    strncpy_s(s_otk, sizeof(s_otk),
+                              KeyBindings::ChordLabel((Key)curKey, Mod::None).c_str(), _TRUNCATE);
+                    s_otkShown = curKey;
+                }
             }
             ImGui::Separator();
 
