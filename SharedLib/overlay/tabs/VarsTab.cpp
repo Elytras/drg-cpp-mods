@@ -6,6 +6,7 @@
 
 #include "OverlayTabs.h"
 #include "CoreUtils.h"          // SafeStof / SafeStoll (canonical parsers)
+#include "Lib_OverlayUI.h"      // UI::InputTextString
 
 #include <imgui.h>
 
@@ -138,11 +139,8 @@ namespace OverlayConsole
                     default:   // String / Vector / Rotator / Name / Object → editable text
                     {
                         std::string& s = editS[v.name];
-                        char buf[256];
-                        strncpy_s(buf, sizeof(buf), s.c_str(), _TRUNCATE);
-                        if (ImGui::InputText("##s", buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue))
-                        { SetVar(v.name, buf); pendS[v.name] = buf; }
-                        s = buf;
+                        if (UI::InputTextString("##s", s, ImGuiInputTextFlags_EnterReturnsTrue))
+                        { SetVar(v.name, s); pendS[v.name] = s; }
                         if (!ImGui::IsItemActive())
                         {
                             if (auto it = pendS.find(v.name); it != pendS.end())

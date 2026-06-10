@@ -84,16 +84,13 @@ namespace OverlayConsole
                     {
                         // Editable chord; Enter rebinds (unbind old + bind new).
                         std::string& s = kbChordEdit[b.chord];
-                        char buf[64];
-                        strncpy_s(buf, sizeof(buf), s.c_str(), _TRUNCATE);
                         ImGui::SetNextItemWidth(-1.f);
-                        if (ImGui::InputText("##chord", buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue))
-                            if (buf[0] && b.chord != buf)
+                        if (UI::InputTextString("##chord", s, ImGuiInputTextFlags_EnterReturnsTrue))
+                            if (!s.empty() && b.chord != s)
                             {
                                 RunCommand("unbind " + b.chord);
-                                RunCommand(std::string("bind ") + buf + " " + b.command);
+                                RunCommand("bind " + s + " " + b.command);
                             }
-                        s = buf;
                         if (!ImGui::IsItemActive()) s = b.chord;
                     }
                     else

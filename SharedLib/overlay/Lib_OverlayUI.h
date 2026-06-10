@@ -25,6 +25,34 @@ namespace UI
 {
     using namespace ImGui;
 
+    namespace detail
+    {
+        // Resize callback for std::string-backed InputText (the imgui_stdlib pattern,
+        // vendored here so we don't depend on misc/cpp/imgui_stdlib).
+        inline int StringResizeCb(ImGuiInputTextCallbackData* d)
+        {
+            if (d->EventFlag == ImGuiInputTextFlags_CallbackResize)
+            {
+                auto* s = static_cast<std::string*>(d->UserData);
+                s->resize((size_t)d->BufTextLen);
+                d->Buf = s->data();
+            }
+            return 0;
+        }
+    }
+
+    // InputText bound directly to a std::string (auto-grows) — no char buffer + strncpy_s
+    // dance. `hint` (optional) shows placeholder text when empty. Returns true on edit per
+    // the usual InputText flags (e.g. EnterReturnsTrue).
+    inline bool InputTextString(const char* label, std::string& s,
+                                ImGuiInputTextFlags flags = 0, const char* hint = nullptr)
+    {
+        flags |= ImGuiInputTextFlags_CallbackResize;
+        return hint
+            ? ImGui::InputTextWithHint(label, hint, s.data(), s.capacity() + 1, flags, detail::StringResizeCb, &s)
+            : ImGui::InputText(label, s.data(), s.capacity() + 1, flags, detail::StringResizeCb, &s);
+    }
+
     // Press-to-capture rebind button. Shows the current key's label; on click it listens
     // (overlay key-capture) for the next key / mouse button — Esc cancels — and when one is
     // captured writes its VK into *vk and returns true (the caller then applies it, e.g.

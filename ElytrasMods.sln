@@ -49,6 +49,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Headers", "Headers", "{02EA
 	ProjectSection(SolutionItems) = preProject
 		SharedLib\overlay\Lib_Overlay.h = SharedLib\overlay\Lib_Overlay.h
 		SharedLib\overlay\Lib_OverlayConsole.h = SharedLib\overlay\Lib_OverlayConsole.h
+		SharedLib\overlay\Lib_OverlayUI.h = SharedLib\overlay\Lib_OverlayUI.h
 		SharedLib\overlay\OverlayTabs.h = SharedLib\overlay\OverlayTabs.h
 	EndProjectSection
 EndProject
