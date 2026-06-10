@@ -104,6 +104,20 @@ namespace UI
         return changed;
     }
 
+    // A dimmed "(?)" that shows `text` as a wrapped tooltip on hover — the classic ImGui
+    // demo helper, so it lives in one place instead of being re-pasted per tab.
+    inline void HelpMarker(const char* text)
+    {
+        ImGui::TextDisabled("(?)");
+        if (ImGui::BeginItemTooltip())
+        {
+            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.f);
+            ImGui::TextUnformatted(text);
+            ImGui::PopTextWrapPos();
+            ImGui::EndTooltip();
+        }
+    }
+
     // Press-to-capture rebind button. Shows the current key's label; on click it listens
     // (overlay key-capture) for the next key / mouse button — Esc cancels — and when one is
     // captured writes its VK into *vk and returns true (the caller then applies it, e.g.
