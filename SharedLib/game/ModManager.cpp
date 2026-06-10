@@ -121,10 +121,13 @@ void ModManager::LoadModsGameThread()
     info("----------------------------------------");
     info("[ModManager] Starting initialization...");
     if (!StartupInfo()) [[unlikely]] return;
-    OnModsLoaded();             // game-specific (RC: BpModLoader::Install)
+    VarSystem::LoadSettings();  // BEFORE any init that reads a cvar: RC starts the overlay in
+                                // OnModsLoaded and Overlay::Start() seeds the toggle key from the
+                                // overlay.togglekey cvar — load it first or the seed reads the default.
+                                // (Also stays before autorun/RunConfig, which reads cvars too.)
+    OnModsLoaded();             // game-specific (RC: BpModLoader::Install, Overlay::Start)
     OverlayConsole::Init(&cmdHandler);   // in-game CLI panels (no-op if overlay isn't started)
     InitDefaultCallbacks();
-    VarSystem::LoadSettings();  // apply persisted settings before autorun reads them
     RunConfig(cmdHandler);
     if constexpr (UseThreads) {
         shouldStop.store(false);
