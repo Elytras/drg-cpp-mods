@@ -138,6 +138,15 @@ namespace UI
         return ImGui::SmallButton(label);
     }
 
+    // A titled section divider with a bit of leading space — groups a panel into labeled
+    // sections more clearly than a bare Separator, and consistently across tabs. (Distinct
+    // from CollapsingHeader: this is a non-collapsing visual break.)
+    inline void SectionHeader(const char* label)
+    {
+        ImGui::Spacing();
+        ImGui::SeparatorText(label);
+    }
+
     // Lay out a labeled control on one line: frame-aligns `label`, then SameLine so the
     // following widget sits next to it. `labelW` > 0 fixes the control's start column (a
     // poor-man's two-column form across rows); `fillControl` sizes the next item to the

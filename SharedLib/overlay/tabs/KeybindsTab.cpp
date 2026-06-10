@@ -48,9 +48,8 @@ namespace OverlayConsole
                 uint16_t k = Overlay::GetToggleKey();
                 if (UI::KeybindButton("otk", &k)) Overlay::SetToggleKey(k);
             }
-            UI::Separator();
-
-            UI::TextDisabled("All keybinds. User binds (from `bind`) are editable; code binds are read-only.");
+            UI::SectionHeader("Bindings");
+            UI::TextDisabled("User binds (from `bind`) are editable; code binds are read-only.");
 
             const auto binds = KeyBindings::SnapshotAll();
 
