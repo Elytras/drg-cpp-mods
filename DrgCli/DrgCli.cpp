@@ -143,8 +143,20 @@ static uint32_t DispatchCommand(const std::string& cmd)
         Log("Cannot forward command — DLL not loaded.");
         return 0;
     }
-    while (g_pCmdBuffer->hasCommand.load(std::memory_order_acquire))
-        Sleep(10);
+    // If the previous response timed out, hasCommand may be stuck true because
+    // the dead DLL never cleared it.  Cap the spin so we don't deadlock.
+    {
+        const DWORD64 slotDeadline = GetTickCount64() + 500;
+        while (g_pCmdBuffer->hasCommand.load(std::memory_order_acquire))
+        {
+            if (GetTickCount64() >= slotDeadline)
+            {
+                g_pCmdBuffer->hasCommand.store(false, std::memory_order_release);
+                break;
+            }
+            Sleep(10);
+        }
+    }
     // Drop any stale, unread response (e.g. from a previous timed-out wait).
     // Without this, the DLL's SendResponse will block waiting for ready=false
     // and never write our response.
@@ -240,9 +252,19 @@ static void AutoSendListCmds()
 
     std::lock_guard<std::mutex> lock(g_DllCommMutex);
 
-    // Wait for the cmd slot to be free, then publish "listcmds".
-    while (g_pCmdBuffer->hasCommand.load(std::memory_order_acquire))
-        Sleep(10);
+    // Wait for the cmd slot to free; if stuck (stale from a dead DLL), clear it.
+    {
+        const DWORD64 slotDeadline = GetTickCount64() + 500;
+        while (g_pCmdBuffer->hasCommand.load(std::memory_order_acquire))
+        {
+            if (GetTickCount64() >= slotDeadline)
+            {
+                g_pCmdBuffer->hasCommand.store(false, std::memory_order_release);
+                break;
+            }
+            Sleep(10);
+        }
+    }
     ClearStaleResponse();
     const uint32_t mySeq = g_pCmdBuffer->seq.fetch_add(1, std::memory_order_relaxed) + 1;
     strncpy_s(g_pCmdBuffer->command, "listcmds", sizeof(g_pCmdBuffer->command) - 1);
@@ -575,6 +597,9 @@ int main(int argc, char** argv)
             DWORD64 remaining = deadline - GetTickCount64();
             WaitForSingleObject(g_hRespEvent, static_cast<DWORD>(remaining < 50 ? remaining : 50));
         }
+
+        if (!gotResponse && g_pCmdBuffer)
+            g_pCmdBuffer->hasCommand.store(false, std::memory_order_release);
 
         commLock.unlock();
 

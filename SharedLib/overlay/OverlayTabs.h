@@ -15,6 +15,7 @@
 #include "../core/GameThreadSnapshot.h"  // GameThreadSnapshot<T> (snapshot accessor return types)
 #include "../game/Lib_VarSystem.h"       // VarSystem::VarType (VarSnap)
 #include "../game/Lib_ActorList.h"       // ActorList::Row (Actors() snapshot)
+#include "../game/Lib_ObjectList.h"      // ObjectList::Row (Objects() snapshot)
 
 class CommandHandler;
 
@@ -41,7 +42,8 @@ namespace OverlayConsole
         // VarSnap is the overlay's flattened view of one VarSystem entry.
         struct VarSnap { std::string name, token; VarSystem::VarType type; };
         GameThreadSnapshot<std::vector<VarSnap>>&        Vars();
-        GameThreadSnapshot<std::vector<ActorList::Row>>& Actors();
+        GameThreadSnapshot<std::vector<ActorList::Row>>&  Actors();
+        GameThreadSnapshot<std::vector<ObjectList::Row>>& Objects();
 
 #if defined(RogueCore) && RogueCore
         GameThreadSnapshot<std::vector<std::string>>& Negotiations();
@@ -73,7 +75,8 @@ namespace OverlayConsole
         void RegisterCommandsTab();
         void RegisterVarsTab();
         void RegisterKeybindsTab();
-        void RegisterActorsTab();
+        void RegisterObjectsTab();   // merged Actors + Objects browser
+        void RegisterLogsTab();
         void RegisterConfigTab();
 #if defined(RogueCore) && RogueCore
         void RegisterNegotiationTab();

@@ -61,7 +61,7 @@ namespace Overlay
     void BeginKeyCapture();
     void CancelKeyCapture();
     bool IsCapturingKey();
-    bool TakeCapturedKey(uint16_t* outVk);
+    bool TakeCapturedKey(uint16_t* outVk, uint8_t* outMods = nullptr);
 
     // Convenience: register a self-contained ImGui window. `draw` is called
     // between ImGui::Begin(name)/End() each frame while the overlay is visible —

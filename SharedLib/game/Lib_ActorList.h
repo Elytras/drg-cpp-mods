@@ -6,6 +6,8 @@
 // schedules it via EnqueueEveryNTicks). The returned rows are plain strings/bools,
 // so consumers (Lib_OverlayConsole) need no SDK headers.
 
+//Very PoC thing so far. shouldn't be used much as a reference until better times imo.
+
 #include <cstdint>
 #include <string>
 #include <vector>

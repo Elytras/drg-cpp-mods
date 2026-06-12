@@ -28,7 +28,16 @@ public:
     auto with(F&& fn) const { std::lock_guard lk(mutex_); return fn(value_); }
 
     // Producer: publish a new snapshot.
-    void store(T v) { std::lock_guard lk(mutex_); value_ = std::move(v); }
+    void store(T v)
+    {
+        std::lock_guard lk(mutex_);
+        value_ = std::move(v);
+        version_.fetch_add(1, std::memory_order_release);
+    }
+
+    // Reader: monotonically increasing counter — increments on every store().
+    // Cheap atomic read; compare against a cached value to detect new data without copying.
+    uint64_t version() const { return version_.load(std::memory_order_acquire); }
 
     // One-shot refresh request (first view / Refresh button). Consumed by due()/take().
     void request()      { requested_.store(true); }
@@ -55,4 +64,5 @@ private:
     std::atomic<bool>     requested_{ false };
     std::atomic<bool>     auto_{ false };
     std::atomic<uint64_t> seen_{ 0 };
+    std::atomic<uint64_t> version_{ 0 };
 };

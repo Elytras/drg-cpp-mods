@@ -87,6 +87,7 @@ namespace Overlay
         std::atomic<bool>            g_capturing{ false };
         std::atomic<bool>            g_haveCaptured{ false };
         std::atomic<uint16_t>        g_capturedKey{ 0 };
+        std::atomic<uint8_t>         g_capturedMods{ 0 };
 
         // (Re)register the global KeyBindings press that shows the overlay. Focus::Game
         // (fires while the game has focus → opens); closing while the overlay is
@@ -230,7 +231,14 @@ namespace Overlay
                            (vk >= VK_LSHIFT && vk <= VK_RMENU) || vk == VK_LWIN || vk == VK_RWIN;
                 };
                 auto capture = [](uint16_t vk) {
-                    g_capturedKey.store(vk); g_haveCaptured.store(true); g_capturing.store(false);
+                    uint8_t mods = 0;
+                    if (GetKeyState(VK_CONTROL) & 0x8000) mods |= 1; // Mod::Ctrl
+                    if (GetKeyState(VK_SHIFT) & 0x8000)   mods |= 2; // Mod::Shift
+                    if (GetKeyState(VK_MENU) & 0x8000)    mods |= 4; // Mod::Alt
+                    g_capturedKey.store(vk);
+                    g_capturedMods.store(mods);
+                    g_haveCaptured.store(true);
+                    g_capturing.store(false);
                 };
                 switch (msg)
                 {
@@ -565,10 +573,11 @@ namespace Overlay
     void BeginKeyCapture()  { g_haveCaptured.store(false); g_capturing.store(true); }
     void CancelKeyCapture() { g_capturing.store(false); }
     bool IsCapturingKey()   { return g_capturing.load(); }
-    bool TakeCapturedKey(uint16_t* outVk)
+    bool TakeCapturedKey(uint16_t* outVk, uint8_t* outMods)
     {
         if (!g_haveCaptured.exchange(false)) return false;
         if (outVk) *outVk = g_capturedKey.load();
+        if (outMods) *outMods = g_capturedMods.load();
         return true;
     }
 

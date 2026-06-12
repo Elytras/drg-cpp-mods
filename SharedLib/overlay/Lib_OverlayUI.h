@@ -117,9 +117,9 @@ namespace UI
         {
             DangerColors()
             {
-                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.55f, 0.15f, 0.15f, 1.f));
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.35f, 0.05f, 0.05f, 1.f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.70f, 0.20f, 0.20f, 1.f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.80f, 0.25f, 0.25f, 1.f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.90f, 0.35f, 0.35f, 1.f));
             }
             ~DangerColors() { ImGui::PopStyleColor(3); }
         };

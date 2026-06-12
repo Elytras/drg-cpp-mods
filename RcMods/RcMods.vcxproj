@@ -186,11 +186,13 @@
       SCO_Internal RVA or call-site signature to enable NewObject<T>().
     -->
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_ActorList.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_ObjectList.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_CommandHandler.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\Lib_Overlay.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\Lib_OverlayConsole.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\ConfigTab.cpp" />
-    <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\ActorsTab.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\LogsTab.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\ObjectsTab.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\VarsTab.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\KeybindsTab.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\CommandsTab.cpp" />
@@ -243,6 +245,7 @@
     <ClInclude Include="$(SolutionDir)SharedLib\core\IpcProtocol.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\core\StringLib.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_ActorList.h" />
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_ObjectList.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_CommandHandler.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_Json.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_KeyBindings.h" />

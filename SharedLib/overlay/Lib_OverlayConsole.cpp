@@ -7,6 +7,7 @@
 #include "Lib_VarSystem.h"     // VarSystem::Vars() store snapshot for the Vars tab
 #include "Lib_KeyBindings.h"   // SnapshotCli for the Keybinds tab
 #include "Lib_ActorList.h"     // actor snapshot for the Actors tab
+#include "Lib_ObjectList.h"   // object snapshot for the Objects tab
 #include "Lib_NetLogConfig.h"  // ConfigPath for the Config tab
 #ifndef NOMINMAX
 #define NOMINMAX               // StringLib pulls <Windows.h>; keep std::min/max usable
@@ -187,7 +188,8 @@ namespace OverlayConsole
         // Actors tab: game-thread-built snapshot. Heavy GObjects walk, so the snapshot
         // gates auto-refresh on a recent beat() (tab actually rendered) to avoid spiking
         // frametime when you aren't looking at the tab.
-        GameThreadSnapshot<std::vector<ActorList::Row>> g_actors;
+        GameThreadSnapshot<std::vector<ActorList::Row>>  g_actors;
+        GameThreadSnapshot<std::vector<ObjectList::Row>> g_objects;
 
         // ── Console input + completion state (overlay thread only) ───────────────
         // Shared infra: read/written by the ImGui input callback, the completion
@@ -608,7 +610,8 @@ namespace OverlayConsole
         }
 
         GameThreadSnapshot<std::vector<VarSnap>>&        Vars()   { return g_vars; }
-        GameThreadSnapshot<std::vector<ActorList::Row>>& Actors() { return g_actors; }
+        GameThreadSnapshot<std::vector<ActorList::Row>>&  Actors()  { return g_actors; }
+        GameThreadSnapshot<std::vector<ObjectList::Row>>& Objects() { return g_objects; }
 
         // Function-local static so the registry is alive before any tab self-registers,
         // independent of cross-TU static-init order.
@@ -659,14 +662,23 @@ namespace OverlayConsole
             if (detail::Actors().due(detail::NowMs(), 700))
                 detail::Actors().store(ActorList::Snapshot());
 
+            // Objects snapshot — same gating pattern; larger cap, includes non-actors.
+            if (detail::Objects().due(detail::NowMs(), 700))
+                detail::Objects().store(ObjectList::Snapshot());
+
 #if defined(RogueCore) && RogueCore
             {
                 static bool bInitialized = false;
                 if (!bInitialized)
                 {
                     std::vector<std::string> negotiations;
-                        static constexpr std::array<std::string_view, 3> skipPrefixes{
-                            "AWP_", "DECK_", "Default__"
+                    static const constexpr std::array<std::string_view, 3> skipPrefixes{
+#define DUMMY_PREFIXES 0
+#if DUMMY_PREFIXES
+                        "Dummy1","Dummy2","Dummy3"
+#else
+                        "AWP_", "Dummy" /* was DECK_ previously, but it works now so no need to filter out it anymore */, "Default__"
+#endif
                     };
 
                     for (auto* c : GObjectsOf<SDK::UBXEUnlockCollection>())
@@ -708,7 +720,8 @@ namespace OverlayConsole
         detail::RegisterCommandsTab();  // "Commands"
         detail::RegisterVarsTab();      // "Vars"
         detail::RegisterKeybindsTab();  // "Keybinds"
-        detail::RegisterActorsTab();    // "Actors"
+        detail::RegisterObjectsTab();   // "Objects" (merged Actors + All Objects browser)
+        detail::RegisterLogsTab();      // "Logs"
 
 #if defined(RogueCore) && RogueCore
         detail::RegisterNegotiationTab();

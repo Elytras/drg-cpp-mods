@@ -156,7 +156,10 @@
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\ConfigTab.cpp">
       <Filter>External</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\ActorsTab.cpp">
+    <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\LogsTab.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\ObjectsTab.cpp">
       <Filter>External</Filter>
     </ClCompile>
     <ClCompile Include="$(SolutionDir)SharedLib\overlay\tabs\VarsTab.cpp">
@@ -170,6 +173,9 @@
     </ClCompile>
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_ActorList.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_ObjectList.cpp">
+      <Filter>External</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -243,6 +249,9 @@
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_ActorList.h">
+      <Filter>Header Files\LibraryHeaders</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_ObjectList.h">
       <Filter>Header Files\LibraryHeaders</Filter>
     </ClInclude>
     <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_CommandHandler.h">

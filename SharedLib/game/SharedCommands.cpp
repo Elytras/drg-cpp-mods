@@ -162,6 +162,41 @@ namespace
         if (serverOn) { LogNetServer(s_dummyCtx); LogNetServer(s_dummyCtx); }
     }
 
+    // ── logdamagerapport: log Server_ReceiveClientDamageRapport RPCs ──────────
+    // RC's BP_NetworkPlayerController_BXE_C (and any parent that declares it)
+    // reports client-applied damage to the server through this server RPC. Hooked
+    // by NAME (Before) so the SAME TU still compiles for DRG, where the function
+    // simply never fires. Logs the caller class/object and every parameter via the
+    // generic param printer.
+    //
+    // FUTURE — *altering* the call instead of just observing it: this is deliberately
+    // a Before hook on the named RPC so we can later (a) mutate `Params` in place here
+    // (e.g. clamp/zero a damage field) or (b) scope it precisely with
+    // .Class(BP_NetworkPlayerController_BXE_C::StaticClass()) — or an earlier parent —
+    // and `.Skip()` to drop the original. Today it is observe-only.
+    GameHooks::HookToggle<GameHooks::ProcessEventHook> s_logDamageRapport{
+        [] { return GameHooks::OnProcessEvent()
+            .Name("Server_ReceiveClientDamageRapport")
+            .Timing(GameHooks::ExecutionTiming::Before)
+            .Bind([](UObject* Object, UFunction* Function, void* Params)
+            {
+                if (!Object || !Function) return;
+                const std::string cls    = Object->Class ? Object->Class->GetName() : "?";
+                const std::string params = BuildParamString(Function, Params);
+                UObject* outer = Object->Outer;
+                if (outer && outer != Object)
+                    info("[DamageRapport] {}::{}({}) | outer: {}",
+                         cls, Object->GetName(), params, outer->GetName());
+                else
+                    info("[DamageRapport] {}::{}({})", cls, Object->GetName(), params);
+            }); } };
+
+    void LogDamageRapport(const CommandContext& = s_dummyCtx)
+    {
+        info("[cmd:logdamagerapport] {}", s_logDamageRapport.Toggle()
+            ? "enabled — logging Server_ReceiveClientDamageRapport" : "disabled");
+    }
+
     // ── scanall ──────────────────────────────────────────────────────────────
     void ScanAll(const CommandContext& = s_dummyCtx)
     {
@@ -923,6 +958,7 @@ void RegisterSharedCommands(CommandHandler& handler)
     // System
     handler.Register("lognetclient", LogNetClient, "System", R"(Toggle logging of all NetClient + NetMulticast ProcessEvent calls)");
     handler.Register("lognetserver", LogNetServer, "System", R"(Toggle logging of all NetServer (server RPC) ProcessEvent calls)");
+    handler.Register("logdamagerapport", LogDamageRapport, "System", R"(Toggle logging of Server_ReceiveClientDamageRapport RPCs (RC BP_NetworkPlayerController_BXE_C client damage reports))");
     handler.Register("reloadnetlog", ReloadNetLog, "System", R"(Reload config.yaml skip lists without toggling active loggers off manually)");
     handler.Register("exec",         ExecCmd,      "System", R"(Execute a console command: exec <command>)");
     handler.Register("logallevents", LogAllEvents, "System", R"(Toggle logging of ALL ProcessEvent calls (very verbose))");
@@ -943,6 +979,21 @@ void RegisterSharedCommands(CommandHandler& handler)
     handler.Register("set",   Cmd_Set,   "Variables", R"(Set a variable: set <n> <value>)");
     handler.Register("unset", Cmd_Unset, "Variables", R"(Delete a variable: unset <n>)");
     handler.Register("vars",  Cmd_Vars,  "Variables", R"(List all variables)");
+}
+
+const std::vector<LogToggleInfo>& GetLogToggles()
+{
+    // Surfaced as checkboxes in the overlay "Logs" tab. `id` is the CLI command the
+    // UI runs (RunCommand) to flip the toggle; `enabled` probes the live HookToggle
+    // for the checkbox. Ordered cheapest/most-useful first, most-verbose last.
+    static const std::vector<LogToggleInfo> toggles = {
+        { "lognetclient",     "Net Client + Multicast", "NetClient + NetMulticast RPCs",            [] { return s_logNetClient.IsEnabled();    } },
+        { "lognetserver",     "Net Server",             "NetServer (server RPC) calls",             [] { return s_logNetServer.IsEnabled();    } },
+        { "logdamagerapport", "Damage Rapport",         "Server_ReceiveClientDamageRapport (RC)",   [] { return s_logDamageRapport.IsEnabled(); } },
+        { "stoptick",         "Actor ReceiveTick",      "AActor ReceiveTick events",                [] { return s_tickWatcher.IsEnabled();     } },
+        { "logallevents",     "All ProcessEvents",      "EVERY ProcessEvent — very verbose",        [] { return s_logAllEvents.IsEnabled();    } },
+    };
+    return toggles;
 }
 
 void InitSharedCallbacks()

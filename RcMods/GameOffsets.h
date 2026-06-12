@@ -8,16 +8,9 @@
 namespace GameOffsets
 {
     // ── StaticConstructObject_Internal ──────────────────────────────────────
-    //
-    // TBD — disassemble a NewObject<T> call site in RogueCore-Win64-Shipping.exe
-    // to find the SCO_Internal address, then either:
-    //   (a) record the RVA below (preferred — survives ASLR, fast at runtime), or
-    //   (b) build a call-site signature like DRG uses (slower but more robust to
-    //       game patches).
-    //
-    // While both are zero/empty, Lib_ObjectFactory::GetStaticConstructObject()
-    // returns nullptr and NewObject<T>() returns nullptr (logs once on first
-    // attempt).
-    inline constexpr uintptr_t       kStaticConstructObjectRVA     = 0;
+    // RVA from Dumper-7 SDK::Offsets::StaticConstructObjectInternal.
+    // Confirmed from 5.6.1-145115+main-RogueCore (experimental branch).
+    // Update this whenever the SDK is regenerated.
+    inline constexpr uintptr_t       kStaticConstructObjectRVA     = 0x015DBB90;
     inline constexpr std::string_view kStaticConstructObjectCallSig = "";
 }
