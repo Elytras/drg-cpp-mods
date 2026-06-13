@@ -118,7 +118,7 @@ namespace
     //   · FField* chain walk      · FName::ToString() heap alloc
     //   · FieldCast::Cast() type dispatch    · GetName() on inner types
 
-    enum class WKind : uint8 { Generic, Bool, Int, Float, Double, Name, Str, EnumKind, VectorLike, Object, Struct, Array, MapOrSet };
+    enum class WKind : uint8 { Generic, Bool, Int, Float, Double, Name, Str, Text, EnumKind, VectorLike, Object, Struct, Array, MapOrSet };
 
     // Vector3-shaped structs editable as a single DragFloat3 row. Excludes Vector2D/Vector4
     // (different component counts) — only the 3-float families + Rotator.
@@ -323,6 +323,8 @@ namespace
                     fd.kind = WKind::Name;
                 else if (FieldCast::IsA<FStrProperty>(f))
                     fd.kind = WKind::Str;
+                else if (FieldCast::IsA<FTextProperty>(f))
+                    fd.kind = WKind::Text;
                 else if (auto* ep = FieldCast::Cast<FEnumProperty>(f))
                 {
                     fd.kind     = WKind::EnumKind;
@@ -593,6 +595,27 @@ namespace
                 UI::SameLine();
                 std::string committed;
                 if (EditTextField("##stredit", base + fd.offset, val, committed))
+                    EnqueuePropWrite(base, fd.prop, fd.name, committed);
+                if (UI::BeginPopupContextItem("##fctx"))
+                {
+                    if (UI::MenuItem("Copy value")) UI::SetClipboardText(val.c_str());
+                    UI::EndPopup();
+                }
+                break;
+            }
+        case WKind::Text:
+            {
+                // FText is a handle; read its source string (guard the null/empty handle).
+                const auto* t = GetPropertyPtr<SDK::FText>(base, fd.offset);
+                const std::string val = t->TextData ? t->TextData->TextSource.ToString() : std::string{};
+                UI::PushStyleColor(ImGuiCol_Text, col);
+                UI::TextUnformatted(fd.name.c_str());
+                UI::PopStyleColor();
+                UI::SameLine();
+                std::string committed;
+                // Commit deferred: WriteProperty's FText path calls Conv_StringToText via
+                // ProcessEvent, which must run on the game thread.
+                if (EditTextField("##textedit", base + fd.offset, val, committed))
                     EnqueuePropWrite(base, fd.prop, fd.name, committed);
                 if (UI::BeginPopupContextItem("##fctx"))
                 {
