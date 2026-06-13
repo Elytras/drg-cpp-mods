@@ -118,7 +118,7 @@ namespace
     //   · FField* chain walk      · FName::ToString() heap alloc
     //   · FieldCast::Cast() type dispatch    · GetName() on inner types
 
-    enum class WKind : uint8 { Generic, Bool, Int, Float, Double, Name, Str, Object, Struct, Array, MapOrSet };
+    enum class WKind : uint8 { Generic, Bool, Int, Float, Double, Name, Str, EnumKind, Object, Struct, Array, MapOrSet };
 
     // Set by Object-field "→" buttons / class-outer buttons; consumed by the tab each frame.
     static uint64_t s_treeJumpAddr      = 0;
@@ -178,6 +178,9 @@ namespace
         UStruct*       innerStruct = nullptr;   // WKind::Struct
         FProperty*     innerProp   = nullptr;   // WKind::Array
         int32          elemSize    = 0;         // WKind::Array
+        int32          enumSize    = 0;         // WKind::EnumKind: backing-int width (1/2/4/8)
+        std::vector<std::string> enumNames;     // WKind::EnumKind: entry labels (prefix-stripped)
+        std::vector<int64>       enumValues;    // WKind::EnumKind: parallel entry values
     };
 
     struct FuncDesc {
@@ -227,6 +230,24 @@ namespace
             return n;
         }
         return "?";
+    }
+
+    // Fill names/values from a UEnum's Names array, stripping the "EType::" prefix UE
+    // prepends. Mirrors ResolveEnumName in Lib_Print.cpp (anon-namespace, not reusable).
+    static void BuildEnumEntries(UEnum* e, std::vector<std::string>& names,
+                                 std::vector<int64>& values)
+    {
+        if (!e) return;
+        for (int32 i = 0; i < e->Names.Num(); ++i)
+        {
+            std::string n = e->Names[i].First.ToString();
+            if (const auto pos = n.rfind("::"); pos != std::string::npos)
+                n = n.substr(pos + 2);
+            // Skip the synthetic trailing "_MAX" sentinel UE appends to most enums.
+            if (n == "_MAX" || n.ends_with("_MAX")) continue;
+            names.push_back(std::move(n));
+            values.push_back(e->Names[i].Second);
+        }
     }
 
     static const StructDesc& GetOrBuildStructDesc(UStruct* ustruct)
@@ -288,6 +309,19 @@ namespace
                     fd.kind = WKind::Name;
                 else if (FieldCast::IsA<FStrProperty>(f))
                     fd.kind = WKind::Str;
+                else if (auto* ep = FieldCast::Cast<FEnumProperty>(f))
+                {
+                    fd.kind     = WKind::EnumKind;
+                    fd.enumSize = ep->UnderlayingProperty ? ep->UnderlayingProperty->ElementSize : 1;
+                    BuildEnumEntries(ep->Enum, fd.enumNames, fd.enumValues);
+                }
+                else if (auto* bp2 = FieldCast::Cast<FByteProperty>(f); bp2 && bp2->Enum)
+                {
+                    // Enum-backed byte (TEnumAsByte) — plain bytes stay Generic.
+                    fd.kind     = WKind::EnumKind;
+                    fd.enumSize = 1;
+                    BuildEnumEntries(bp2->Enum, fd.enumNames, fd.enumValues);
+                }
                 else if (FieldCast::IsA<FObjectProperty>(f) || FieldCast::IsA<FClassProperty>(f))
                     fd.kind = WKind::Object;
                 else if (FieldCast::IsA<FMapProperty>(f) || FieldCast::IsA<FSetProperty>(f))
@@ -513,6 +547,40 @@ namespace
                 {
                     if (UI::MenuItem("Copy value")) UI::SetClipboardText(val.c_str());
                     UI::EndPopup();
+                }
+                break;
+            }
+        case WKind::EnumKind:
+            {
+                // Read the current value sized by the enum's backing-int width.
+                uint8* slot = GetPropertyPtr<uint8>(base, fd.offset);
+                int64 cur = 0;
+                switch (fd.enumSize)
+                {
+                case 2: cur = *reinterpret_cast<uint16*>(slot); break;
+                case 4: cur = *reinterpret_cast<uint32*>(slot); break;
+                case 8: cur = *reinterpret_cast<int64*> (slot); break;
+                default: cur = *slot; break;   // size 1
+                }
+                UI::PushStyleColor(ImGuiCol_Text, col);
+                UI::TextUnformatted(fd.name.c_str());
+                UI::PopStyleColor();
+                UI::SameLine();
+                if (fd.enumNames.empty())
+                {
+                    UI::Text("= %lld", (long long)cur);   // no usable entries — show raw value
+                    break;
+                }
+                int idx = -1;
+                for (int i = 0; i < (int)fd.enumValues.size(); ++i)
+                    if (fd.enumValues[i] == cur) { idx = i; break; }
+                UI::SetNextItemWidth(220.f);
+                if (UI::ComboFromList("##enumedit", &idx, fd.enumNames,
+                                      /*searchable*/ fd.enumNames.size() > 12,
+                                      {}, nullptr, /*allow_rename*/ false)
+                    && idx >= 0 && idx < (int)fd.enumValues.size())
+                {
+                    EnqueuePropWrite(base, fd.prop, fd.name, std::to_string(fd.enumValues[idx]));
                 }
                 break;
             }
