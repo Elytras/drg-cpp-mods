@@ -16,6 +16,7 @@
 #include "CoreUtils.h"         // SafeStof / SafeStoll (canonical parsers)
 #include "GameThreadSnapshot.h" // double-buffered game-thread→UI snapshot
 #include "OverlayTabs.h"        // detail:: shared services + tab registry (per-tab TUs)
+#include "Lib_ObjectView.h"     // ObjView::BuildObjectView (game-thread Objects-tab model)
 #include "Common.h"
 
 #include <fstream>
@@ -192,6 +193,12 @@ namespace OverlayConsole
         GameThreadSnapshot<std::vector<ObjectList::Row>> g_objects;
         // Scanned-function names for `call` completion; published by each game's scanfuncs.
         GameThreadSnapshot<std::vector<std::string>>     g_callFuncs;
+
+        // Objects-tab property tree: focused object's model (game thread → UI) + the request
+        // (UI → game: focus addr/index + expanded node keys).
+        GameThreadSnapshot<ObjView::ObjectView> g_objView;
+        std::mutex                              g_objViewReqMx;
+        ObjView::Request                        g_objViewReq;
 
         // ── Console input + completion state (overlay thread only) ───────────────
         // Shared infra: read/written by the ImGui input callback, the completion
@@ -616,6 +623,9 @@ namespace OverlayConsole
         GameThreadSnapshot<std::vector<VarSnap>>&        Vars()   { return g_vars; }
         GameThreadSnapshot<std::vector<ActorList::Row>>&  Actors()  { return g_actors; }
         GameThreadSnapshot<std::vector<ObjectList::Row>>& Objects() { return g_objects; }
+        GameThreadSnapshot<ObjView::ObjectView>&         ObjectViewSnap() { return g_objView; }
+        void SetObjViewRequest(const ObjView::Request& r) { std::lock_guard lk(g_objViewReqMx); g_objViewReq = r; }
+        ObjView::Request GetObjViewRequest()              { std::lock_guard lk(g_objViewReqMx); return g_objViewReq; }
 
         // Function-local static so the registry is alive before any tab self-registers,
         // independent of cross-TU static-init order.
@@ -707,6 +717,20 @@ namespace OverlayConsole
                 }
             }
 #endif
+            return true;
+        });
+
+        // Objects-tab property tree — fast-path the focused object: rebuild EVERY tick while the
+        // tab is live (UI beats ObjectViewSnap() each frame it renders the tree). The UI renders
+        // the resulting snapshot and never touches live memory. No-op until a focus is set (the
+        // request stays empty while the old live-read renderer is still active — step 5 wires it).
+        EnqueueEveryNTicks(1, []
+        {
+            if (!detail::ObjectViewSnap().live(detail::NowMs(), 500)) return true;
+            const ObjView::Request req = detail::GetObjViewRequest();
+            if (req.focusAddr)
+                detail::ObjectViewSnap().store(
+                    ObjView::BuildObjectView(reinterpret_cast<SDK::UObject*>(req.focusAddr), req));
             return true;
         });
 

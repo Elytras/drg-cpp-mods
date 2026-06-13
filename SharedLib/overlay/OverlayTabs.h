@@ -16,6 +16,7 @@
 #include "../game/Lib_VarSystem.h"       // VarSystem::VarType (VarSnap)
 #include "../game/Lib_ActorList.h"       // ActorList::Row (Actors() snapshot)
 #include "../game/Lib_ObjectList.h"      // ObjectList::Row (Objects() snapshot)
+#include "ObjectView.h"                  // ObjView::ObjectView / Request (Objects property tree)
 
 class CommandHandler;
 
@@ -44,6 +45,14 @@ namespace OverlayConsole
         GameThreadSnapshot<std::vector<VarSnap>>&        Vars();
         GameThreadSnapshot<std::vector<ActorList::Row>>&  Actors();
         GameThreadSnapshot<std::vector<ObjectList::Row>>& Objects();
+
+        // Objects-tab property tree: the focused object's model (game thread builds it every
+        // tick while the tab is live; UI renders it) + the UI→game request (focus + expanded
+        // node keys). The UI beats ObjectView() each frame it renders the tree so the producer
+        // only works while the tab is actually shown.
+        GameThreadSnapshot<ObjView::ObjectView>& ObjectViewSnap();
+        void                SetObjViewRequest(const ObjView::Request& req);   // UI → game
+        ObjView::Request    GetObjViewRequest();                              // game reads
 
 #if defined(RogueCore) && RogueCore
         GameThreadSnapshot<std::vector<std::string>>& Negotiations();
