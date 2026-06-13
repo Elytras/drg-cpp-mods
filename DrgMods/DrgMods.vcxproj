@@ -131,7 +131,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions);FMT_HEADER_ONLY;NOMINMAX;WIN32_LEAN_AND_MEAN;USEOWNIMPL=0</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions);FMT_HEADER_ONLY;NOMINMAX;WIN32_LEAN_AND_MEAN;USEOWNIMPL=0;UE_GLOBAL_ALLOC=1</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpplatest</LanguageStandard>
@@ -209,6 +209,7 @@
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_Scan.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_VarSystem.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\game\ModManager.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_GlobalAlloc.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\game\SharedCommands.cpp" />
     <ClCompile Include="SDK\SDK\AssetRegistry_functions.cpp" />
     <ClCompile Include="SDK\SDK\Basic.cpp">

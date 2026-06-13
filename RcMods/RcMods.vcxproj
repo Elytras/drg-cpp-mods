@@ -209,6 +209,7 @@
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_Scan.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_VarSystem.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\game\ModManager.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_GlobalAlloc.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\game\SharedCommands.cpp" />
     <ClCompile Include="SDK\SDK\Basic.cpp">
       <LanguageStandard Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">stdcpplatest</LanguageStandard>

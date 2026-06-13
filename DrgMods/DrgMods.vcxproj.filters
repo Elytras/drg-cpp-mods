@@ -66,6 +66,9 @@
     <ClCompile Include="$(SolutionDir)SharedLib\game\ModManager.cpp">
       <Filter>Source Files\DLL Impl</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_GlobalAlloc.cpp">
+      <Filter>Source Files\DLL Impl</Filter>
+    </ClCompile>
     <ClCompile Include="Commands.cpp">
       <Filter>Source Files\DLL Impl</Filter>
     </ClCompile>
