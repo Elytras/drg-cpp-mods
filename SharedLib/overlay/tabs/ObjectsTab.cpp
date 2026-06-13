@@ -33,6 +33,7 @@
 #include "../../core/StringLib.h"
 #include "../../game/Lib_ObjectCast.h"
 #include "../../game/Lib_PropertyAccess.h"
+#include "../../game/Lib_PropertyInspector.h"
 #include "../../game/Lib_Print.h"
 #include "../../hooks/Lib_GameHooks.h"
 
@@ -122,6 +123,49 @@ namespace
     // Set by Object-field "→" buttons / class-outer buttons; consumed by the tab each frame.
     static uint64_t s_treeJumpAddr      = 0;
     static uint64_t s_treeJumpClassAddr = 0;
+
+    // ── Inline field editing ──────────────────────────────────────────────────────
+    // Root object of the tree currently being drawn — threaded via file statics (like
+    // the jump addresses) so DrawFieldFromDesc can validate/log a write without an extra
+    // param on every node. Set at the top of DrawObjectTree, valid for that draw only.
+    static UObject* s_rootObj = nullptr;
+    static int32    s_rootIdx = -1;
+
+    // Single active text edit at a time, keyed by the field's absolute address. Avoids an
+    // unbounded per-field std::string buffer: while a field is focused we keep its in-progress
+    // text here; every other field mirrors its live value each frame (a fresh local copy).
+    static uintptr_t s_editKey = 0;
+    static std::string s_editText;
+
+    // Editable single-line text widget. `live` is the current value (shown when not focused).
+    // Returns true with the committed text in `out` when the user presses Enter.
+    static bool EditTextField(const char* id, uintptr_t key, const std::string& live, std::string& out)
+    {
+        const bool active = (s_editKey == key);
+        std::string buf = active ? s_editText : live;   // per-frame copy ImGui edits into
+        UI::SetNextItemWidth(220.f);
+        const bool entered = UI::InputTextString(id, buf, ImGuiInputTextFlags_EnterReturnsTrue);
+        if (UI::IsItemActivated()) { s_editKey = key; s_editText = live; }
+        if (s_editKey == key) s_editText = buf;          // capture this frame's keystrokes
+        if (entered && active) { out = buf; s_editKey = 0; return true; }
+        // Focus lost without committing → discard the pending edit.
+        if (active && !entered && UI::IsItemDeactivated()) s_editKey = 0;
+        return false;
+    }
+
+    // Queue a string→property write onto the game thread (name table / allocator are
+    // game-thread-confined). Re-validates the root object by index before poking.
+    static void EnqueuePropWrite(uintptr_t writeBase, FProperty* prop,
+                                 const std::string& name, std::string value)
+    {
+        UObject*    root = s_rootObj;
+        const int32 idx  = s_rootIdx;
+        EnqueueOnce([root, idx, writeBase, prop, name, value]()
+        {
+            if (!IsValidRaw(root) || root->Index != idx) return;
+            PropertyInspector::WriteProperty(root, prop, writeBase, prop, value, name, false, 0);
+        });
+    }
 
     struct FieldDesc {
         FField*        field;
@@ -439,8 +483,12 @@ namespace
             {
                 const std::string val = GetPropertyPtr<FName>(base, fd.offset)->ToString();
                 UI::PushStyleColor(ImGuiCol_Text, col);
-                UI::Text("%s = %s", fd.name.c_str(), val.c_str());
+                UI::TextUnformatted(fd.name.c_str());
                 UI::PopStyleColor();
+                UI::SameLine();
+                std::string committed;
+                if (EditTextField("##nameedit", base + fd.offset, val, committed))
+                    EnqueuePropWrite(base, fd.prop, fd.name, committed);
                 if (UI::BeginPopupContextItem("##fctx"))
                 {
                     if (UI::MenuItem("Copy value")) UI::SetClipboardText(val.c_str());
@@ -699,6 +747,10 @@ namespace
     static void DrawObjectTree(UObject* obj, const char* fieldFilter)
     {
         if (!obj || !IsValidRaw(obj) || !obj->Class || !IsValidRaw(obj->Class)) return;
+
+        // Record the root object for inline field writes (consumed by EnqueuePropWrite).
+        s_rootObj = obj;
+        s_rootIdx = obj->Index;
 
         // Header: object name + class jump button + outer jump button
         UI::TextUnformatted(obj->GetName().c_str());
