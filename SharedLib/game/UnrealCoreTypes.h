@@ -23,6 +23,9 @@ namespace SDK {
 using namespace SDK::InSDKUtils;
 extern int Utf8ToWide(const char* src, wchar* dst, int capacity);
 extern void* FindPattern(const wchar_t* moduleName, std::string_view pattern);
+// Allocation-free pattern scan — MUST be used on the allocator-resolution path so the
+// global operator new (UE_GLOBAL_ALLOC) can't re-enter itself and deadlock. See Lib_Utils.cpp.
+extern void* FindPatternNoAlloc(const wchar_t* moduleName, std::string_view pattern);
 class UnrealAllocator
 {
     inline static uint64 RVA = 0;
@@ -42,10 +45,10 @@ class UnrealAllocator
         static GCreateMallocFn fn = []() -> GCreateMallocFn
         {
 #if defined(RogueCore) && RogueCore
-            uint8_t* match = static_cast<uint8_t*>(FindPattern(nullptr,
+            uint8_t* match = static_cast<uint8_t*>(FindPatternNoAlloc(nullptr,
                 "48 81 EC ?? ?? ?? ?? 8B 0D ?? ?? ?? ?? 65 48 8B 04 25 58 00 00 00"));
 #else
-            uint8_t* match = static_cast<uint8_t*>(FindPattern(nullptr,
+            uint8_t* match = static_cast<uint8_t*>(FindPatternNoAlloc(nullptr,
                 "48 81 EC A8 00 00 00 65 48 8B 04 25 58 00 00 00 8B 0D ?? ?? ?? ??"));
 #endif
             return match ? reinterpret_cast<GCreateMallocFn>(match) : nullptr;
@@ -139,6 +142,10 @@ public:
     {
         return Get() != nullptr;
     }
+
+    // Non-resolving peek at the cached allocator (never scans, never allocates). The global
+    // operator new uses this as its fast path so a cached allocation can't trigger resolution.
+    static UnrealAllocator* Peek() { return Cached; }
 
     UnrealAllocator(const UnrealAllocator&) = delete;
     UnrealAllocator& operator=(const UnrealAllocator&) = delete;

@@ -226,3 +226,67 @@ void* FindPattern(const wchar_t* moduleName, std::string_view pattern)
     }
     return nullptr;
 }
+
+// Allocation-free twin of FindPattern. The global operator new (UE_GLOBAL_ALLOC)
+// resolves UnrealAllocator lazily on its first call; if that resolution path
+// allocated (FindPattern uses std::vector), it would re-enter operator new and
+// deadlock on the magic-static init lock. This variant uses fixed stack buffers
+// so the resolver never touches the heap. Patterns are short (< kMaxPat bytes).
+void* FindPatternNoAlloc(const wchar_t* moduleName, std::string_view pattern)
+{
+    constexpr int kMaxPat = 128;
+    uint8_t pat[kMaxPat];
+    bool    mask[kMaxPat];
+    int     len = 0;
+
+    auto hexVal = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return 0;
+    };
+
+    const char* s = pattern.data();
+    const char* e = s + pattern.size();
+    while (s < e && len < kMaxPat)
+    {
+        while (s < e && *s == ' ') ++s;
+        if (s >= e) break;
+        if (s[0] == '?')
+        {
+            pat[len] = 0x00; mask[len] = false; ++len;
+            s += (s + 1 < e && s[1] == '?') ? 2 : 1;
+        }
+        else if (s + 1 < e)
+        {
+            pat[len] = static_cast<uint8_t>((hexVal(s[0]) << 4) | hexVal(s[1]));
+            mask[len] = true; ++len; s += 2;
+        }
+        else break;
+    }
+    if (len == 0) return nullptr;
+
+    HMODULE mod = GetModuleHandleW(moduleName);
+    if (!mod) return nullptr;
+
+    auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(mod);
+    auto* nt  = reinterpret_cast<IMAGE_NT_HEADERS64*>(
+        reinterpret_cast<uint8_t*>(mod) + dos->e_lfanew);
+
+    auto* sec = IMAGE_FIRST_SECTION(nt);
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++sec)
+    {
+        if (!(sec->Characteristics & (IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_CNT_CODE)))
+            continue;
+        const uint8_t* begin = reinterpret_cast<uint8_t*>(mod) + sec->VirtualAddress;
+        const uint8_t* last  = begin + sec->Misc.VirtualSize - len;
+        for (const uint8_t* p = begin; p <= last; ++p)
+        {
+            bool match = true;
+            for (int j = 0; j < len && match; ++j)
+                if (mask[j] && p[j] != pat[j]) match = false;
+            if (match) return const_cast<uint8_t*>(p);
+        }
+    }
+    return nullptr;
+}

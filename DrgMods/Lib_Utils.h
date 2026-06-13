@@ -225,3 +225,4 @@ std::vector<SDK::AFSDPawn*> GetAliveNonFriendlies();
 std::string                ObjToStr    (const SDK::UObject* Obj);
 std::string            parse_quoted(std::string_view input);
 void*                  FindPattern (const wchar_t* moduleName, std::string_view pattern);
+void*                  FindPatternNoAlloc(const wchar_t* moduleName, std::string_view pattern);
