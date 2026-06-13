@@ -118,7 +118,16 @@ namespace
     //   · FField* chain walk      · FName::ToString() heap alloc
     //   · FieldCast::Cast() type dispatch    · GetName() on inner types
 
-    enum class WKind : uint8 { Generic, Bool, Int, Float, Double, Name, Str, EnumKind, Object, Struct, Array, MapOrSet };
+    enum class WKind : uint8 { Generic, Bool, Int, Float, Double, Name, Str, EnumKind, VectorLike, Object, Struct, Array, MapOrSet };
+
+    // Vector3-shaped structs editable as a single DragFloat3 row. Excludes Vector2D/Vector4
+    // (different component counts) — only the 3-float families + Rotator.
+    static bool IsVector3Struct(const std::string& n)
+    {
+        return n == "Vector" || n == "Rotator"
+            || n == "Vector_NetQuantize"    || n == "Vector_NetQuantize10"
+            || n == "Vector_NetQuantize100" || n == "Vector_NetQuantizeNormal";
+    }
 
     // Set by Object-field "→" buttons / class-outer buttons; consumed by the tab each frame.
     static uint64_t s_treeJumpAddr      = 0;
@@ -283,9 +292,14 @@ namespace
                 fd.offset = p->Offset;
                 if (auto* sp = FieldCast::Cast<FStructProperty>(f))
                 {
-                    fd.kind        = WKind::Struct;
-                    fd.innerStruct = sp->Struct;
-                    fd.typeName    = sp->Struct ? sp->Struct->GetName() : "?";
+                    fd.typeName = sp->Struct ? sp->Struct->GetName() : "?";
+                    if (IsVector3Struct(fd.typeName))
+                        fd.kind = WKind::VectorLike;
+                    else
+                    {
+                        fd.kind        = WKind::Struct;
+                        fd.innerStruct = sp->Struct;
+                    }
                 }
                 else if (auto* ap = FieldCast::Cast<FArrayProperty>(f))
                 {
@@ -400,6 +414,43 @@ namespace
         const ImVec4 col = FieldDepthColor(depth);
         switch (fd.kind)
         {
+        case WKind::VectorLike:
+            {
+                // Read via SDK::FVector/FRotator (game-correct layout; double-backed on UE5)
+                // and present as a single DragFloat3. Components map 1:1 to WriteProperty's
+                // "x,y,z" / "pitch,yaw,roll" parse order.
+                const bool isRot = (fd.typeName == "Rotator");
+                float v[3];
+                if (isRot)
+                {
+                    auto* r = GetPropertyPtr<SDK::FRotator>(base, fd.offset);
+                    v[0] = (float)r->Pitch; v[1] = (float)r->Yaw; v[2] = (float)r->Roll;
+                }
+                else
+                {
+                    auto* p = GetPropertyPtr<SDK::FVector>(base, fd.offset);
+                    v[0] = (float)p->X; v[1] = (float)p->Y; v[2] = (float)p->Z;
+                }
+                UI::PushStyleColor(ImGuiCol_Text, col);
+                UI::TextUnformatted(fd.name.c_str());
+                UI::PopStyleColor();
+                UI::SameLine();
+                UI::SetNextItemWidth(240.f);
+                if (UI::DragFloat3("##vec3", v, 0.1f))
+                {
+                    char buf[96];
+                    snprintf(buf, sizeof(buf), "%g,%g,%g", v[0], v[1], v[2]);
+                    EnqueuePropWrite(base, fd.prop, fd.name, buf);
+                }
+                if (UI::BeginPopupContextItem("##fctx"))
+                {
+                    char buf[96];
+                    snprintf(buf, sizeof(buf), "%g,%g,%g", v[0], v[1], v[2]);
+                    if (UI::MenuItem("Copy value")) UI::SetClipboardText(buf);
+                    UI::EndPopup();
+                }
+                break;
+            }
         case WKind::Struct:
             {
                 if (depth >= kMaxTreeDepth)
