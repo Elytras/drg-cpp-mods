@@ -324,6 +324,17 @@ namespace
                     fd.innerProp = ap->InnerProperty;
                     fd.elemSize  = ap->InnerProperty ? ap->InnerProperty->ElementSize : 0;
                     fd.typeName  = PrettifyPropTypeName(ap->InnerProperty);
+                    // Cache the inner enum's entries (if any) so enum array elements get a combo.
+                    if (auto* iep = FieldCast::Cast<FEnumProperty>(ap->InnerProperty))
+                    {
+                        fd.enumSize = iep->UnderlayingProperty ? iep->UnderlayingProperty->ElementSize : 1;
+                        BuildEnumEntries(iep->Enum, fd.enumNames, fd.enumValues);
+                    }
+                    else if (auto* ibp = FieldCast::Cast<FByteProperty>(ap->InnerProperty); ibp && ibp->Enum)
+                    {
+                        fd.enumSize = 1;
+                        BuildEnumEntries(ibp->Enum, fd.enumNames, fd.enumValues);
+                    }
                 }
                 else if (auto* bp = FieldCast::Cast<FBoolProperty>(f))
                 {
@@ -511,6 +522,8 @@ namespace
                     // the object/struct (stable), so capturing its absolute address is safe.
                     const bool strInner  = fd.innerProp && FieldCast::IsA<FStrProperty>(fd.innerProp);
                     const bool nameInner = fd.innerProp && FieldCast::IsA<FNameProperty>(fd.innerProp);
+                    const bool enumInner = !fd.enumNames.empty();   // populated only for enum inners
+                    const bool editInner = strInner || nameInner || enumInner;
                     const uintptr_t arrayAddr = base + fd.offset;
 
                     if (arr.IsValid() && num > 0 && fd.innerProp && depth < kMaxTreeDepth)
@@ -523,7 +536,32 @@ namespace
                             char lbl[32];
                             snprintf(lbl, sizeof(lbl), "[%d]", i);
                             UI::PushID(i);
-                            if (strInner || nameInner)
+                            if (enumInner)
+                            {
+                                uint8* slot = reinterpret_cast<uint8*>(elem);
+                                int64 cur = 0;
+                                switch (fd.enumSize)
+                                {
+                                case 2: cur = *reinterpret_cast<uint16*>(slot); break;
+                                case 4: cur = *reinterpret_cast<uint32*>(slot); break;
+                                case 8: cur = *reinterpret_cast<int64*> (slot); break;
+                                default: cur = *slot; break;
+                                }
+                                UI::PushStyleColor(ImGuiCol_Text, FieldDepthColor(depth + 1));
+                                UI::TextUnformatted(lbl);
+                                UI::PopStyleColor();
+                                UI::SameLine();
+                                int sel = -1;
+                                for (int k = 0; k < (int)fd.enumValues.size(); ++k)
+                                    if (fd.enumValues[k] == cur) { sel = k; break; }
+                                UI::SetNextItemWidth(220.f);
+                                if (UI::ComboFromList("##aenum", &sel, fd.enumNames,
+                                                      fd.enumNames.size() > 12, {}, nullptr, false)
+                                    && sel >= 0 && sel < (int)fd.enumValues.size())
+                                    EnqueueArrayElemWrite(arrayAddr, fd.prop, i,
+                                                          std::to_string(fd.enumValues[sel]));
+                            }
+                            else if (strInner || nameInner)
                             {
                                 std::string val = nameInner
                                     ? GetPropertyPtr<FName>(elem, 0)->ToString()
@@ -544,11 +582,17 @@ namespace
                         if (num > show) UI::TextDisabled("  ... %d more", num - show);
                     }
 
-                    // Append a new (empty) element — grows the array via the game thread.
-                    if ((strInner || nameInner) && depth < kMaxTreeDepth)
+                    // Append a new element — grows the array via the game thread. Strings/names
+                    // append empty; enums append their first entry's value (zeroed slot is then
+                    // a valid default the user can change via the combo).
+                    if (editInner && depth < kMaxTreeDepth)
                     {
                         if (UI::SmallButton("+ append"))
-                            EnqueueArrayElemWrite(arrayAddr, fd.prop, num, std::string{});
+                        {
+                            const std::string init = enumInner && !fd.enumValues.empty()
+                                ? std::to_string(fd.enumValues[0]) : std::string{};
+                            EnqueueArrayElemWrite(arrayAddr, fd.prop, num, init);
+                        }
                     }
                     UI::TreePop();
                 }
