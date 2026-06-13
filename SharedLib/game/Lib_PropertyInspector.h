@@ -81,6 +81,16 @@ namespace PropertyInspector
     void  WriteProperty     (UObject* obj, FProperty* prop, uintptr_t writeBase,
                              FProperty* writeProp, const std::string& valueStr,
                              const std::string& baseName, bool hadIndex, int32 elementIndex);
+
+    // Write a single element of a reflected TArray, growing the array if `index` is past
+    // its current Num. `arrayAddr` is the absolute address of the FScriptArray header
+    // {Data,Num,Max}; resolve it on the GAME THREAD (this re-reads Data live, so it is
+    // safe against the array reallocating). Growth uses the engine allocator (UERealloc,
+    // the same FMemory the array's own TArray uses) and zero-fills new slots — so it is
+    // gated on the inner property being ZeroConstructor; returns false otherwise (or on
+    // a bad index / OOM). Appends when index == Num.
+    bool  WriteArrayElement (UObject* obj, uintptr_t arrayAddr, FArrayProperty* arrayProp,
+                             int32 index, const std::string& valueStr);
     int32 ComputeParmsSize  (UFunction* Func);
     bool  WriteParam        (FProperty* Prop, const std::string& token, uint8_t* parms);
 

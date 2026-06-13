@@ -2,6 +2,7 @@
 #include "Lib_Print.h"
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <unordered_map>
 
 namespace PropertyInspector
@@ -276,6 +277,52 @@ void WriteProperty(UObject* obj, FProperty* prop, uintptr_t writeBase,
             }
             catch (...) { warn("[prop] Failed to parse value '{}'", valueStr); }
         });
+}
+
+// ---------------------------------------------------------------
+// WriteArrayElement
+// ---------------------------------------------------------------
+
+bool WriteArrayElement(UObject* obj, uintptr_t arrayAddr, FArrayProperty* arrayProp,
+                       int32 index, const std::string& valueStr)
+{
+    if (!arrayProp || !arrayProp->InnerProperty || index < 0 || !arrayAddr) return false;
+    FProperty* inner = arrayProp->InnerProperty;
+    const int32 es = inner->ElementSize;
+    if (es <= 0) return false;
+
+    // Reflected TArray runtime layout (FScriptArray). Re-read live on the game thread.
+    struct FScriptArray { void* Data; int32 Num; int32 Max; };
+    auto* a = reinterpret_cast<FScriptArray*>(arrayAddr);
+
+    const int32 need = index + 1;   // need == Num+1 when appending
+    if (need > a->Num)
+    {
+        // New slots are zero-filled, which is a valid default only for ZeroConstructor types.
+        const auto pflags = static_cast<EPropertyFlags>(inner->PropertyFlags);
+        if (!(pflags & EPropertyFlags::ZeroConstructor))
+        {
+            warn("[prop] cannot grow array of non-zero-constructible '{}'", GetTypeName(inner));
+            return false;
+        }
+        if (need > a->Max)
+        {
+            // Same FMemory the array's own TArray uses (UERealloc -> GMalloc), so the engine
+            // can later Realloc/Free this buffer with no cross-allocator mismatch.
+            const uint32 align = es >= 16 ? 16u : 8u;
+            void* nd = UC::Internal::UERealloc(a->Data, static_cast<uint64>(need) * es, align);
+            if (!nd) { warn("[prop] array grow failed (OOM)"); return false; }
+            a->Data = nd;
+            a->Max  = need;
+        }
+        std::memset(static_cast<uint8*>(a->Data) + static_cast<uint64>(a->Num) * es, 0,
+                    static_cast<uint64>(need - a->Num) * es);
+        a->Num = need;
+    }
+
+    const uintptr_t elem = reinterpret_cast<uintptr_t>(a->Data) + static_cast<uint64>(index) * es;
+    WriteProperty(obj, inner, elem, inner, valueStr, arrayProp->Name.ToString(), true, index);
+    return true;
 }
 
 // ---------------------------------------------------------------
