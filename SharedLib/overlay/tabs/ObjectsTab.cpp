@@ -523,7 +523,13 @@ namespace
                     const bool strInner  = fd.innerProp && FieldCast::IsA<FStrProperty>(fd.innerProp);
                     const bool nameInner = fd.innerProp && FieldCast::IsA<FNameProperty>(fd.innerProp);
                     const bool enumInner = !fd.enumNames.empty();   // populated only for enum inners
-                    const bool editInner = strInner || nameInner || enumInner;
+                    const bool numInner  = fd.innerProp &&
+                        (FieldCast::IsA<FIntProperty>(fd.innerProp)
+                      || FieldCast::IsA<FFloatProperty>(fd.innerProp)
+                      || FieldCast::IsA<FDoubleProperty>(fd.innerProp));
+                    // editInner = elements we can grow/append; numeric elements still edit in place
+                    // (responsive) via DrawFieldNode, but can be appended through the safe path.
+                    const bool editInner = strInner || nameInner || enumInner || numInner;
                     const uintptr_t arrayAddr = base + fd.offset;
 
                     if (arr.IsValid() && num > 0 && fd.innerProp && depth < kMaxTreeDepth)
@@ -589,8 +595,10 @@ namespace
                     {
                         if (UI::SmallButton("+ append"))
                         {
-                            const std::string init = enumInner && !fd.enumValues.empty()
-                                ? std::to_string(fd.enumValues[0]) : std::string{};
+                            const std::string init =
+                                  (enumInner && !fd.enumValues.empty()) ? std::to_string(fd.enumValues[0])
+                                : numInner                              ? std::string("0")
+                                : std::string{};
                             EnqueueArrayElemWrite(arrayAddr, fd.prop, num, init);
                         }
                     }
