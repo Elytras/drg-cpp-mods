@@ -943,6 +943,36 @@ namespace
             return;
         }
 
+        // ── Object: read-only label + jump button (e.g. array-of-objects elements) ──
+        if (FieldCast::IsA<FObjectProperty>(field) || FieldCast::IsA<FClassProperty>(field))
+        {
+            auto* ptr = *GetPropertyPtr<UObject*>(base, static_cast<FProperty*>(field)->Offset);
+            const bool valid = ptr && IsValidRaw(ptr);
+            UI::PushStyleColor(ImGuiCol_Text, col);
+            if (valid)
+                UI::Text("%s = %s'%s'", label,
+                    ptr->Class ? ptr->Class->GetName().c_str() : "?", ptr->GetName().c_str());
+            else
+                UI::Text("%s = nullptr", label);
+            UI::PopStyleColor();
+            if (UI::BeginPopupContextItem("##fctx"))
+            {
+                if (valid)
+                {
+                    if (UI::MenuItem("Jump to object")) s_treeJumpAddr = (uint64_t)ptr;
+                    char addr[20]; snprintf(addr, sizeof(addr), "0x%llX", (uint64_t)ptr);
+                    if (UI::MenuItem("Copy address")) UI::SetClipboardText(addr);
+                }
+                UI::EndPopup();
+            }
+            if (valid)
+            {
+                UI::SameLine();
+                if (UI::SmallButton("->##objelem")) s_treeJumpAddr = (uint64_t)ptr;
+            }
+            return;
+        }
+
         // ── Generic leaf: read-only text + copy context menu ─────────────────
         {
             const std::string valStr = GetFieldValueAsString(base, field);
