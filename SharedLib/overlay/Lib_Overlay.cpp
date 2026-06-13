@@ -395,12 +395,35 @@ namespace Overlay
         // While the overlay is open, reclaim input focus whenever the GAME window
         // regains the foreground (e.g. after alt-tabbing back) — otherwise the game
         // keeps eating input until the user clicks the overlay.
+        //
+        // The reclaim is DEFERRED ~0.5s after the game gains foreground rather than fired
+        // instantly: stealing foreground the moment the game wins it (a) re-backgrounds the
+        // game just as UE is lifting its background-FPS throttle, and (b) makes AttachThreadInput
+        // attach to the game's input thread while that thread is busy with the focus-gain burst —
+        // together that produced a multi-second stall on alt-tab back. Waiting lets the game
+        // settle first; if the game loses foreground again (or the user clicks the overlay)
+        // during the wait, the pending reclaim is cancelled.
         void ReclaimFocusIfGameForeground()
         {
-            static HWND s_lastFg = nullptr;
-            HWND fg = GetForegroundWindow();
-            if (fg == s_gameHwnd && s_lastFg != s_gameHwnd)
-                ForceForeground(s_hwnd);
+            constexpr ULONGLONG kReclaimDelayMs = 500;
+            static HWND       s_lastFg      = nullptr;
+            static ULONGLONG  s_gameFgSince = 0;   // tick the game became foreground; 0 = none pending
+
+            const HWND fg = GetForegroundWindow();
+            if (fg == s_gameHwnd)
+            {
+                if (s_lastFg != s_gameHwnd)
+                    s_gameFgSince = GetTickCount64();           // game just gained fg → start the timer
+                else if (s_gameFgSince && GetTickCount64() - s_gameFgSince >= kReclaimDelayMs)
+                {
+                    ForceForeground(s_hwnd);                    // settled long enough → reclaim now
+                    s_gameFgSince = 0;
+                }
+            }
+            else
+            {
+                s_gameFgSince = 0;   // game no longer foreground → cancel any pending reclaim
+            }
             s_lastFg = fg;
         }
 
