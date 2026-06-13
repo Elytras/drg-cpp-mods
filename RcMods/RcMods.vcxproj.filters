@@ -84,6 +84,9 @@
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_PropertyInspector.cpp">
       <Filter>External</Filter>
     </ClCompile>
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_ObjectView.cpp">
+      <Filter>External</Filter>
+    </ClCompile>
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_VarSystem.cpp">
       <Filter>External</Filter>
     </ClCompile>

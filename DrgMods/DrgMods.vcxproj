@@ -206,6 +206,7 @@
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_Print.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_PropertyAccess.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_PropertyInspector.cpp" />
+    <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_ObjectView.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_Scan.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\game\Lib_VarSystem.cpp" />
     <ClCompile Include="$(SolutionDir)SharedLib\game\ModManager.cpp" />
@@ -257,6 +258,8 @@
     <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_Print.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_PropertyAccess.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_PropertyInspector.h" />
+    <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_ObjectView.h" />
+    <ClInclude Include="$(SolutionDir)SharedLib\overlay\ObjectView.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_Scan.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\game\Lib_VarSystem.h" />
     <ClInclude Include="$(SolutionDir)SharedLib\game\Saveable.h" />
