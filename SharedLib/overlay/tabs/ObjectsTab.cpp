@@ -774,6 +774,38 @@ namespace
             return;
         }
 
+        // ── Numeric: inline editable drag (synchronous poke, like the bool above) ──
+        // Name/string/enum array elements stay read-only: their writes must defer to the
+        // game thread, and the array's heap buffer can move before the task runs (TOCTOU).
+        // Numeric writes land this frame, while `base` is the same pointer we just read.
+        if (FieldCast::IsA<FIntProperty>(field))
+        {
+            auto* v = GetPropertyPtr<int32>(base, static_cast<FProperty*>(field)->Offset);
+            UI::PushStyleColor(ImGuiCol_Text, col);
+            UI::SetNextItemWidth(130.f);
+            UI::DragInt(label, v);
+            UI::PopStyleColor();
+            return;
+        }
+        if (FieldCast::IsA<FFloatProperty>(field))
+        {
+            auto* v = GetPropertyPtr<float>(base, static_cast<FProperty*>(field)->Offset);
+            UI::PushStyleColor(ImGuiCol_Text, col);
+            UI::SetNextItemWidth(130.f);
+            UI::DragFloat(label, v, 0.1f);
+            UI::PopStyleColor();
+            return;
+        }
+        if (FieldCast::IsA<FDoubleProperty>(field))
+        {
+            auto* v = GetPropertyPtr<double>(base, static_cast<FProperty*>(field)->Offset);
+            UI::PushStyleColor(ImGuiCol_Text, col);
+            UI::SetNextItemWidth(130.f);
+            UI::DragScalar(label, ImGuiDataType_Double, v, 0.1f);
+            UI::PopStyleColor();
+            return;
+        }
+
         // ── Map / Set: read-only text (container editing not yet supported) ──
         if (FieldCast::IsA<FMapProperty>(field) || FieldCast::IsA<FSetProperty>(field))
         {
