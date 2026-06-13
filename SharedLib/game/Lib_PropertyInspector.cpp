@@ -214,8 +214,53 @@ void WriteProperty(UObject* obj, FProperty* prop, uintptr_t writeBase,
                     *GetPropertyPtr<int64>(writeBase, p->Offset) = std::stoll(valueStr);
                 else if constexpr (std::is_same_v<T, FByteProperty>)
                     *GetPropertyPtr<uint8>(writeBase, p->Offset) = static_cast<uint8>(std::stoi(valueStr));
+                else if constexpr (std::is_same_v<T, FInt8Property>)
+                    *GetPropertyPtr<int8>(writeBase, p->Offset) = static_cast<int8>(std::stoi(valueStr));
+                else if constexpr (std::is_same_v<T, FInt16Property>)
+                    *GetPropertyPtr<int16>(writeBase, p->Offset) = static_cast<int16>(std::stoi(valueStr));
+                else if constexpr (std::is_same_v<T, FUInt16Property>)
+                    *GetPropertyPtr<uint16>(writeBase, p->Offset) = static_cast<uint16>(std::stoul(valueStr));
+                else if constexpr (std::is_same_v<T, FUInt32Property>)
+                    *GetPropertyPtr<uint32>(writeBase, p->Offset) = static_cast<uint32>(std::stoul(valueStr));
+                else if constexpr (std::is_same_v<T, FUInt64Property>)
+                    *GetPropertyPtr<uint64>(writeBase, p->Offset) = std::stoull(valueStr);
                 else if constexpr (std::is_same_v<T, FStrProperty>)
+                    // Live object: assign (frees old buffer + copies) — never placement-new.
                     *GetPropertyPtr<UC::FString>(writeBase, p->Offset) = UC::FString(StringLib::ToWide(valueStr).c_str());
+                else if constexpr (std::is_same_v<T, FNameProperty>)
+                    // FName is POD (index pair) — plain assignment is correct for a live object.
+                    *GetPropertyPtr<FName>(writeBase, p->Offset) = FName(StringLib::ToWide(valueStr).c_str());
+                else if constexpr (std::is_same_v<T, FEnumProperty>)
+                {
+                    // Numeric write into the enum's underlying integer slot.
+                    const int64 val = std::stoll(valueStr);
+                    uint8* slot = GetPropertyPtr<uint8>(writeBase, p->Offset);
+                    switch (p->UnderlayingProperty ? p->UnderlayingProperty->ElementSize : 1)
+                    {
+                    case 1: *reinterpret_cast<uint8*> (slot) = static_cast<uint8> (val); break;
+                    case 2: *reinterpret_cast<uint16*>(slot) = static_cast<uint16>(val); break;
+                    case 4: *reinterpret_cast<uint32*>(slot) = static_cast<uint32>(val); break;
+                    case 8: *reinterpret_cast<uint64*>(slot) = static_cast<uint64>(val); break;
+                    }
+                }
+                else if constexpr (std::is_same_v<T, FStructProperty>)
+                {
+                    // POD math structs — direct assignment into the live layout.
+                    const std::string sname = p->Struct ? p->Struct->GetName() : "";
+                    if (sname.rfind("Vector", 0) == 0)
+                    {
+                        float x = 0, y = 0, z = 0;
+                        sscanf_s(valueStr.c_str(), "%f,%f,%f", &x, &y, &z);
+                        *GetPropertyPtr<SDK::FVector>(writeBase, p->Offset) = { x, y, z };
+                    }
+                    else if (sname == "Rotator")
+                    {
+                        float pitch = 0, yaw = 0, roll = 0;
+                        sscanf_s(valueStr.c_str(), "%f,%f,%f", &pitch, &yaw, &roll);
+                        *GetPropertyPtr<SDK::FRotator>(writeBase, p->Offset) = { pitch, yaw, roll };
+                    }
+                    else warn("[prop] struct '{}' not editable", sname);
+                }
                 else warn("[prop] set not supported for this property type");
                 info("[prop] Set '{}.{}{}' = {}", obj->GetName(), baseName,
                     hadIndex ? "[" + std::to_string(elementIndex) + "]" : "", valueStr);
