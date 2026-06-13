@@ -1036,7 +1036,7 @@ namespace
         UI::PopID();
     }
 
-    static void DrawObjectTree(UObject* obj, const char* fieldFilter)
+    static void DrawObjectTree(UObject* obj, const char* fieldFilter, bool hideEmptyClasses)
     {
         if (!obj || !IsValidRaw(obj) || !obj->Class || !IsValidRaw(obj->Class)) return;
 
@@ -1072,6 +1072,13 @@ namespace
         {
             UStruct* level = chain[lvl];
             if (!level || !IsValidRaw(level)) continue;
+            // Skip pure-scaffolding ancestors that contribute neither reflected properties
+            // nor functions (functions are listed separately by DrawFunctionSection, which
+            // also filters to function-bearing levels, so such a class vanishes from both).
+            if (hideEmptyClasses
+                && GetOrBuildStructDesc(level).empty()
+                && GetOrBuildFuncList(level).empty())
+                continue;
             const ImGuiTreeNodeFlags flags = (lvl == 0)
                 ? ImGuiTreeNodeFlags_DefaultOpen : ImGuiTreeNodeFlags_None;
             UI::PushID((int)lvl);
@@ -1127,6 +1134,9 @@ namespace
         bool m_showCDOs      = false;  // show Class Default Objects
         bool m_showBP        = true;   // show instances of Blueprint-compiled classes
         bool m_showNative    = true;   // show instances of native C++ classes
+
+        // Property tree: hide ancestor classes with no reflected properties and no functions
+        bool m_hideEmptyClasses = true;
 
         // Selection / jump
         uint64_t m_selectedAddr        = 0;
@@ -1604,7 +1614,10 @@ namespace
                         UI::SetNextItemWidth(-1.f);
                         UI::InputTextWithHint("##ffilter", "filter fields...",
                                              m_fieldFilter, sizeof(m_fieldFilter));
-                        DrawObjectTree(obj, m_fieldFilter);
+                        UI::Checkbox("Hide empty classes", &m_hideEmptyClasses);
+                        UI::SameLine();
+                        UI::TextDisabled("(no properties or functions)");
+                        DrawObjectTree(obj, m_fieldFilter, m_hideEmptyClasses);
                         if (s_treeJumpAddr)
                         {
                             JumpTo(s_treeJumpAddr);
