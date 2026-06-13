@@ -176,6 +176,23 @@ namespace
         });
     }
 
+    // Queue a realloc-safe array-element write (grows/appends if needed). `arrayAddr` is the
+    // absolute FScriptArray header location; WriteArrayElement re-reads its Data live on the
+    // game thread, so the array reallocating can't strand us. `arrayProp` is the FArrayProperty.
+    static void EnqueueArrayElemWrite(uintptr_t arrayAddr, FProperty* arrayProp,
+                                      int32 index, std::string value)
+    {
+        UObject*    root = s_rootObj;
+        const int32 idx  = s_rootIdx;
+        auto*       ap   = FieldCast::Cast<FArrayProperty>(arrayProp);
+        if (!ap) return;
+        EnqueueOnce([root, idx, arrayAddr, ap, index, value]()
+        {
+            if (!IsValidRaw(root) || root->Index != idx) return;
+            PropertyInspector::WriteArrayElement(root, arrayAddr, ap, index, value);
+        });
+    }
+
     struct FieldDesc {
         FField*        field;
         FProperty*     prop;
@@ -489,20 +506,49 @@ namespace
                 UI::PopStyleColor();
                 if (open)
                 {
+                    // Editable string/name elements use the realloc-safe game-thread write
+                    // (re-resolves the array on the game thread). The array header lives in
+                    // the object/struct (stable), so capturing its absolute address is safe.
+                    const bool strInner  = fd.innerProp && FieldCast::IsA<FStrProperty>(fd.innerProp);
+                    const bool nameInner = fd.innerProp && FieldCast::IsA<FNameProperty>(fd.innerProp);
+                    const uintptr_t arrayAddr = base + fd.offset;
+
                     if (arr.IsValid() && num > 0 && fd.innerProp && depth < kMaxTreeDepth)
                     {
                         const int32     show = std::min(num, kMaxArrShow);
                         const uintptr_t db   = reinterpret_cast<uintptr_t>(arr.GetDataPtr());
                         for (int32 i = 0; i < show; ++i)
                         {
+                            const uintptr_t elem = db + (uintptr_t)i * fd.elemSize;
                             char lbl[32];
                             snprintf(lbl, sizeof(lbl), "[%d]", i);
                             UI::PushID(i);
-                            DrawFieldNode(db + (uintptr_t)i * fd.elemSize,
-                                fd.innerProp, lbl, depth + 1);
+                            if (strInner || nameInner)
+                            {
+                                std::string val = nameInner
+                                    ? GetPropertyPtr<FName>(elem, 0)->ToString()
+                                    : (GetPropertyPtr<UC::FString>(elem, 0)->IsValid()
+                                        ? GetPropertyPtr<UC::FString>(elem, 0)->ToString() : std::string{});
+                                UI::PushStyleColor(ImGuiCol_Text, FieldDepthColor(depth + 1));
+                                UI::TextUnformatted(lbl);
+                                UI::PopStyleColor();
+                                UI::SameLine();
+                                std::string committed;
+                                if (EditTextField("##aelem", elem, val, committed))
+                                    EnqueueArrayElemWrite(arrayAddr, fd.prop, i, committed);
+                            }
+                            else
+                                DrawFieldNode(elem, fd.innerProp, lbl, depth + 1);
                             UI::PopID();
                         }
                         if (num > show) UI::TextDisabled("  ... %d more", num - show);
+                    }
+
+                    // Append a new (empty) element — grows the array via the game thread.
+                    if ((strInner || nameInner) && depth < kMaxTreeDepth)
+                    {
+                        if (UI::SmallButton("+ append"))
+                            EnqueueArrayElemWrite(arrayAddr, fd.prop, num, std::string{});
                     }
                     UI::TreePop();
                 }
