@@ -190,6 +190,8 @@ namespace OverlayConsole
         // frametime when you aren't looking at the tab.
         GameThreadSnapshot<std::vector<ActorList::Row>>  g_actors;
         GameThreadSnapshot<std::vector<ObjectList::Row>> g_objects;
+        // Scanned-function names for `call` completion; published by each game's scanfuncs.
+        GameThreadSnapshot<std::vector<std::string>>     g_callFuncs;
 
         // ── Console input + completion state (overlay thread only) ───────────────
         // Shared infra: read/written by the ImGui input callback, the completion
@@ -336,6 +338,8 @@ namespace OverlayConsole
                 for (const auto& b : KeyBindings::SnapshotCli()) v.push_back(b.chord);
                 return v;
             }
+            if (cmd == "call")
+                return g_callFuncs.read();   // published by scanfuncs (run it first to populate)
             return {};
         }
 
@@ -636,6 +640,11 @@ namespace OverlayConsole
             g_sink->set_pattern("[%H:%M:%S.%e] [%n] [%l] %v");
         }
         return g_sink;
+    }
+
+    void PublishCallFuncs(std::vector<std::string> names)
+    {
+        g_callFuncs.store(std::move(names));   // ArgPoolFor("call") reads this on the UI thread
     }
 
     void Init(CommandHandler* handler)

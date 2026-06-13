@@ -776,6 +776,18 @@ namespace Scan
         }
         info("[scan] Scan complete — {} new functions, {} total.",
             inserted, State::ScannedFunctions.size());
+
+        // Publish names for the overlay console's `call` arg-completion (game thread → UI).
+        // Both base names and explicit variants are valid `call` targets, so offer both.
+        {
+            std::vector<std::string> names;
+            names.reserve(State::ScannedFunctionVariantsByName.size() + State::ScannedFunctions.size());
+            for (const auto& [base, variants] : State::ScannedFunctionVariantsByName) names.push_back(base);
+            for (const auto& [explicitName, sf] : State::ScannedFunctions)             names.push_back(explicitName);
+            std::sort(names.begin(), names.end());
+            names.erase(std::unique(names.begin(), names.end()), names.end());
+            OverlayConsole::PublishCallFuncs(std::move(names));
+        }
     }
 }
 

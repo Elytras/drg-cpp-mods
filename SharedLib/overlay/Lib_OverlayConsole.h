@@ -7,6 +7,8 @@
 // CommandHandler::Dispatch — the same entry point the CLI drives over IPC.
 
 #include <spdlog/spdlog.h>   // spdlog::sink_ptr
+#include <string>
+#include <vector>
 
 class CommandHandler;
 
@@ -19,4 +21,9 @@ namespace OverlayConsole
     // Register the Console + Commands panels on the overlay, bound to `handler`.
     // Call once after the overlay exists and the handler is populated.
     void Init(CommandHandler* handler);
+
+    // Publish scanned-function names for the console's `call` arg-completion. Each game
+    // calls this from its `scanfuncs` command (game thread); the console reads the snapshot
+    // when completing a `call <fn>` argument. Thread-safe.
+    void PublishCallFuncs(std::vector<std::string> names);
 }

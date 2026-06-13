@@ -4,6 +4,7 @@
 #include "NetLogConfig.h"
 #include "SharedCommands.h"
 #include "Lib_Overlay.h"   // standalone DX11 overlay (own window/thread)
+#include "Lib_OverlayConsole.h"   // OverlayConsole::PublishCallFuncs (call autocomplete)
 #include <cmath>
 #include <random>
 #include <array>
@@ -368,6 +369,16 @@ namespace RcCmd
 
         for (auto& [key, sf] : State::ScannedFunctions)
             WriteToSr(sf);
+
+        // Publish names for the overlay console's `call` arg-completion (game thread → UI).
+        {
+            std::vector<std::string> names;
+            names.reserve(State::ScannedFunctions.size());
+            for (const auto& [key, sf] : State::ScannedFunctions) names.push_back(key);
+            std::sort(names.begin(), names.end());
+            names.erase(std::unique(names.begin(), names.end()), names.end());
+            OverlayConsole::PublishCallFuncs(std::move(names));
+        }
 
         info("[scanfuncs] Done — {} server RPCs (populates `call` autocomplete)", sr.count);
 
