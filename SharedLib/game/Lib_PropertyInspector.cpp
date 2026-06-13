@@ -230,6 +230,15 @@ void WriteProperty(UObject* obj, FProperty* prop, uintptr_t writeBase,
                 else if constexpr (std::is_same_v<T, FNameProperty>)
                     // FName is POD (index pair) — plain assignment is correct for a live object.
                     *GetPropertyPtr<FName>(writeBase, p->Offset) = FName(StringLib::ToWide(valueStr).c_str());
+                else if constexpr (std::is_same_v<T, FTextProperty>)
+                    // FText is a refcounted handle, not a string — build a fresh one through the
+                    // engine's Conv_StringToText UFunction (runs via ProcessEvent, so this must be
+                    // on the game thread) and overwrite the slot. The previous FTextData's
+                    // shared-ref leaks by one (the SDK FText has no operator= to release it), which
+                    // is acceptable for a manual editor and far safer than mutating the shared,
+                    // immutable TextSource in place.
+                    *GetPropertyPtr<FText>(writeBase, p->Offset) =
+                        UKismetTextLibrary::Conv_StringToText(ToFString(valueStr));
                 else if constexpr (std::is_same_v<T, FEnumProperty>)
                 {
                     // Numeric write into the enum's underlying integer slot.
