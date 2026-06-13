@@ -118,7 +118,7 @@ namespace
     //   · FField* chain walk      · FName::ToString() heap alloc
     //   · FieldCast::Cast() type dispatch    · GetName() on inner types
 
-    enum class WKind : uint8 { Generic, Bool, Int, Float, Double, Name, Object, Struct, Array, MapOrSet };
+    enum class WKind : uint8 { Generic, Bool, Int, Float, Double, Name, Str, Object, Struct, Array, MapOrSet };
 
     // Set by Object-field "→" buttons / class-outer buttons; consumed by the tab each frame.
     static uint64_t s_treeJumpAddr      = 0;
@@ -286,6 +286,8 @@ namespace
                     fd.kind = WKind::Double;
                 else if (FieldCast::IsA<FNameProperty>(f))
                     fd.kind = WKind::Name;
+                else if (FieldCast::IsA<FStrProperty>(f))
+                    fd.kind = WKind::Str;
                 else if (FieldCast::IsA<FObjectProperty>(f) || FieldCast::IsA<FClassProperty>(f))
                     fd.kind = WKind::Object;
                 else if (FieldCast::IsA<FMapProperty>(f) || FieldCast::IsA<FSetProperty>(f))
@@ -488,6 +490,24 @@ namespace
                 UI::SameLine();
                 std::string committed;
                 if (EditTextField("##nameedit", base + fd.offset, val, committed))
+                    EnqueuePropWrite(base, fd.prop, fd.name, committed);
+                if (UI::BeginPopupContextItem("##fctx"))
+                {
+                    if (UI::MenuItem("Copy value")) UI::SetClipboardText(val.c_str());
+                    UI::EndPopup();
+                }
+                break;
+            }
+        case WKind::Str:
+            {
+                const auto& str = *GetPropertyPtr<UC::FString>(base, fd.offset);
+                const std::string val = str.IsValid() ? str.ToString() : std::string{};
+                UI::PushStyleColor(ImGuiCol_Text, col);
+                UI::TextUnformatted(fd.name.c_str());
+                UI::PopStyleColor();
+                UI::SameLine();
+                std::string committed;
+                if (EditTextField("##stredit", base + fd.offset, val, committed))
                     EnqueuePropWrite(base, fd.prop, fd.name, committed);
                 if (UI::BeginPopupContextItem("##fctx"))
                 {
