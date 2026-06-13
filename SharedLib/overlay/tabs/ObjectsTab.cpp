@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -214,7 +215,7 @@ namespace
         std::string  name;
         std::string  suffix;
         bool         hasInputParams = false;
-        bool         callable       = false;
+        bool         invokable      = false;   // BP/Event/Pure/Exec — callable regardless of params
         int32        parmsSize      = 0;
         struct Param { std::string name, type; const char* dir; };
         std::vector<Param> params;
@@ -423,11 +424,11 @@ namespace
                     fd.params.push_back({p->Name.ToString(), GetTypeName(p),
                         isReturn ? "[ret]" : isOut ? "[out]" : " [in]"});
                 }
-                fd.callable = !fd.hasInputParams && (
+                fd.invokable =
                     (fflags & EFunctionFlags::BlueprintCallable) ||
                     (fflags & EFunctionFlags::BlueprintEvent)    ||
                     (fflags & EFunctionFlags::BlueprintPure)     ||
-                    (fflags & EFunctionFlags::Exec));
+                    (fflags & EFunctionFlags::Exec);
                 entry.funcs.push_back(std::move(fd));
             }
         }
@@ -959,6 +960,81 @@ namespace
     // ── Function tree ────────────────────────────────────────────────────────
     // Renders one function using pre-cached FuncDesc — no per-frame allocations.
 
+    // ── Function calling ─────────────────────────────────────────────────────────
+    // Per-function input-arg text buffers (UI thread only; one string per input param).
+    static std::unordered_map<UFunction*, std::vector<std::string>> s_callArgs;
+    // Last call result per function (return + out params, formatted). Written on the game
+    // thread by InvokeFunctionGameThread, read on the UI thread by DrawFunctionNode.
+    static std::mutex s_callResMx;
+    static std::unordered_map<UFunction*, std::string> s_callResults;
+
+    static bool ParamIsInput(const char* dir) { return std::string_view(dir).find("in") != std::string_view::npos; }
+
+    // Marshal `inArgs` into a parm buffer, ProcessEvent on the GAME THREAD, then read the
+    // return + out params back as strings and stash them in s_callResults. Mirrors the CLI
+    // `call` command's marshaling (ComputeParmsSize/WriteParam, Native-flag toggle, FString/
+    // FName destruct) and additionally captures the output the command path discards.
+    static void InvokeFunctionGameThread(UObject* obj, int32 objIdx, UFunction* func,
+                                         std::vector<std::string> inArgs)
+    {
+        auto setResult = [&](std::string s)
+        {
+            std::lock_guard<std::mutex> lk(s_callResMx);
+            s_callResults[func] = std::move(s);
+        };
+        if (!IsValidRaw(obj) || obj->Index != objIdx || !IsValidRaw(func))
+        { setResult("(object/function no longer valid)"); return; }
+
+        std::vector<FProperty*> inParms;    // consume args, in declaration order
+        std::vector<FProperty*> outParms;   // out + return — read back after the call
+        FProperty* retProp = nullptr;
+        for (FField* f : FFieldRange(func->ChildProperties))
+        {
+            auto* p = FieldCast::Cast<FProperty>(f);
+            if (!p) continue;
+            const auto pf = static_cast<EPropertyFlags>(p->PropertyFlags);
+            if (!(pf & EPropertyFlags::Parm)) continue;
+            if (pf & EPropertyFlags::ReturnParm) { retProp = p; outParms.push_back(p); }
+            else if (pf & EPropertyFlags::OutParm) outParms.push_back(p);
+            else inParms.push_back(p);
+        }
+
+        const int32 parmsSize = PropertyInspector::ComputeParmsSize(func);
+        std::vector<uint8> buf(parmsSize > 0 ? (size_t)parmsSize : 1, 0);
+        for (size_t i = 0; i < inParms.size() && i < inArgs.size(); ++i)
+            if (!inArgs[i].empty())
+                PropertyInspector::WriteParam(inParms[i], inArgs[i], buf.data());
+
+        const uint32 savedFlags = func->FunctionFlags;
+        if (static_cast<EFunctionFlags>(func->FunctionFlags) & EFunctionFlags::Native)
+            func->FunctionFlags |= 0x400;
+        obj->ProcessEvent(func, parmsSize > 0 ? buf.data() : nullptr);
+        func->FunctionFlags = savedFlags;
+
+        const uintptr_t bb = reinterpret_cast<uintptr_t>(buf.data());
+        std::string result;
+        for (FProperty* p : outParms)   // read BEFORE destructing any strings below
+        {
+            if (!result.empty()) result += "   ";
+            result += (p == retProp ? std::string("return") : p->Name.ToString())
+                    + " = " + GetFieldValueAsString(bb, p);
+        }
+        if (outParms.empty()) result = "(called — no return/out value)";
+
+        auto destruct = [&](FProperty* p)
+        {
+            FieldCast::Visit(p, [&]<typename T>(T* pp)
+            {
+                if      constexpr (std::is_same_v<T, FStrProperty>)  GetPropertyPtr<FString>(bb, pp->Offset)->~FString();
+                else if constexpr (std::is_same_v<T, FNameProperty>) GetPropertyPtr<FName>(bb, pp->Offset)->~FName();
+            });
+        };
+        for (FProperty* p : inParms)  destruct(p);
+        for (FProperty* p : outParms) destruct(p);
+
+        setResult(std::move(result));
+    }
+
     static void DrawFunctionNode(UObject* obj, const FuncDesc& fd)
     {
         UI::PushID(fd.func);
@@ -968,31 +1044,70 @@ namespace
         {
             if (fd.params.empty())
                 UI::TextDisabled("  (no parameters)");
-            else
-                for (const auto& p : fd.params)
-                    UI::TextDisabled("  %s %s : %s", p.dir, p.name.c_str(), p.type.c_str());
 
-            if (fd.callable)
+            // Input params get an editable field (consumed as call args, in order); out/return
+            // params are shown read-only — their values appear in the result line after a call.
+            auto& argBuf = s_callArgs[fd.func];
+            size_t inIdx = 0;
+            for (const auto& p : fd.params)
+            {
+                if (ParamIsInput(p.dir))
+                {
+                    if (argBuf.size() <= inIdx) argBuf.resize(inIdx + 1);
+                    UI::Text("  %s %s :", p.dir, p.name.c_str());
+                    UI::SameLine();
+                    UI::PushID((int)inIdx);
+                    UI::SetNextItemWidth(180.f);
+                    UI::InputTextString("##arg", argBuf[inIdx], 0, p.type.c_str());
+                    UI::PopID();
+                    ++inIdx;
+                }
+                else
+                    UI::TextDisabled("  %s %s : %s", p.dir, p.name.c_str(), p.type.c_str());
+            }
+
+            if (fd.invokable)
             {
                 if (UI::SmallButton("Call"))
                 {
-                    UObject*    captObj   = obj;
-                    UFunction*  captFunc  = fd.func;
-                    const int32 parmsSize = fd.parmsSize;
-                    EnqueueOnce([captObj, captFunc, parmsSize]()
+                    UObject*    captObj  = obj;
+                    const int32 captIdx  = IsValidRaw(obj) ? obj->Index : -1;
+                    UFunction*  captFunc = fd.func;
+                    std::vector<std::string> args(argBuf.begin(), argBuf.end());
+                    EnqueueOnce([captObj, captIdx, captFunc, args]()
                     {
-                        if (!IsValidRaw(captObj)) return;
-                        std::vector<uint8> parms(parmsSize > 0 ? (size_t)parmsSize : 1, 0);
-                        captObj->ProcessEvent(captFunc, parms.data());
+                        InvokeFunctionGameThread(captObj, captIdx, captFunc, args);
                     });
                 }
                 UI::SameLine();
                 UI::TextDisabled("(dispatched to game thread)");
             }
-            else if (fd.hasInputParams)
-                UI::TextDisabled("  [input params — direct call not yet supported]");
             else
                 UI::TextDisabled("  [not BlueprintCallable / Exec]");
+
+            // Last call result (return + out params), captured on the game thread.
+            std::string res;
+            {
+                std::lock_guard<std::mutex> lk(s_callResMx);
+                auto it = s_callResults.find(fd.func);
+                if (it != s_callResults.end()) res = it->second;
+            }
+            if (!res.empty())
+            {
+                UI::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.90f, 0.55f, 1.f));
+                UI::TextWrapped("\xE2\x86\x92 %s", res.c_str());   // "→ ..."
+                UI::PopStyleColor();
+                if (UI::BeginPopupContextItem("##callres"))
+                {
+                    if (UI::MenuItem("Copy result")) UI::SetClipboardText(res.c_str());
+                    if (UI::MenuItem("Clear result"))
+                    {
+                        std::lock_guard<std::mutex> lk(s_callResMx);
+                        s_callResults.erase(fd.func);
+                    }
+                    UI::EndPopup();
+                }
+            }
 
             UI::TreePop();
         }
