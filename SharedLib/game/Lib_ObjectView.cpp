@@ -53,6 +53,29 @@ namespace ObjView
 
         std::string PrettyType(FProperty* p) { return p ? GetTypeName(p) : "?"; }
 
+        // Map a property to the EditKind the shared widget builder understands (type only — no
+        // value read). Used for function-arg widgets; object/non-vector-struct fall to ReadOnly
+        // (the arg builder renders those as a text token WriteParam parses, incl. object-by-name).
+        EditKind ClassifyParamEdit(FProperty* p, std::vector<std::string>& enumNames,
+                                   std::vector<int64>& enumValues, int32& enumSize)
+        {
+            if (FieldCast::IsA<FBoolProperty>(p))   return EditKind::Bool;
+            if (FieldCast::IsA<FIntProperty>(p))    return EditKind::Int;
+            if (FieldCast::IsA<FFloatProperty>(p))  return EditKind::Float;
+            if (FieldCast::IsA<FDoubleProperty>(p)) return EditKind::Double;
+            if (FieldCast::IsA<FNameProperty>(p))   return EditKind::Name;
+            if (FieldCast::IsA<FStrProperty>(p))    return EditKind::Str;
+            if (FieldCast::IsA<FTextProperty>(p))   return EditKind::Text;
+            if (auto* ep = FieldCast::Cast<FEnumProperty>(p))
+            { enumSize = ep->UnderlayingProperty ? ep->UnderlayingProperty->ElementSize : 1; BuildEnumEntries(ep->Enum, enumNames, enumValues); return EditKind::Enum; }
+            if (auto* bp = FieldCast::Cast<FByteProperty>(p); bp && bp->Enum)
+            { enumSize = 1; BuildEnumEntries(bp->Enum, enumNames, enumValues); return EditKind::Enum; }
+            if (auto* sp = FieldCast::Cast<FStructProperty>(p))
+                return (sp->Struct && IsVector3Struct(sp->Struct->GetName())) ? EditKind::VectorLike : EditKind::ReadOnly;
+            if (FieldCast::IsA<FObjectProperty>(p) || FieldCast::IsA<FClassProperty>(p)) return EditKind::Object;
+            return EditKind::ReadOnly;
+        }
+
         // ── one property → PropNode ──────────────────────────────────────────────
         // `base` is the absolute address of the container holding `prop`; `pathToBase` are the
         // hops that reach `base` from the root; `parentKey` seeds this node's stable key.
@@ -264,7 +287,12 @@ namespace ObjView
                 int dir = 0;                       // plain input or const-ref input
                 if (isRet)      dir = 2;
                 else if (out)   dir = byRef ? 3 : 1;   // in-out vs pure-out
-                fv.params.push_back({ p->Name.ToString(), GetTypeName(p), dir });
+                ParamView pv;
+                pv.name = p->Name.ToString();
+                pv.type = GetTypeName(p);
+                pv.dir  = dir;
+                pv.edit = ClassifyParamEdit(p, pv.enumNames, pv.enumValues, pv.enumSize);
+                fv.params.push_back(std::move(pv));
             }
             fv.invokable =
                 (fl & EFunctionFlags::BlueprintCallable) || (fl & EFunctionFlags::BlueprintEvent) ||

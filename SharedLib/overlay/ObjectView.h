@@ -96,7 +96,12 @@ namespace ObjView
     {
         std::string name;
         std::string type;
-        int         dir = 0;   // 0 in, 1 out, 2 return
+        int         dir = 0;   // 0 in, 1 pure-out, 2 return, 3 in-out
+        // Edit metadata so the arg builder renders the same typed widgets as the property tree.
+        EditKind    edit = EditKind::ReadOnly;
+        int32       enumSize = 0;
+        std::vector<std::string> enumNames;
+        std::vector<int64>       enumValues;
     };
 
     struct FuncView

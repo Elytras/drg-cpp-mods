@@ -436,8 +436,22 @@ namespace
                 {
                     if (argBuf.size() <= inIdx) argBuf.resize(inIdx + 1);
                     UI::Text("  %s %s :", p.dir == 3 ? "[in-out]" : "[in]", p.name.c_str()); UI::SameLine();
-                    UI::PushID((int)inIdx); UI::SetNextItemWidth(180.f);
-                    UI::InputTextString("##arg", argBuf[inIdx], 0, p.type.c_str());
+                    UI::PushID((int)inIdx);
+                    using EK = ObjView::EditKind;
+                    // Typed widget (same builder as the property tree) for bool/numeric/enum/
+                    // vector; text token for string/name/text and object (resolved by name) /
+                    // other structs. The widget updates argBuf[inIdx] in place; Call reads it.
+                    if (p.edit == EK::Bool || p.edit == EK::Int || p.edit == EK::Float ||
+                        p.edit == EK::Double || p.edit == EK::Enum || p.edit == EK::VectorLike)
+                    {
+                        const uint64_t key = fv.funcId ^ ((uint64_t)(inIdx + 1) * 0x9E3779B97F4A7C15ULL);
+                        EditTypedValue("##arg", key, p.edit, p.enumNames, p.enumValues, argBuf[inIdx]);
+                    }
+                    else
+                    {
+                        UI::SetNextItemWidth(180.f);
+                        UI::InputTextString("##arg", argBuf[inIdx], 0, p.type.c_str());
+                    }
                     UI::PopID();
                     ++inIdx;
                 }
