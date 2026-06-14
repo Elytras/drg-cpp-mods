@@ -3,6 +3,7 @@
 #include "Lib_Print.h"            // BuildClassChain, GetFieldValueAsString
 #include "Lib_ObjectCast.h"       // IsValidRaw, ObjectCast::Cast
 #include "Lib_PropertyAccess.h"   // GetPropertyPtr, GetTypeName, ReadBool
+#include "Lib_PropertyInspector.h"// WriteProperty (path-resolved writes)
 
 #include <algorithm>
 #include <string>
@@ -263,6 +264,33 @@ namespace ObjView
     } // namespace
 
     uint64 ChildKey(uint64 parentKey, uint64 discriminator) { return Mix(parentKey, discriminator); }
+
+    bool WritePath(const PropPath& path, const std::string& value)
+    {
+        auto* root = reinterpret_cast<UObject*>(path.rootAddr);
+        if (!root || !IsValidRaw(root) || root->Index != path.rootIndex) return false;
+        auto* leaf = reinterpret_cast<FProperty*>(path.leafProp);
+        if (!leaf) return false;
+
+        // FScriptArray runtime layout, re-read live at each ArrayElem hop (realloc-safe).
+        struct FScriptArray { void* Data; int32 Num; int32 Max; };
+
+        uintptr_t base = static_cast<uintptr_t>(path.rootAddr);
+        for (const auto& hop : path.hops)
+        {
+            if (hop.kind == PropHop::Kind::Struct)
+                base += hop.offset;
+            else // ArrayElem
+            {
+                auto* a = reinterpret_cast<FScriptArray*>(base + hop.offset);
+                if (!a->Data || hop.index < 0 || hop.index >= a->Num) return false;
+                base = reinterpret_cast<uintptr_t>(a->Data) + (uintptr_t)hop.index * hop.elemSize;
+            }
+        }
+        // WriteProperty applies leaf->Offset to `base` (0 for array-element inner props).
+        PropertyInspector::WriteProperty(root, leaf, base, leaf, value, leaf->Name.ToString(), false, 0);
+        return true;
+    }
 
     ObjectView BuildObjectView(SDK::UObject* obj, const Request& req)
     {

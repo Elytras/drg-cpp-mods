@@ -19,4 +19,10 @@ namespace ObjView
     // Stable per-node key (matches the keys the builder emits) so the UI can toggle expansion
     // without holding the model: childKey(parentKey, discriminator).
     uint64 ChildKey(uint64 parentKey, uint64 discriminator);
+
+    // Resolve a PropPath on the GAME THREAD (validate root by index, re-walk hops re-reading
+    // each container's live data pointer) and write `value` into the leaf via
+    // PropertyInspector::WriteProperty. Realloc-safe by construction; works at any nesting depth.
+    // Call inside EnqueueOnce. Returns false if the root/path is stale or unwritable.
+    bool WritePath(const PropPath& path, const std::string& value);
 }
