@@ -180,8 +180,11 @@ namespace
             if (!p) continue;
             const auto pf = static_cast<EPropertyFlags>(p->PropertyFlags);
             if (!(pf & EPropertyFlags::Parm)) continue;
+            // A const-reference parameter carries CPF_OutParm too, but it's an INPUT passed by
+            // ref — it must be filled from args, not left zeroed (a null ref → ProcessEvent
+            // deref crash). Only OutParm WITHOUT ConstParm is a real output.
             if (pf & EPropertyFlags::ReturnParm) { retProp = p; outParms.push_back(p); }
-            else if (pf & EPropertyFlags::OutParm) outParms.push_back(p);
+            else if ((pf & EPropertyFlags::OutParm) && !(pf & EPropertyFlags::ConstParm)) outParms.push_back(p);
             else inParms.push_back(p);
         }
 
@@ -389,6 +392,9 @@ namespace
             break;
         }
         }
+        // Type annotation next to the value (expandable struct/array nodes return early above and
+        // already show their type in the header).
+        if (!n.typeName.empty()) { UI::SameLine(); UI::TextDisabled(": %s", n.typeName.c_str()); }
         UI::PopID();
     }
 
@@ -418,7 +424,9 @@ namespace
                 else
                     UI::TextDisabled("  %s %s : %s", p.dir == 2 ? "[ret]" : "[out]", p.name.c_str(), p.type.c_str());
             }
-            if (fv.invokable)
+            //but what if..
+            //update: seems to work LOL
+            if (/* fv.invokable */ true)
             {
                 if (UI::SmallButton("Call"))
                 {

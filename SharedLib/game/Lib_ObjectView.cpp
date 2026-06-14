@@ -83,6 +83,7 @@ namespace ObjView
             n.name     = name;
             n.depth    = depth;
             n.key      = key;
+            n.typeName = GetTypeName(prop);   // shown next to the name; struct/array override below
             // Leaf write addressing: hops reach `base`, leaf is this prop (offset applied by the
             // write resolver). Struct/array children extend the hops below.
             n.path           = pathToBase;
@@ -253,8 +254,11 @@ namespace ObjView
                 if (!p) continue;
                 const auto pf = static_cast<EPropertyFlags>(p->PropertyFlags);
                 if (!(pf & EPropertyFlags::Parm)) continue;
+                // Const-ref params have CPF_OutParm but are INPUTS (passed by reference). Only
+                // OutParm without ConstParm is a true output — must match InvokeFunctionGameThread
+                // so the UI shows an input field for each ref-in (else it's passed null → crash).
                 const bool isRet = !!(pf & EPropertyFlags::ReturnParm);
-                const bool isOut = !isRet && !!(pf & EPropertyFlags::OutParm);
+                const bool isOut = !isRet && (pf & EPropertyFlags::OutParm) && !(pf & EPropertyFlags::ConstParm);
                 fv.params.push_back({ p->Name.ToString(), GetTypeName(p), isRet ? 2 : isOut ? 1 : 0 });
             }
             fv.invokable =

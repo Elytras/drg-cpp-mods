@@ -331,14 +331,16 @@ bool WriteArrayElement(UObject* obj, uintptr_t arrayAddr, FArrayProperty* arrayP
 
 int32 ComputeParmsSize(UFunction* Func)
 {
+    // Cover the WHOLE parameter block, INCLUDING the return parm: ProcessEvent writes the
+    // return value at its offset, so excluding it (as this used to) under-sizes the buffer and
+    // ProcessEvent scribbles past the end → crash for any function that returns a value.
     int32 size = 0;
     for (auto* field : FFieldRange(Func->ChildProperties))
     {
         if (!FieldCast::IsA<FProperty>(field)) continue;
         auto* Prop = static_cast<FProperty*>(field);
         auto  pf = static_cast<EPropertyFlags>(Prop->PropertyFlags);
-        if (!(pf & EPropertyFlags::Parm))    continue;
-        if (pf & EPropertyFlags::ReturnParm) continue;
+        if (!(pf & EPropertyFlags::Parm)) continue;
         int32 end = Prop->Offset + Prop->ElementSize;
         if (end > size) size = end;
     }
