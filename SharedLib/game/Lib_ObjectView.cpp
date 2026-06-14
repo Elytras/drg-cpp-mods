@@ -306,7 +306,11 @@ namespace ObjView
     bool WritePath(const PropPath& path, const std::string& value)
     {
         auto* root = reinterpret_cast<UObject*>(path.rootAddr);
-        if (!root || !IsValidRaw(root) || root->Index != path.rootIndex) return false;
+        if (!root) return false;
+        // Validate by index against GObjects before dereferencing (the root may be freed — same
+        // wild-pointer hazard as BuildObjectView; IsValidRaw alone would deref a dead pointer).
+        if (path.rootIndex < 0 || UObject::GObjects->GetByIndex(path.rootIndex) != root) return false;
+        if (!IsValidRaw(root) || root->Index != path.rootIndex) return false;
         auto* leaf = reinterpret_cast<FProperty*>(path.leafProp);
         if (!leaf) return false;
 
@@ -333,8 +337,15 @@ namespace ObjView
     ObjectView BuildObjectView(SDK::UObject* obj, const Request& req)
     {
         ObjectView v;
-        if (!obj || !IsValidRaw(obj) || !obj->Class || !IsValidRaw(obj->Class)) return v;
-        if (req.focusIndex >= 0 && obj->Index != req.focusIndex)               return v;
+        if (!obj) return v;
+        // The focus pointer may be FREED (e.g. the object was destroyed while the overlay was
+        // hidden, so no rebuild caught it; on reopen we build the stale addr). IsValidRaw only
+        // checks GC flags — it still dereferences the pointer, so a wild ptr crashes. When we have
+        // a recorded index (normal selection), confirm the GObjects slot still maps to THIS exact
+        // pointer via the bounds-checked array lookup BEFORE any deref.
+        if (req.focusIndex >= 0 && UObject::GObjects->GetByIndex(req.focusIndex) != obj) return v;
+        if (!IsValidRaw(obj) || !obj->Class || !IsValidRaw(obj->Class)) return v;
+        if (req.focusIndex >= 0 && obj->Index != req.focusIndex)        return v;
 
         v.addr      = (uint64)obj;
         v.index     = obj->Index;
