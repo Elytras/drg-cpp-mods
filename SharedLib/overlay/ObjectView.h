@@ -71,6 +71,7 @@ namespace ObjView
         std::string valueStr;     // formatted value (also the edit seed)
         EditKind    edit = EditKind::ReadOnly;
         int         depth = 0;
+        uint64      key = 0;      // stable expansion key (UI toggles it into Request.expanded)
         PropPath    path;         // how to write/locate this leaf on the game thread
 
         // Type extras (only the ones relevant to `edit` are populated):

@@ -78,14 +78,15 @@ namespace ObjView
                            const PropPath& pathToBase, uint64 parentKey, int depth,
                            const Request& req)
         {
+            const uint64 key = Mix(parentKey, (uint64)prop->Offset + 1);
             PropNode n;
             n.name     = name;
             n.depth    = depth;
+            n.key      = key;
             // Leaf write addressing: hops reach `base`, leaf is this prop (offset applied by the
             // write resolver). Struct/array children extend the hops below.
             n.path           = pathToBase;
             n.path.leafProp  = reinterpret_cast<uint64>(prop);
-            const uint64 key = Mix(parentKey, (uint64)prop->Offset + 1);
 
             FField* field = prop;
             auto valStr = [&]{ return GetFieldValueAsString(base, field); };

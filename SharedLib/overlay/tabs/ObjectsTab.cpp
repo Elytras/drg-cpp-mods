@@ -34,6 +34,7 @@
 #include "../../game/Lib_ObjectCast.h"
 #include "../../game/Lib_PropertyAccess.h"
 #include "../../game/Lib_PropertyInspector.h"
+#include "../../game/Lib_ObjectView.h"   // ObjView model + WritePath (game-thread renderer model)
 #include "../../game/Lib_Print.h"
 #include "../../hooks/Lib_GameHooks.h"
 
@@ -42,6 +43,7 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -1259,6 +1261,299 @@ namespace
         DrawFunctionSection(obj, chain);
     }
 
+    // ════════════════════════════════════════════════════════════════════════════
+    // Model renderer — consumes ObjView::ObjectView (a game-thread snapshot). Touches NO live
+    // game memory: every value is a string/number already extracted game-side; writes/jumps go
+    // back through opaque PropPath / addresses. This is what replaces the live-read tree above.
+    // ════════════════════════════════════════════════════════════════════════════
+
+    static void EnqueuePathWrite(const ObjView::PropPath& path, std::string value)
+    {
+        EnqueueOnce([path, value]() { ObjView::WritePath(path, value); });
+    }
+
+    // Active-drag guard: while the user drags a numeric/vector widget keep the in-progress value;
+    // otherwise mirror the model (which the producer refreshes every tick). One active drag.
+    static uint64_t s_dragKey = 0;
+    static double   s_dragVal[3] = {};
+
+    static void RenderScalarDrag(const ObjView::PropNode& n, const ImVec4& col)
+    {
+        const bool active = (s_dragKey == n.key);
+        UI::PushStyleColor(ImGuiCol_Text, col);
+        UI::SetNextItemWidth(140.f);
+        bool changed = false;
+        char buf[40];
+        if (n.edit == ObjView::EditKind::Int)
+        {
+            int v = active ? (int)s_dragVal[0] : atoi(n.valueStr.c_str());
+            changed = UI::DragInt(n.name.c_str(), &v);
+            if (UI::IsItemActivated()) s_dragKey = n.key;
+            if (s_dragKey == n.key) { s_dragVal[0] = v; if (changed) { snprintf(buf, sizeof buf, "%d", v); EnqueuePathWrite(n.path, buf); } }
+        }
+        else
+        {
+            double v = active ? s_dragVal[0] : strtod(n.valueStr.c_str(), nullptr);
+            float f = (float)v;
+            changed = UI::DragFloat(n.name.c_str(), &f, 0.1f);
+            if (UI::IsItemActivated()) s_dragKey = n.key;
+            if (s_dragKey == n.key) { s_dragVal[0] = f; if (changed) { snprintf(buf, sizeof buf, "%g", (double)f); EnqueuePathWrite(n.path, buf); } }
+        }
+        if (s_dragKey == n.key && UI::IsItemDeactivated()) s_dragKey = 0;
+        UI::PopStyleColor();
+    }
+
+    static void RenderVec3(const ObjView::PropNode& n, const ImVec4& col)
+    {
+        const bool active = (s_dragKey == n.key);
+        float v[3] = { n.vec3[0], n.vec3[1], n.vec3[2] };
+        if (active) { v[0] = (float)s_dragVal[0]; v[1] = (float)s_dragVal[1]; v[2] = (float)s_dragVal[2]; }
+        UI::PushStyleColor(ImGuiCol_Text, col);
+        UI::TextUnformatted(n.name.c_str());
+        UI::PopStyleColor();
+        UI::SameLine();
+        UI::SetNextItemWidth(240.f);
+        const bool changed = UI::DragFloat3("##vec3", v, 0.1f);
+        if (UI::IsItemActivated()) s_dragKey = n.key;
+        if (s_dragKey == n.key)
+        {
+            s_dragVal[0] = v[0]; s_dragVal[1] = v[1]; s_dragVal[2] = v[2];
+            if (changed) { char b[96]; snprintf(b, sizeof b, "%g,%g,%g", v[0], v[1], v[2]); EnqueuePathWrite(n.path, b); }
+            if (UI::IsItemDeactivated()) s_dragKey = 0;
+        }
+    }
+
+    static void RenderEnum(const ObjView::PropNode& n, const ImVec4& col)
+    {
+        UI::PushStyleColor(ImGuiCol_Text, col);
+        UI::TextUnformatted(n.name.c_str());
+        UI::PopStyleColor();
+        UI::SameLine();
+        if (n.enumNames.empty()) { UI::Text("= %lld", (long long)n.enumValue); return; }
+        int idx = -1;
+        for (int i = 0; i < (int)n.enumValues.size(); ++i)
+            if (n.enumValues[i] == n.enumValue) { idx = i; break; }
+        UI::SetNextItemWidth(220.f);
+        if (UI::ComboFromList("##enum", &idx, n.enumNames, n.enumNames.size() > 12, {}, nullptr, false)
+            && idx >= 0 && idx < (int)n.enumValues.size())
+            EnqueuePathWrite(n.path, std::to_string(n.enumValues[idx]));
+    }
+
+    static void RenderModelNode(const ObjView::PropNode& n, std::set<uint64_t>& expanded)
+    {
+        const ImVec4 col = FieldDepthColor(n.depth);
+        UI::PushID(reinterpret_cast<void*>(static_cast<uintptr_t>(n.key)));
+
+        if (n.hasChildren)   // struct / array — expandable
+        {
+            char head[400];
+            if (n.container == ObjView::Container::Array)
+                snprintf(head, sizeof head, "%s [%d] <%s>", n.name.c_str(), n.containerNum, n.typeName.c_str());
+            else
+                snprintf(head, sizeof head, "%s (%s) = %s", n.name.c_str(), n.typeName.c_str(), n.valueStr.c_str());
+            UI::PushStyleColor(ImGuiCol_Text, col);
+            const bool open = UI::TreeNodeEx(head, ImGuiTreeNodeFlags_None);
+            UI::PopStyleColor();
+            // Mirror ImGui's open-state into the request set — the producer expands matching keys.
+            if (open) expanded.insert(n.key); else expanded.erase(n.key);
+            if (open)
+            {
+                if (n.children.empty()) UI::TextDisabled("  …");   // requested; fills in next tick
+                else for (const auto& c : n.children) RenderModelNode(c, expanded);
+                UI::TreePop();
+            }
+            UI::PopID();
+            return;
+        }
+
+        switch (n.edit)
+        {
+        case ObjView::EditKind::Bool:
+        {
+            bool b = n.boolVal;
+            UI::PushStyleColor(ImGuiCol_Text, col);
+            if (UI::Checkbox(n.name.c_str(), &b)) EnqueuePathWrite(n.path, b ? "true" : "false");
+            UI::PopStyleColor();
+            break;
+        }
+        case ObjView::EditKind::Int:
+        case ObjView::EditKind::Float:
+        case ObjView::EditKind::Double:
+            RenderScalarDrag(n, col);
+            break;
+        case ObjView::EditKind::Name:
+        case ObjView::EditKind::Str:
+        case ObjView::EditKind::Text:
+        {
+            UI::PushStyleColor(ImGuiCol_Text, col);
+            UI::TextUnformatted(n.name.c_str());
+            UI::PopStyleColor();
+            UI::SameLine();
+            std::string committed;
+            if (EditTextField("##e", static_cast<uintptr_t>(n.key), n.valueStr, committed))
+                EnqueuePathWrite(n.path, committed);
+            break;
+        }
+        case ObjView::EditKind::Enum:
+            RenderEnum(n, col);
+            break;
+        case ObjView::EditKind::VectorLike:
+            RenderVec3(n, col);
+            break;
+        case ObjView::EditKind::Object:
+        {
+            UI::PushStyleColor(ImGuiCol_Text, col);
+            UI::Text("%s = %s", n.name.c_str(), n.valueStr.c_str());
+            UI::PopStyleColor();
+            if (n.objectAddr) { UI::SameLine(); if (UI::SmallButton("->")) s_treeJumpAddr = n.objectAddr; }
+            if (UI::BeginPopupContextItem("##oc"))
+            {
+                if (n.objectAddr && UI::MenuItem("Jump to object")) s_treeJumpAddr = n.objectAddr;
+                if (UI::MenuItem("Copy value")) UI::SetClipboardText(n.valueStr.c_str());
+                UI::EndPopup();
+            }
+            break;
+        }
+        case ObjView::EditKind::ReadOnly:
+        default:
+        {
+            UI::PushStyleColor(ImGuiCol_Text, col);
+            UI::Text("%s = %s", n.name.c_str(), n.valueStr.c_str());
+            UI::PopStyleColor();
+            if (UI::BeginPopupContextItem("##rc"))
+            {
+                if (UI::MenuItem("Copy value")) UI::SetClipboardText(n.valueStr.c_str());
+                UI::EndPopup();
+            }
+            break;
+        }
+        }
+        UI::PopID();
+    }
+
+    // One function node, calling on the focused object (addr+idx) by funcId. Reuses the existing
+    // game-thread invoke + s_callArgs/s_callResults stores (funcId IS the UFunction*).
+    static void RenderModelFunc(uint64_t objAddr, int32 objIdx, const ObjView::FuncView& fv)
+    {
+        auto* func = reinterpret_cast<UFunction*>(fv.funcId);
+        UI::PushID(reinterpret_cast<void*>(static_cast<uintptr_t>(fv.funcId)));
+        const bool open = UI::TreeNodeEx(func, ImGuiTreeNodeFlags_None, "%s%s", fv.name.c_str(), fv.suffix.c_str());
+        if (open)
+        {
+            if (fv.params.empty()) UI::TextDisabled("  (no parameters)");
+            auto& argBuf = s_callArgs[func];
+            size_t inIdx = 0;
+            for (const auto& p : fv.params)
+            {
+                if (p.dir == 0)   // input
+                {
+                    if (argBuf.size() <= inIdx) argBuf.resize(inIdx + 1);
+                    UI::Text("  [in] %s :", p.name.c_str()); UI::SameLine();
+                    UI::PushID((int)inIdx); UI::SetNextItemWidth(180.f);
+                    UI::InputTextString("##arg", argBuf[inIdx], 0, p.type.c_str());
+                    UI::PopID();
+                    ++inIdx;
+                }
+                else
+                    UI::TextDisabled("  %s %s : %s", p.dir == 2 ? "[ret]" : "[out]", p.name.c_str(), p.type.c_str());
+            }
+            if (fv.invokable)
+            {
+                if (UI::SmallButton("Call"))
+                {
+                    auto* obj = reinterpret_cast<UObject*>(objAddr);
+                    std::vector<std::string> args(argBuf.begin(), argBuf.end());
+                    EnqueueOnce([obj, objIdx, func, args]() { InvokeFunctionGameThread(obj, objIdx, func, args); });
+                }
+                UI::SameLine(); UI::TextDisabled("(dispatched to game thread)");
+            }
+            else
+                UI::TextDisabled("  [not BlueprintCallable / Exec]");
+
+            std::string res;
+            { std::lock_guard<std::mutex> lk(s_callResMx); auto it = s_callResults.find(func); if (it != s_callResults.end()) res = it->second; }
+            if (!res.empty())
+            {
+                UI::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.90f, 0.55f, 1.f));
+                UI::TextWrapped("\xE2\x86\x92 %s", res.c_str());
+                UI::PopStyleColor();
+                if (UI::BeginPopupContextItem("##callres"))
+                {
+                    if (UI::MenuItem("Copy result")) UI::SetClipboardText(res.c_str());
+                    if (UI::MenuItem("Clear result")) { std::lock_guard<std::mutex> lk(s_callResMx); s_callResults.erase(func); }
+                    UI::EndPopup();
+                }
+            }
+            UI::TreePop();
+        }
+        UI::PopID();
+    }
+
+    // Renders a whole ObjectView. Returns nothing; jumps post via s_treeJump* (consumed by the tab).
+    static void RenderObjectView(const ObjView::ObjectView& v, std::set<uint64_t>& expanded,
+                                 const char* fieldFilter, bool hideEmptyClasses)
+    {
+        // Header: name + class-jump + outer-jump
+        UI::TextUnformatted(v.objName.c_str());
+        UI::SameLine();
+        {
+            char cls[256]; snprintf(cls, sizeof cls, "[%s]##cls", v.className.c_str());
+            if (UI::SmallButton(cls) && v.classAddr) s_treeJumpClassAddr = v.classAddr;
+        }
+        if (v.outerAddr)
+        {
+            UI::SameLine(); UI::TextDisabled("outer:"); UI::SameLine();
+            char out[256]; snprintf(out, sizeof out, "%s##out", v.outerName.c_str());
+            if (UI::SmallButton(out)) s_treeJumpAddr = v.outerAddr;
+        }
+        UI::Separator();
+
+        for (size_t lvl = 0; lvl < v.chain.size(); ++lvl)
+        {
+            const auto& clv = v.chain[lvl];
+            if (hideEmptyClasses && clv.props.empty() && clv.funcs.empty()) continue;
+            UI::PushID((int)lvl);
+            UI::PushStyleColor(ImGuiCol_Text, ClassLevelColor(clv.level));
+            const ImGuiTreeNodeFlags f = (lvl == 0) ? ImGuiTreeNodeFlags_DefaultOpen : ImGuiTreeNodeFlags_None;
+            const bool open = UI::TreeNodeEx(clv.className.c_str(), f);
+            UI::PopStyleColor();
+            if (open)
+            {
+                bool any = false;
+                for (const auto& n : clv.props)
+                {
+                    if (fieldFilter[0] && !IContains(n.name, fieldFilter)) continue;
+                    any = true;
+                    RenderModelNode(n, expanded);
+                }
+                if (!any && fieldFilter[0]) UI::TextDisabled("(no matches)");
+                else if (clv.props.empty())  UI::TextDisabled("(no properties)");
+                UI::TreePop();
+            }
+            UI::PopID();
+        }
+
+        // Functions section (mirrors DrawFunctionSection)
+        bool anyFuncs = false;
+        for (const auto& clv : v.chain) if (!clv.funcs.empty()) { anyFuncs = true; break; }
+        if (anyFuncs)
+        {
+            UI::Spacing(); UI::Separator(); UI::TextDisabled("Functions"); UI::Spacing();
+            UI::PushID("##mfuncs");
+            for (const auto& clv : v.chain)
+            {
+                if (clv.funcs.empty()) continue;
+                UI::PushID(clv.level);
+                UI::PushStyleColor(ImGuiCol_Text, ClassLevelColor(clv.level));
+                const bool open = UI::TreeNodeEx(clv.className.c_str(), ImGuiTreeNodeFlags_None);
+                UI::PopStyleColor();
+                if (open) { for (const auto& fv : clv.funcs) RenderModelFunc(v.addr, v.index, fv); UI::TreePop(); }
+                UI::PopID();
+            }
+            UI::PopID();
+        }
+    }
+
     // ── Tab ─────────────────────────────────────────────────────────────────────
 
     struct ObjectBrowserTab : detail::OverlayTab<ObjectBrowserTab>
@@ -1282,6 +1577,12 @@ namespace
 
         // Property tree: hide ancestor classes with no reflected properties and no functions
         bool m_hideEmptyClasses = true;
+
+        // Refactor: render the right pane from the game-thread ObjectView snapshot (no live
+        // UI-thread reads). Toggle off to A/B against the legacy live-read tree (removed in
+        // step 6). m_expanded holds the expansion node-keys published to the producer request.
+        bool m_useModelTree = true;
+        std::set<uint64_t> m_expanded;
 
         // Selection / jump
         uint64_t m_selectedAddr        = 0;
@@ -1745,35 +2046,50 @@ namespace
             const bool newSel = (m_selectedAddr != m_prevSelected);
             if (UI::BeginChild("##proptree", ImVec2(0.f, 0.f)))
             {
-                if (newSel) UI::SetScrollHereY(0.f);
+                if (newSel) { UI::SetScrollHereY(0.f); m_expanded.clear(); }
                 if (m_selectedAddr)
                 {
-                    auto* obj = reinterpret_cast<UObject*>(m_selectedAddr);
-                    if (!IsValidRaw(obj) || obj->Index != m_selectedIdx)
+                    UI::SetNextItemWidth(-1.f);
+                    UI::InputTextWithHint("##ffilter", "filter fields...",
+                                         m_fieldFilter, sizeof(m_fieldFilter));
+                    UI::Checkbox("Hide empty classes", &m_hideEmptyClasses);
+                    UI::SameLine();
+                    UI::Checkbox("model tree", &m_useModelTree);
+
+                    if (m_useModelTree)
                     {
-                        UI::TextDisabled("(object destroyed or replaced — deselected)");
-                        m_selectedAddr = 0;
+                        // Publish the request (focus + expanded keys) and beat the snapshot so the
+                        // game-thread producer rebuilds the focused object every tick; render the
+                        // resulting snapshot WITHOUT touching live memory.
+                        ObjView::Request req;
+                        req.focusAddr  = m_selectedAddr;
+                        req.focusIndex = m_selectedIdx;
+                        req.expanded.assign(m_expanded.begin(), m_expanded.end());   // set → sorted
+                        detail::SetObjViewRequest(req);
+                        detail::ObjectViewSnap().beat(detail::NowMs());
+                        const auto view = detail::ObjectViewSnap().read();
+                        if (view.valid && view.addr == m_selectedAddr)
+                        {
+                            m_selectedIdx = view.index;   // adopt game-thread truth (fixes post-jump idx)
+                            RenderObjectView(view, m_expanded, m_fieldFilter, m_hideEmptyClasses);
+                        }
+                        else
+                            UI::TextDisabled("(building… or object destroyed)");
                     }
                     else
                     {
-                        UI::SetNextItemWidth(-1.f);
-                        UI::InputTextWithHint("##ffilter", "filter fields...",
-                                             m_fieldFilter, sizeof(m_fieldFilter));
-                        UI::Checkbox("Hide empty classes", &m_hideEmptyClasses);
-                        UI::SameLine();
-                        UI::TextDisabled("(no properties or functions)");
-                        DrawObjectTree(obj, m_fieldFilter, m_hideEmptyClasses);
-                        if (s_treeJumpAddr)
+                        auto* obj = reinterpret_cast<UObject*>(m_selectedAddr);
+                        if (!IsValidRaw(obj) || obj->Index != m_selectedIdx)
                         {
-                            JumpTo(s_treeJumpAddr);
-                            s_treeJumpAddr = 0;
+                            UI::TextDisabled("(object destroyed or replaced — deselected)");
+                            m_selectedAddr = 0;
                         }
-                        if (s_treeJumpClassAddr)
-                        {
-                            JumpToClass(s_treeJumpClassAddr);
-                            s_treeJumpClassAddr = 0;
-                        }
+                        else
+                            DrawObjectTree(obj, m_fieldFilter, m_hideEmptyClasses);
                     }
+
+                    if (s_treeJumpAddr)      { JumpTo(s_treeJumpAddr);          s_treeJumpAddr = 0; }
+                    if (s_treeJumpClassAddr) { JumpToClass(s_treeJumpClassAddr); s_treeJumpClassAddr = 0; }
                 }
                 else
                     UI::TextDisabled("Select an object from the list on the left.");
