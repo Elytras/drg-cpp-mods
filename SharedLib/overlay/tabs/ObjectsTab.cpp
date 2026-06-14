@@ -246,66 +246,90 @@ namespace
     static uint64_t s_dragKey = 0;
     static double   s_dragVal[3] = {};
 
-    static void RenderScalarDrag(const ObjView::PropNode& n, const ImVec4& col)
+    // ── Shared typed-value widget builder ──────────────────────────────────────────
+    // Renders the editor for `edit`, seeded from `value` (string); on change writes the new
+    // string back into `value` and returns true. ONE implementation behind both the property
+    // tree (commit → WritePath) and the function-arg builder (commit → arg buffer). The active-
+    // drag guard keeps an in-progress drag from being clobbered by the per-tick re-seed. Text
+    // (Name/Str/Text) and Object/ReadOnly are handled by the caller (different semantics).
+    static bool EditTypedValue(const char* id, uint64_t key, ObjView::EditKind edit,
+                               const std::vector<std::string>& enumNames,
+                               const std::vector<int64_t>& enumValues, std::string& value)
     {
-        const bool active = (s_dragKey == n.key);
-        UI::PushStyleColor(ImGuiCol_Text, col);
-        UI::SetNextItemWidth(140.f);
-        bool changed = false;
-        char buf[40];
-        if (n.edit == ObjView::EditKind::Int)
+        using EK = ObjView::EditKind;
+        const bool active = (s_dragKey == key);
+        bool committed = false;
+        switch (edit)
         {
-            int v = active ? (int)s_dragVal[0] : atoi(n.valueStr.c_str());
-            changed = UI::DragInt(n.name.c_str(), &v);
-            if (UI::IsItemActivated()) s_dragKey = n.key;
-            if (s_dragKey == n.key) { s_dragVal[0] = v; if (changed) { snprintf(buf, sizeof buf, "%d", v); EnqueuePathWrite(n.path, buf); } }
-        }
-        else
+        case EK::Bool:
         {
-            double v = active ? s_dragVal[0] : strtod(n.valueStr.c_str(), nullptr);
-            float f = (float)v;
-            changed = UI::DragFloat(n.name.c_str(), &f, 0.1f);
-            if (UI::IsItemActivated()) s_dragKey = n.key;
-            if (s_dragKey == n.key) { s_dragVal[0] = f; if (changed) { snprintf(buf, sizeof buf, "%g", (double)f); EnqueuePathWrite(n.path, buf); } }
+            bool b = (value == "true" || value == "1");
+            if (UI::Checkbox(id, &b)) { value = b ? "true" : "false"; committed = true; }
+            break;
         }
-        if (s_dragKey == n.key && UI::IsItemDeactivated()) s_dragKey = 0;
-        UI::PopStyleColor();
+        case EK::Int:
+        {
+            int v = active ? (int)s_dragVal[0] : atoi(value.c_str());
+            UI::SetNextItemWidth(140.f);
+            const bool ch = UI::DragInt(id, &v);
+            if (UI::IsItemActivated()) s_dragKey = key;
+            if (s_dragKey == key) { s_dragVal[0] = v; if (ch) { value = std::to_string(v); committed = true; } if (UI::IsItemDeactivated()) s_dragKey = 0; }
+            break;
+        }
+        case EK::Float:
+        case EK::Double:
+        {
+            float f = active ? (float)s_dragVal[0] : (float)strtod(value.c_str(), nullptr);
+            UI::SetNextItemWidth(140.f);
+            const bool ch = UI::DragFloat(id, &f, 0.1f);
+            if (UI::IsItemActivated()) s_dragKey = key;
+            if (s_dragKey == key) { s_dragVal[0] = f; if (ch) { char b[40]; snprintf(b, sizeof b, "%g", (double)f); value = b; committed = true; } if (UI::IsItemDeactivated()) s_dragKey = 0; }
+            break;
+        }
+        case EK::VectorLike:
+        {
+            float v[3] = { 0, 0, 0 };
+            if (active) { v[0] = (float)s_dragVal[0]; v[1] = (float)s_dragVal[1]; v[2] = (float)s_dragVal[2]; }
+            else sscanf_s(value.c_str(), "%f,%f,%f", &v[0], &v[1], &v[2]);
+            UI::SetNextItemWidth(240.f);
+            const bool ch = UI::DragFloat3(id, v, 0.1f);
+            if (UI::IsItemActivated()) s_dragKey = key;
+            if (s_dragKey == key) { s_dragVal[0]=v[0]; s_dragVal[1]=v[1]; s_dragVal[2]=v[2]; if (ch) { char b[96]; snprintf(b, sizeof b, "%g,%g,%g", v[0], v[1], v[2]); value = b; committed = true; } if (UI::IsItemDeactivated()) s_dragKey = 0; }
+            break;
+        }
+        case EK::Enum:
+        {
+            if (enumNames.empty()) { UI::TextDisabled("(enum %s)", value.c_str()); break; }
+            const int64_t cur = strtoll(value.c_str(), nullptr, 10);
+            int idx = -1;
+            for (int i = 0; i < (int)enumValues.size(); ++i) if (enumValues[i] == cur) { idx = i; break; }
+            UI::SetNextItemWidth(220.f);
+            if (UI::ComboFromList(id, &idx, enumNames, enumNames.size() > 12, {}, nullptr, false)
+                && idx >= 0 && idx < (int)enumValues.size()) { value = std::to_string(enumValues[idx]); committed = true; }
+            break;
+        }
+        default:
+            UI::TextDisabled("%s", value.c_str());
+            break;
+        }
+        return committed;
     }
 
-    static void RenderVec3(const ObjView::PropNode& n, const ImVec4& col)
+    // Property-tree wrapper: name label + EditTypedValue, committing via WritePath. Seeds enum
+    // from the integer value and vector from the xyz the builder extracted (not GetFieldValueAsString).
+    static void RenderEditableLeaf(const ObjView::PropNode& n, const ImVec4& col)
     {
-        const bool active = (s_dragKey == n.key);
-        float v[3] = { n.vec3[0], n.vec3[1], n.vec3[2] };
-        if (active) { v[0] = (float)s_dragVal[0]; v[1] = (float)s_dragVal[1]; v[2] = (float)s_dragVal[2]; }
+        using EK = ObjView::EditKind;
         UI::PushStyleColor(ImGuiCol_Text, col);
         UI::TextUnformatted(n.name.c_str());
         UI::PopStyleColor();
         UI::SameLine();
-        UI::SetNextItemWidth(240.f);
-        const bool changed = UI::DragFloat3("##vec3", v, 0.1f);
-        if (UI::IsItemActivated()) s_dragKey = n.key;
-        if (s_dragKey == n.key)
-        {
-            s_dragVal[0] = v[0]; s_dragVal[1] = v[1]; s_dragVal[2] = v[2];
-            if (changed) { char b[96]; snprintf(b, sizeof b, "%g,%g,%g", v[0], v[1], v[2]); EnqueuePathWrite(n.path, b); }
-            if (UI::IsItemDeactivated()) s_dragKey = 0;
-        }
-    }
-
-    static void RenderEnum(const ObjView::PropNode& n, const ImVec4& col)
-    {
-        UI::PushStyleColor(ImGuiCol_Text, col);
-        UI::TextUnformatted(n.name.c_str());
-        UI::PopStyleColor();
-        UI::SameLine();
-        if (n.enumNames.empty()) { UI::Text("= %lld", (long long)n.enumValue); return; }
-        int idx = -1;
-        for (int i = 0; i < (int)n.enumValues.size(); ++i)
-            if (n.enumValues[i] == n.enumValue) { idx = i; break; }
-        UI::SetNextItemWidth(220.f);
-        if (UI::ComboFromList("##enum", &idx, n.enumNames, n.enumNames.size() > 12, {}, nullptr, false)
-            && idx >= 0 && idx < (int)n.enumValues.size())
-            EnqueuePathWrite(n.path, std::to_string(n.enumValues[idx]));
+        std::string v;
+        if (n.edit == EK::Enum)            v = std::to_string(n.enumValue);
+        else if (n.edit == EK::VectorLike) { char b[96]; snprintf(b, sizeof b, "%g,%g,%g", n.vec3[0], n.vec3[1], n.vec3[2]); v = b; }
+        else                               v = n.valueStr;
+        if (EditTypedValue("##v", n.key, n.edit, n.enumNames, n.enumValues, v))
+            EnqueuePathWrite(n.path, v);
     }
 
     static void RenderModelNode(const ObjView::PropNode& n, std::set<uint64_t>& expanded)
@@ -338,17 +362,10 @@ namespace
         switch (n.edit)
         {
         case ObjView::EditKind::Bool:
-        {
-            bool b = n.boolVal;
-            UI::PushStyleColor(ImGuiCol_Text, col);
-            if (UI::Checkbox(n.name.c_str(), &b)) EnqueuePathWrite(n.path, b ? "true" : "false");
-            UI::PopStyleColor();
-            break;
-        }
         case ObjView::EditKind::Int:
         case ObjView::EditKind::Float:
         case ObjView::EditKind::Double:
-            RenderScalarDrag(n, col);
+            RenderEditableLeaf(n, col);
             break;
         case ObjView::EditKind::Name:
         case ObjView::EditKind::Str:
@@ -364,10 +381,8 @@ namespace
             break;
         }
         case ObjView::EditKind::Enum:
-            RenderEnum(n, col);
-            break;
         case ObjView::EditKind::VectorLike:
-            RenderVec3(n, col);
+            RenderEditableLeaf(n, col);
             break;
         case ObjView::EditKind::Object:
         {
