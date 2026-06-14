@@ -254,12 +254,17 @@ namespace ObjView
                 if (!p) continue;
                 const auto pf = static_cast<EPropertyFlags>(p->PropertyFlags);
                 if (!(pf & EPropertyFlags::Parm)) continue;
-                // Const-ref params have CPF_OutParm but are INPUTS (passed by reference). Only
-                // OutParm without ConstParm is a true output — must match InvokeFunctionGameThread
-                // so the UI shows an input field for each ref-in (else it's passed null → crash).
-                const bool isRet = !!(pf & EPropertyFlags::ReturnParm);
-                const bool isOut = !isRet && (pf & EPropertyFlags::OutParm) && !(pf & EPropertyFlags::ConstParm);
-                fv.params.push_back({ p->Name.ToString(), GetTypeName(p), isRet ? 2 : isOut ? 1 : 0 });
+                // Param direction (CPF_OutParm is set on every by-ref param, so it alone doesn't
+                // mean "output"). 0=in, 1=pure-out (write-only), 2=return, 3=in-out (UPARAM(ref):
+                // non-const reference the function reads AND writes). Must match
+                // InvokeFunctionGameThread's needsInput/readBack split below.
+                const bool isRet  = !!(pf & EPropertyFlags::ReturnParm);
+                const bool out    = (pf & EPropertyFlags::OutParm) && !(pf & EPropertyFlags::ConstParm);
+                const bool byRef  = !!(pf & EPropertyFlags::ReferenceParm);
+                int dir = 0;                       // plain input or const-ref input
+                if (isRet)      dir = 2;
+                else if (out)   dir = byRef ? 3 : 1;   // in-out vs pure-out
+                fv.params.push_back({ p->Name.ToString(), GetTypeName(p), dir });
             }
             fv.invokable =
                 (fl & EFunctionFlags::BlueprintCallable) || (fl & EFunctionFlags::BlueprintEvent) ||

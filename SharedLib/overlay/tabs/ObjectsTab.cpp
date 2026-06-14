@@ -180,12 +180,17 @@ namespace
             if (!p) continue;
             const auto pf = static_cast<EPropertyFlags>(p->PropertyFlags);
             if (!(pf & EPropertyFlags::Parm)) continue;
-            // A const-reference parameter carries CPF_OutParm too, but it's an INPUT passed by
-            // ref — it must be filled from args, not left zeroed (a null ref → ProcessEvent
-            // deref crash). Only OutParm WITHOUT ConstParm is a real output.
-            if (pf & EPropertyFlags::ReturnParm) { retProp = p; outParms.push_back(p); }
-            else if ((pf & EPropertyFlags::OutParm) && !(pf & EPropertyFlags::ConstParm)) outParms.push_back(p);
-            else inParms.push_back(p);
+            // readBack: value copied to the caller (return, or a non-const out / in-out param).
+            // needsInput: caller supplies a value — everything except return and pure write-only
+            // out. const-ref (Out+Const) and in-out (Out+Ref, non-const) are BOTH inputs; in-out
+            // is also read back. Must match BuildFunc's dir split so the input fields line up.
+            const bool isRet     = !!(pf & EPropertyFlags::ReturnParm);
+            const bool trueOut   = (pf & EPropertyFlags::OutParm) && !(pf & EPropertyFlags::ConstParm);
+            const bool needsInput = !isRet &&
+                (!(pf & EPropertyFlags::OutParm) || (pf & EPropertyFlags::ConstParm) || (pf & EPropertyFlags::ReferenceParm));
+            if (isRet) retProp = p;
+            if (isRet || trueOut) outParms.push_back(p);   // read back after the call
+            if (needsInput)       inParms.push_back(p);    // fill from args (incl const-ref + in-out)
         }
 
         const int32 parmsSize = PropertyInspector::ComputeParmsSize(func);
@@ -412,10 +417,10 @@ namespace
             size_t inIdx = 0;
             for (const auto& p : fv.params)
             {
-                if (p.dir == 0)   // input
+                if (p.dir == 0 || p.dir == 3)   // input, or in-out (caller seeds initial value)
                 {
                     if (argBuf.size() <= inIdx) argBuf.resize(inIdx + 1);
-                    UI::Text("  [in] %s :", p.name.c_str()); UI::SameLine();
+                    UI::Text("  %s %s :", p.dir == 3 ? "[in-out]" : "[in]", p.name.c_str()); UI::SameLine();
                     UI::PushID((int)inIdx); UI::SetNextItemWidth(180.f);
                     UI::InputTextString("##arg", argBuf[inIdx], 0, p.type.c_str());
                     UI::PopID();
