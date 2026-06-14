@@ -29,7 +29,9 @@ std::string GetTypeName(FField* field)
             if constexpr (std::is_same_v<T, FStructProperty>)
                 result = prop->Struct ? prop->Struct->GetName() : "struct";
             else if constexpr (std::is_same_v<T, FClassProperty>)
-                result = prop->PropertyClass ? "TSubclassOf<" + prop->PropertyClass->GetName() + ">" : "UClass";
+                // MetaClass is the expected base the UClass* must derive from (PropertyClass is
+                // just "UClass" for every class property).
+                result = prop->MetaClass ? "TSubclassOf<" + prop->MetaClass->GetName() + ">" : "UClass";
             else if constexpr (std::is_same_v<T, FSoftClassProperty>)
                 result = prop->PropertyClass ? "TSoftClassPtr<" + prop->PropertyClass->GetName() + ">" : "TSoftClassPtr";
             else if constexpr (std::is_same_v<T, FSoftObjectProperty>)
@@ -67,7 +69,8 @@ std::string GetTypeName(FField* field)
             else if constexpr (std::is_same_v<T, FTextProperty>)            result = "FText";
             else if constexpr (std::is_same_v<T, FDelegateProperty>)        result = "FDelegate";
             else if constexpr (std::is_same_v<T, FMulticastDelegateProperty>) result = "FMulticastDelegate";
-            else if constexpr (std::is_same_v<T, FInterfaceProperty>)       result = "TScriptInterface";
+            else if constexpr (std::is_same_v<T, FInterfaceProperty>)
+                result = prop->InterfaceClass ? "TScriptInterface<" + prop->InterfaceClass->GetName() + ">" : "TScriptInterface";
             else if constexpr (std::is_same_v<T, FFieldPathProperty>)       result = "FFieldPath";
             else result = prop->ClassPrivate ? prop->ClassPrivate->Name.ToString() : "?";
         });
